@@ -5,7 +5,9 @@
   "private": true,
   "expo": {
     "install": {
-      "exclude": ["expo-image"]
+      "exclude": [
+        "expo-image"
+      ]
     }
   },
   "scripts": {
@@ -14,7 +16,14 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "prepare": "husky",
+    "commitlint": "commitlint --edit"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs}": "expo lint --fix"
   },
   "dependencies": {
     "@expo/ui": "56.0.15",
@@ -43,7 +52,18 @@
     "react-native-worklets": "0.8.3"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.0.2",
+    "@commitlint/config-conventional": "^21.0.2",
     "@types/react": "19.2.16",
+    "@typescript-eslint/eslint-plugin": "^8.60.1",
+    "@typescript-eslint/parser": "^8.60.1",
+    "eslint": "^9.39.4",
+    "eslint-config-expo": "~56.0.4",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.7",
+    "prettier": "^3.8.3",
     "typescript": "6.0.3"
   }
 }

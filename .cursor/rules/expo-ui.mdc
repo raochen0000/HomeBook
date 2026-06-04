@@ -1,0 +1,81 @@
+---
+alwaysApply: true
+---
+
+# Expo UI (SwiftUI) — AI 编码规则
+
+> 目标平台：iOS · Expo SDK 56 · React Native 0.85 · React 19.2
+> 适用范围：使用 `@expo/ui/swift-ui` 构建原生 iOS 界面的所有任务。
+> 把本文件放在仓库根目录作为 `CLAUDE.md`，或放入 `.cursor/rules/expo-ui.mdc`。
+
+## 0. 版本契约（最高优先级）
+
+- 本项目锁定 **Expo SDK 56**。`expo`、所有 `expo-*` 和 `@expo/ui` 必须是 `^56.0.0`。
+- 涉及版本不确定时，以 SDK 56 为准，**不要**套用 53/54/55 的旧 API 或写法。
+- 如果某条本地 skill / 记忆与"SDK 56"冲突，**以本文件为准**。
+
+## 1. 写代码前先查文档（强制）
+
+- 使用任何 `@expo/ui/swift-ui` 的组件或 modifier 前，**先抓取对应文档确认 API**，不要凭记忆写。
+- 文档一律用带版本号的端点，禁止用 `latest`：
+  - 组件：`https://docs.expo.dev/versions/v56.0.0/sdk/ui/swift-ui/{组件名}/index.md`
+  - 修饰符：`https://docs.expo.dev/versions/v56.0.0/sdk/ui/swift-ui/modifiers/index.md`
+  - 通用组件：`https://docs.expo.dev/versions/v56.0.0/sdk/ui/universal/{组件名}/index.md`
+  - 文档总索引：`https://docs.expo.dev/versions/v56.0.0/llms.txt`
+- 拿不准某个 View/modifier 是否存在时，先查 `llms.txt` 索引，不要臆造组件名或 prop。
+
+## 2. 安装与构建
+
+- 安装命令：`npx expo install @expo/ui`
+- SDK 56 起 Expo UI 已进入 Expo Go，简单预览可直接用 Expo Go。
+- 但只要用到自定义原生模块 / 本地 Expo module，仍需原生重建：`npx expo run:ios`。
+- 生成代码若涉及新增原生依赖，必须提醒用户重新构建，否则代码看着对但跑不起来。
+- iOS 部署目标为 16.4，不要生成依赖更低部署目标的配置。
+
+## 3. 核心结构规则
+
+- `@expo/ui/swift-ui` 的 API 镜像 SwiftUI 的 API；用 SwiftUI 的知识决定该用哪个组件/modifier。
+- 组件从 `@expo/ui/swift-ui` 导入，modifier 从 `@expo/ui/swift-ui/modifiers` 导入。
+- **每一棵 SwiftUI 树都必须包在 `Host` 里。**
+- `Host` 内部布局用 `VStack` / `HStack` / `Spacer`，**不要用 Flexbox**（不要在 Host 内用 `flex`、`flexDirection` 等 RN 样式做布局）。
+- 样式通过 `modifiers` 数组传入，例如 `padding`、`frame`、`foregroundStyle`、`background`、`font`。
+
+## 4. 与 React Native 混用
+
+- 要在 SwiftUI 树里嵌入 RN 组件时，用 `RNHostView` 包起来：
+
+```tsx
+import { Host, VStack, RNHostView } from "@expo/ui/swift-ui";
+import { Pressable } from "react-native";
+
+<Host matchContents>
+  <VStack>
+    <RNHostView matchContents>
+      <Pressable />
+    </RNHostView>
+  </VStack>
+</Host>;
+```
+
+- 反过来，把 `<Host>` 当作普通 RN View 直接放进 RN 页面即可，可传 `style` 或 `matchContents`。
+
+## 5. SDK 56 的偏好
+
+- **优先用 Expo UI 的 drop-in 替代**而非社区库：bottom-sheet、datetimepicker、masked-view、menu、pager-view、picker、segmented-control、slider 等已有官方替代，多数只需改 import。注意部分 prop 可能不支持或有差异（底层是 SwiftUI 而非 UIKit）。
+- 高频表单输入（如带格式化的输入框）优先考虑 `useNativeState`（来自 `@expo/ui/swift-ui`），把更新放到 UI 线程、绕过 JS 线程。
+- 路由用 `expo-router`；**不要同时安装 `react-navigation`**（SDK 56 起 expo-router 已解耦，混装会被 expo-doctor 警告）。全屏底部 tab 用 `expo-router/unstable-native-tabs`，而不是 Expo UI 的 `TabView`。
+
+## 6. 缺组件时
+
+- 如果 Expo UI 缺某个 View 或 modifier，可通过本地 Expo module（含 SDK 56 的 inline modules）扩展。
+- **扩展原生代码前，必须先和用户确认**，不要擅自创建原生模块。
+- 参考：`https://docs.expo.dev/guides/expo-ui-swift-ui/extending/index.md`
+
+## 7. 输出前自检清单
+
+- [ ] 用到的每个组件/modifier 都已对照 v56 文档确认过 API？
+- [ ] 所有 SwiftUI 组件都在 `Host` 内？
+- [ ] Host 内没有用 Flexbox 做布局？
+- [ ] 嵌入的 RN 组件都包了 `RNHostView`？
+- [ ] 没有引入与 SDK 56 不匹配的包版本？
+- [ ] 若新增原生依赖，已提醒用户重新构建？
