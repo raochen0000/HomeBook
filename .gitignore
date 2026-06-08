@@ -41,3 +41,11 @@ example
 # generated native folders
 /ios
 /android
+
+# agnets
+.agents/
+.claude/
+.codex/
+
+# skills
+skills-lock.json
