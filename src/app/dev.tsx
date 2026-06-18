@@ -15,11 +15,13 @@ import { useTheme } from '@/hooks/use-theme';
 import {
   TEST_ACCOUNTS,
   addSampleExpense,
+  createInvitation,
   devSignIn,
   devSignOut,
   ensureFamily,
   fetchOverview,
   getMyProfile,
+  joinFamily,
 } from '@/lib/dev-auth';
 import { supabase } from '@/lib/supabase';
 
@@ -28,6 +30,7 @@ export default function DevScreen() {
   const [email, setEmail] = useState<string | null>(null);
   const [log, setLog] = useState<string>('（操作结果会显示在这里）');
   const [busy, setBusy] = useState(false);
+  const [lastCode, setLastCode] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setEmail(data.session?.user.email ?? null));
@@ -92,6 +95,25 @@ export default function DevScreen() {
             {button('确保有家庭', () => run('ensureFamily', () => ensureFamily()))}
             {button('记一笔 ¥25.80', () => run('addSampleExpense', () => addSampleExpense()))}
             {button('读概览', () => run('fetchOverview', fetchOverview))}
+          </ThemedView>
+
+          <ThemedText type="smallBold" style={styles.sectionTitle}>
+            邀请 → 加入（户主账号生成码，另一账号加入）
+          </ThemedText>
+          <ThemedView type="background" style={styles.row}>
+            {button('生成邀请码', () =>
+              run('createInvitation', async () => {
+                const inv = await createInvitation(false);
+                setLastCode(inv.code);
+                return inv;
+              }),
+            )}
+            {button(`用邀请码加入${lastCode ? `（${lastCode}）` : ''}`, () =>
+              run('joinFamily', () => {
+                if (!lastCode) throw new Error('请先用户主账号生成邀请码');
+                return joinFamily(lastCode);
+              }),
+            )}
           </ThemedView>
 
           <ThemedText type="smallBold" style={styles.sectionTitle}>

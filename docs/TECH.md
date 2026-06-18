@@ -261,7 +261,7 @@ git --version
 
 **RLS 模型：** 全部 `public` 表启用 RLS，策略遵循官方四要点——`(select auth.uid())` 包裹、一律 `TO authenticated`（anon 不授权）、每操作独立策略、跨表归属判断走 `private.*` 的 `SECURITY DEFINER` 辅助函数以避免递归。家庭隔离统一由 `private.is_family_member(family_id)` / `private.is_family_owner(family_id)` 等判定；`profiles` 可见性由 `private.shares_family()` 控制；`notifications` 仅本人可见。
 
-**核心 RPC（单事务，`SECURITY DEFINER` + 内部鉴权）：** `create_family`、`join_family_by_code`、`savings_deposit`、`savings_withdraw`（后两者实现方案 B 资金闭环：一笔流水 + 一条 entry + 更新目标，含 `version` 乐观锁）。`leave / remove / transfer / 解散 / 继任` 等流转 RPC 按流程后续补充。
+**核心 RPC（单事务，`SECURITY DEFINER` + 内部鉴权）：** `create_family`、`create_invitation`（户主生成邀请码，对应 PRD §5）、`join_family_by_code`、`savings_deposit`、`savings_withdraw`（后两者实现方案 B 资金闭环：一笔流水 + 一条 entry + 更新目标，含 `version` 乐观锁）。`leave / remove / transfer / 解散 / 继任` 等流转 RPC 按流程后续补充。
 
 **迁移文件清单：**
 
@@ -275,8 +275,9 @@ git --version
 | `…0006_constraints_triggers.sql` | `handle_new_user`、`updated_at` 触发器、`family_id` 不可变、成员 ≤8 / 目标 ≤5 计数触发器 |
 | `…0007_rls_helpers.sql` | `private.*` RLS 辅助函数 |
 | `…0008_rls_policies.sql` | 各表 RLS 策略 + 表权限 GRANT |
-| `…0009_rpc_functions.sql` | 上述核心 RPC |
+| `…0009_rpc_functions.sql` | `create_family` / `join_family_by_code` / `savings_deposit` / `savings_withdraw` |
 | `…0010_seed_system_categories.sql` | 系统预设分类种子（含储蓄存入/取出，资金闭环依赖） |
+| `…0011_create_invitation_rpc.sql` | `create_invitation`（户主生成邀请码：仅户主 / 满 8 拦截 / 24h / 复用或刷新，PRD §5） |
 
 **迁移执行方式：** 当前后端为阿里云自托管 Supabase 兼容实例（非 Cloud），CLI 用直连 Postgres 连接串 `supabase db push`（不用 `supabase link`）；或在 Studio SQL Editor 按编号顺序粘贴执行。客户端仅持 anon key，无法执行 DDL。
 

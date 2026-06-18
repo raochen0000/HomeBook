@@ -65,6 +65,20 @@ export async function ensureFamily(name = '调试之家', timezone = 'Asia/Shang
   return (data as { id: string }).id;
 }
 
+/** 户主生成邀请码（forceNew=true 强制刷新换新码）。返回邀请码与有效期。 */
+export async function createInvitation(forceNew = false) {
+  const { data, error } = await supabase.rpc('create_invitation', { p_force_new: forceNew });
+  if (error) throw error;
+  return data as { code: string; expires_at: string; status: string };
+}
+
+/** 凭邀请码加入家庭，返回加入后的家庭。 */
+export async function joinFamily(code: string) {
+  const { data, error } = await supabase.rpc('join_family_by_code', { p_code: code });
+  if (error) throw error;
+  return data;
+}
+
 /** 记一笔示例支出（默认 ¥25.80 餐饮），用于验证写入 + RLS。 */
 export async function addSampleExpense(amountCents = 2580, note = '午饭') {
   const profile = await getMyProfile();
