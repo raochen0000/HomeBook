@@ -205,6 +205,7 @@ git --version
 
 ### 7.3 鉴权与短信验证码流程
 
+- **用户主表 = `auth.users`（Supabase Auth 托管）+ `public.profiles`（业务字段）**：DATAMODEL 中的 `USER` 实体落地时拆分——手机号/OTP/session 由 Supabase Auth 的 `auth.users` 持有，**不在业务表冗余 `phone`**；`public.profiles.id` 一对一引用 `auth.users(id)`（`ON DELETE CASCADE`），存 `nickname / avatar_url / current_family_id / last_login_at / status`。新用户注册时由 `handle_new_user()` 触发器自动建 profiles 行。
 - **手机号 OTP**：客户端请求验证码 → 后端（Edge Function / RPC）调**阿里云短信服务**下发 → 客户端回填校验 → Supabase Auth 签发 session（JWT），存入 `expo-secure-store`。
 - **Apple 登录**：Supabase Auth Apple provider（iOS 必备的第三方登录合规项）。
 - **微信登录（后期可选）**：Supabase Auth 无内置，需自实现 OAuth provider。
@@ -219,6 +220,8 @@ git --version
 - `TRANSACTION.family_id` 创建后不可变（规则/触发器拒绝 UPDATE）。
 - 储蓄存取、户主转让、解散、加入家庭、删除目标余额回吐 → **单事务 RPC**（见 AGENTS.md §7）。
 - 每条 RLS / RPC 配 pgTAP 测试。
+
+> 落地状态：上述约束已在 `supabase/migrations/` 实现（建表 + 部分唯一索引 + 触发器 + RLS + 核心 RPC），清单见 §7.8。
 
 ### 7.5 推送通道（国内重点）
 
@@ -241,6 +244,41 @@ git --version
 - **区域适配层可替换**：短信（阿里云短信 ↔ Twilio）、推送（EMAS ↔ Expo Push/FCM）、存储（OSS ↔ Supabase Storage/S3）、CDN，全部走接口抽象。
 - **全球化两种形态**：① 迁/扩到 Supabase Cloud 多区域；② 「境内一套 + 海外一套」双部署，按用户区域路由。
 - **结论**：因底座是标准 Postgres + RLS + RPC，扩展到全球是**配置与部署问题，不是重写**。
+
+### 7.8 数据库迁移与 RLS / RPC 清单（已落地）
+
+> 在 DATAMODEL（v0.1）蓝图基础上，按 Supabase 最佳实践重整后实现。迁移位于 `supabase/migrations/`，按依赖顺序编号。
+
+**关键落地决策（相对初稿的修正）：**
+
+| 项 | 初稿 | 落地方案 | 理由 |
+| --- | --- | --- | --- |
+| 用户主表 | 自建 `USER`，`phone` 主键 | `auth.users` + `public.profiles`（见 §7.3） | 复用 Supabase Auth，避免手机号冗余 |
+| 枚举 | 仅列取值 | `text` + `CHECK` 约束 | 比原生 enum 灵活（加值不受事务限制） |
+| 时间类型 | `timestamp (UTC)` | 一律 `timestamptz` | 避免时区歧义 |
+| 主键 | UUID | `uuid default gen_random_uuid()` | PG13+ 内置，无需扩展 |
+| 软删除 | 文字约定 | `status` / `is_deleted` 字段 + 仅开放 update | — |
+
+**RLS 模型：** 全部 `public` 表启用 RLS，策略遵循官方四要点——`(select auth.uid())` 包裹、一律 `TO authenticated`（anon 不授权）、每操作独立策略、跨表归属判断走 `private.*` 的 `SECURITY DEFINER` 辅助函数以避免递归。家庭隔离统一由 `private.is_family_member(family_id)` / `private.is_family_owner(family_id)` 等判定；`profiles` 可见性由 `private.shares_family()` 控制；`notifications` 仅本人可见。
+
+**核心 RPC（单事务，`SECURITY DEFINER` + 内部鉴权）：** `create_family`、`join_family_by_code`、`savings_deposit`、`savings_withdraw`（后两者实现方案 B 资金闭环：一笔流水 + 一条 entry + 更新目标，含 `version` 乐观锁）。`leave / remove / transfer / 解散 / 继任` 等流转 RPC 按流程后续补充。
+
+**迁移文件清单：**
+
+| 文件 | 内容 |
+| --- | --- |
+| `…0001_extensions.sql` | `private` schema、`set_updated_at()` 通用函数 |
+| `…0002_core_tables.sql` | `profiles` / `families` / `memberships`（含交叉外键、一人一家 / 户主唯一部分索引） |
+| `…0003_ledger_savings_tables.sql` | `categories` / `savings_goals` / `transactions` / `savings_entries` |
+| `…0004_budget_tables.sql` | `budgets` / `budget_categories` |
+| `…0005_aux_tables.sql` | `invitations` / `succession_requests` / `notifications` / `monthly_summaries` |
+| `…0006_constraints_triggers.sql` | `handle_new_user`、`updated_at` 触发器、`family_id` 不可变、成员 ≤8 / 目标 ≤5 计数触发器 |
+| `…0007_rls_helpers.sql` | `private.*` RLS 辅助函数 |
+| `…0008_rls_policies.sql` | 各表 RLS 策略 + 表权限 GRANT |
+| `…0009_rpc_functions.sql` | 上述核心 RPC |
+| `…0010_seed_system_categories.sql` | 系统预设分类种子（含储蓄存入/取出，资金闭环依赖） |
+
+**迁移执行方式：** 当前后端为阿里云自托管 Supabase 兼容实例（非 Cloud），CLI 用直连 Postgres 连接串 `supabase db push`（不用 `supabase link`）；或在 Studio SQL Editor 按编号顺序粘贴执行。客户端仅持 anon key，无法执行 DDL。
 
 ---
 
@@ -318,7 +356,7 @@ supabase/                 # 后端工程（与客户端同仓或独立仓）
 
 - §13 后端接口契约（DTO / 错误码 / 同步协议：pull 增量 + push 队列）—— 与后端实现对齐后补充
 - §14 本地 DB Schema（WatermelonDB）与 Repository / SyncEngine 设计明细
-- §15 数据库迁移与 RLS / RPC 清单（建表约束 + policy + 核心 RPC 函数骨架）
+- ~~§15 数据库迁移与 RLS / RPC 清单（建表约束 + policy + 核心 RPC 函数骨架）~~ —— **已落地，见 §7.8 与 `supabase/migrations/`**（流转类 RPC 待补）
 - §16 阿里云基座落地细则（A1 内置 Supabase 核实结论 / A2 自建部署拓扑、网络、备份）
 - §17 CI/CD（迁移自动化、Edge Functions 部署、pgTAP、EAS Build、灰度发布）
 - §18 测试策略（单元 / 组件 / E2E：Jest + React Native Testing Library + Maestro + pgTAP）

@@ -1,0 +1,11 @@
+# 家账 HomeBook · Supabase 工程配置
+# 注意：当前后端为阿里云自托管的 Supabase 兼容实例（非 Supabase Cloud）。
+# 若后续接入 Supabase CLI 管理迁移，请用直连 Postgres 连接串执行 `supabase db push`，
+# 而非 `supabase link`（link 仅适用于 Supabase Cloud 项目）。
+
+project_id = "HomeBook"
+
+[db]
+# 本地开发栈用，远程自托管实例不依赖此配置
+port = 54322
+major_version = 15
