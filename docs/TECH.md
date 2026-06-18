@@ -280,6 +280,30 @@ git --version
 
 **迁移执行方式：** 当前后端为阿里云自托管 Supabase 兼容实例（非 Cloud），CLI 用直连 Postgres 连接串 `supabase db push`（不用 `supabase link`）；或在 Studio SQL Editor 按编号顺序粘贴执行。客户端仅持 anon key，无法执行 DDL。
 
+### 7.9 开发期测试登录（OTP 未配前的临时方案）
+
+> 仅用于开发/调试，**勿用于生产**。手机 OTP 短信尚未接入前，借实例已开启的「邮箱注册 + `mailer_autoconfirm=true`」（注册即确认、无需邮件/短信验证），用邮箱密码拿真实 JWT，在**真实 RLS** 下验证前/后端接口。
+
+**测试账号**（A、B 两个，便于验证跨家庭隔离）：
+
+| | 邮箱 | 密码 |
+| --- | --- | --- |
+| A | `dev.a@homebook.test` | `devtest123456` |
+| B | `dev.b@homebook.test` | `devtest123456` |
+
+**前端**：`src/app/dev.tsx` 是 `__DEV__` 门控的调试台（首页底部「→ Dev 调试台」入口，生产构建重定向回首页）；可一键登录 A/B、`create_family`、记一笔、读概览。复用逻辑在 `src/lib/dev-auth.ts`（`devSignIn` 不存在则自动注册、`ensureFamily`、`addSampleExpense`、`fetchOverview`）。
+
+**后端 / 接口**：`scripts/dev-token.sh` 从 `.env` 读 URL + anon key，登录拿 `access_token` 并可发起已鉴权请求：
+
+```bash
+scripts/dev-token.sh                                  # 打印 access_token
+scripts/dev-token.sh GET  /rest/v1/families?select=*  # 已鉴权 GET
+scripts/dev-token.sh POST /rest/v1/rpc/create_family '{"p_name":"家","p_timezone":"Asia/Shanghai"}'
+DEV_EMAIL=dev.b@homebook.test scripts/dev-token.sh ...  # 切 B 账号
+```
+
+> 接入手机 OTP（阿里云短信，见 §7.3）后，本方案与测试账号即可下线。
+
 ---
 
 ## 8. 工程结构建议
