@@ -23,6 +23,19 @@ export function useMyProfile() {
   return useQuery({ queryKey: queryKeys.profile, queryFn: fetchMyProfile });
 }
 
+export type FamilyMember = Pick<Profile, 'id' | 'nickname' | 'avatar_url'>;
+
+/** 同家庭成员（含自己）的昵称/头像；RLS（shares_family）只返回同家庭成员。 */
+export async function fetchFamilyMembers(): Promise<FamilyMember[]> {
+  const { data, error } = await supabase.from('profiles').select('id, nickname, avatar_url');
+  if (error) throw error;
+  return data;
+}
+
+export function useFamilyMembers() {
+  return useQuery({ queryKey: queryKeys.familyMembers, queryFn: fetchFamilyMembers });
+}
+
 /** 当前用户所属家庭；无则返回 null（RLS 只返回本人家庭）。 */
 export async function fetchMyFamily(): Promise<Family | null> {
   const { data, error } = await supabase.from('families').select('*').maybeSingle();

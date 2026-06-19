@@ -42,6 +42,23 @@ export async function devSignOut() {
   if (error) throw error;
 }
 
+/**
+ * 开发期自动登录：仅在 __DEV__ 且当前无 session 时，静默登录默认测试账号，
+ * 免去每次手动登录。已存在 session（含手动切换到的其它账号）时不覆盖。
+ * 设环境变量 EXPO_PUBLIC_DEV_AUTOLOGIN=0 可关闭（用于调试「未登录」态）。
+ */
+export async function devAutoSignIn(acc: TestAccount = TEST_ACCOUNTS.a) {
+  if (!__DEV__ || process.env.EXPO_PUBLIC_DEV_AUTOLOGIN === '0') return null;
+  const { data } = await supabase.auth.getSession();
+  if (data.session) return data.session.user;
+  try {
+    return await devSignIn(acc);
+  } catch (e) {
+    console.warn('[dev] 自动登录测试账号失败：', e);
+    return null;
+  }
+}
+
 /** 当前登录用户的 profile（含 current_family_id）。未登录返回 null。 */
 export async function getMyProfile() {
   const { data: sessionData } = await supabase.auth.getSession();
