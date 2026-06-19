@@ -5,7 +5,10 @@ export const queryKeys = {
   familyMembers: ['family_members'] as const,
   memberships: ['memberships'] as const,
   notifications: ['notifications'] as const,
+  notificationsAll: ['notifications', 'all'] as const,
   categories: (type?: 'expense' | 'income') => ['categories', type ?? 'all'] as const,
   transactions: ['transactions'] as const,
   savingsGoals: ['savings_goals'] as const,
+  savingsEntries: (goalId: string) => ['savings_entries', goalId] as const,
+  budget: (period: string) => ['budget', period] as const,
 };

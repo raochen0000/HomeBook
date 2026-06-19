@@ -11,6 +11,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-nat
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  useBudget,
   useCategories,
   useCreateFamily,
   useFamilyMembers,
@@ -22,11 +23,13 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { BalanceCard, DayGroup, InsightBanner, type RowData } from '@/features/home/components';
+import { MonthlySummarySheet } from '@/features/report/monthly-summary';
 import { RecordSheet } from '@/features/record/record-sheet';
 import { SearchSheet } from '@/features/search/search-sheet';
 import { useSession } from '@/lib/auth';
+import { budgetLevel, expenseUsedInPeriod } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import { currentPeriod, dayKey, humanDay, signForType } from '@/lib/format';
+import { currentPeriod, dayKey, formatAmount, humanDay, signForType } from '@/lib/format';
 
 type Group = { key: string; label: string; totalCents: number; rows: RowData[] };
 
@@ -40,9 +43,23 @@ export default function HomeScreen() {
   const membersQ = useFamilyMembers();
   const categoriesQ = useCategories();
   const transactionsQ = useTransactions();
+  const budgetQ = useBudget(currentPeriod());
   const createFamilyM = useCreateFamily();
 
   const multiMember = (familyQ.data?.member_count ?? 1) > 1;
+
+  // 预算预警条幅（流程 8：用至 80% / 超支，按总预算口径）。
+  const budgetAlert = useMemo(() => {
+    const budget = budgetQ.data?.budget;
+    if (!budget || !budget.alert_enabled || budget.total_amount <= 0) return null;
+    const { total } = expenseUsedInPeriod(transactionsQ.data ?? [], currentPeriod());
+    const pct = Math.round((total / budget.total_amount) * 100);
+    const level = budgetLevel(pct);
+    if (level === 'normal') return null;
+    return level === 'danger'
+      ? { danger: true, text: `本月已超支 ${formatAmount(total - budget.total_amount, '')}` }
+      : { danger: false, text: `本月预算已用 ${pct}%，注意节奏` };
+  }, [budgetQ.data, transactionsQ.data]);
 
   // 记账面板状态：editing=null 为新建，否则编辑该流水。
   const [sheet, setSheet] = useState<{ open: boolean; editing: Transaction | null; familyId: string }>({
@@ -51,6 +68,7 @@ export default function HomeScreen() {
     familyId: '',
   });
   const [searchOpen, setSearchOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
   const { groups, balance, expense, income, monthCount } = useMemo(() => {
     const txns = transactionsQ.data ?? [];
@@ -152,6 +170,24 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
+        {/* 预算预警条幅（流程 8） */}
+        {session && budgetAlert ? (
+          <View
+            style={[styles.budgetBanner, { backgroundColor: budgetAlert.danger ? palette.danger : palette.bannerTint }]}
+          >
+            <SymbolView
+              name={budgetAlert.danger ? 'exclamationmark.triangle.fill' : 'bell.fill'}
+              tintColor={budgetAlert.danger ? '#FFFFFF' : palette.warning}
+              size={15}
+            />
+            <ThemedText
+              style={[styles.budgetBannerText, { color: budgetAlert.danger ? '#FFFFFF' : palette.textPrimary }]}
+            >
+              {budgetAlert.text}
+            </ThemedText>
+          </View>
+        ) : null}
+
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator />
@@ -174,7 +210,10 @@ export default function HomeScreen() {
               <VStack spacing={Space[5]} modifiers={[padding({ horizontal: Space[4], top: Space[2], bottom: 140 })]}>
                 <BalanceCard balanceCents={balance} expenseCents={expense} incomeCents={income} />
                 {monthCount > 0 ? (
-                  <InsightBanner message={`${month} 月家里一起记下了 ${monthCount} 笔 · 查看月度总结`} />
+                  <InsightBanner
+                    message={`${month} 月家里一起记下了 ${monthCount} 笔 · 查看月度总结`}
+                    onPress={() => setSummaryOpen(true)}
+                  />
                 ) : null}
                 {groups.map((g) => (
                   <DayGroup key={g.key} label={g.label} totalCents={g.totalCents} rows={g.rows} onRowPress={openEdit} />
@@ -201,6 +240,9 @@ export default function HomeScreen() {
 
       {/* 搜索（顶栏 🔍） */}
       <SearchSheet visible={searchOpen} onClose={() => setSearchOpen(false)} />
+
+      {/* 月度总结卡（首页条幅入口，流程 9） */}
+      <MonthlySummarySheet visible={summaryOpen} period={currentPeriod()} onClose={() => setSummaryOpen(false)} />
     </View>
   );
 }
@@ -218,6 +260,17 @@ const styles = StyleSheet.create({
     paddingBottom: Space[3],
   },
   title: { fontSize: 34, fontWeight: '700' },
+  budgetBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[2],
+    marginHorizontal: Space[4],
+    marginBottom: Space[2],
+    paddingHorizontal: Space[3],
+    paddingVertical: Space[2],
+    borderRadius: Radius.md,
+  },
+  budgetBannerText: { flex: 1, fontSize: 13, fontWeight: '500' },
   fab: {
     position: 'absolute',
     right: Space[4],

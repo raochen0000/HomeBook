@@ -1,60 +1,88 @@
 /**
- * 报表（Tab 2，流程 9 基础版）：本月收入/支出/结余 + 支出分类占比环形图 + 分类明细（可下钻）。
- * 口径（DATAMODEL §3.4）：收支结余统计全部流水；分类占比仅算「支出 + source=normal」，排除储蓄类流水。
+ * 报表（Tab 2，流程 9 完整版）：周/月/年维度切换 + 收支结余概览 + 支出分类占比环形图
+ * + 成员贡献条形图 + 消费趋势折线图 + 月度总结入口 + 分类明细下钻。
+ * 口径（PRD §11）：收支结余统计全部流水（含储蓄类，对账）；分类占比/趋势/成员贡献仅算
+ * 「支出 + source=normal」（排除储蓄类）。
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Circle, Polyline } from 'react-native-svg';
 
-import { useCategories, useTransactions, type Transaction } from '@/api';
+import { useCategories, useFamilyMembers, useMyProfile, useTransactions, type Transaction } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { Donut } from '@/features/report/donut';
+import { MonthlySummarySheet } from '@/features/report/monthly-summary';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import { currentPeriod, formatAmount, monthLabel, signForNet } from '@/lib/format';
+import { currentPeriod, formatAmount, signForNet } from '@/lib/format';
+import { inRange, isCurrentPeriod, periodRange, shiftAnchor, trendBuckets, type Dimension } from '@/lib/report';
 
 type CatSlice = { id: string; name: string; amount: number; color: string; symbol: string };
+type Member = { id: string; name: string; amount: number };
+
+const DIMENSIONS: { key: Dimension; label: string }[] = [
+  { key: 'week', label: '周' },
+  { key: 'month', label: '月' },
+  { key: 'year', label: '年' },
+];
 
 export default function ReportScreen() {
   const palette = usePalette();
   const catColors = useCategoryColors();
   const txnsQ = useTransactions();
   const catsQ = useCategories();
+  const membersQ = useFamilyMembers();
+  const profileQ = useMyProfile();
 
-  const [monthDate, setMonthDate] = useState(() => new Date());
+  const [dimension, setDimension] = useState<Dimension>('month');
+  const [anchor, setAnchor] = useState(() => new Date());
   const [detail, setDetail] = useState<{ id: string; name: string } | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
-  const period = currentPeriod(monthDate);
-  const isCurrentMonth = period === currentPeriod();
+  const range = useMemo(() => periodRange(dimension, anchor), [dimension, anchor]);
+  const isCurrent = isCurrentPeriod(dimension, anchor);
 
-  const { income, expense, balance, byCat, expenseTotal } = useMemo(() => {
+  const { income, expense, balance, byCat, expenseTotal, members, trend } = useMemo(() => {
     const txns = txnsQ.data ?? [];
     const cats = catsQ.data ?? [];
+    const mem = membersQ.data ?? [];
     const catById = new Map(cats.map((c) => [c.id, c]));
+    const nameById = new Map(mem.map((m) => [m.id, m.nickname]));
+    const myId = profileQ.data?.id;
 
     let inc = 0;
     let exp = 0;
     const catMap = new Map<string, CatSlice>();
+    const memMap = new Map<string, Member>();
+    const consumExpenses: { occurred_at: string; amount: number }[] = [];
 
     for (const t of txns) {
-      if (currentPeriod(new Date(t.occurred_at)) !== period) continue;
+      if (!inRange(t.occurred_at, range.start, range.end)) continue;
       if (t.type === 'income') inc += t.amount;
       else exp += t.amount;
 
-      // 分类占比：仅支出 + 普通流水（排除储蓄类）
+      // 分类占比 / 成员贡献 / 趋势：仅支出 + 普通流水（排除储蓄类）
       if (t.type === 'expense' && t.source === 'normal') {
+        consumExpenses.push({ occurred_at: t.occurred_at, amount: t.amount });
+
         const cat = catById.get(t.category_id);
-        const name = cat?.name ?? '未分类';
+        const cname = cat?.name ?? '未分类';
         const entry = catMap.get(t.category_id) ?? {
           id: t.category_id,
-          name,
+          name: cname,
           amount: 0,
-          color: catColors[categoryColorKey(name, 'expense')],
+          color: catColors[categoryColorKey(cname, 'expense')],
           symbol: categorySymbol(cat?.icon ?? null, 'expense'),
         };
         entry.amount += t.amount;
         catMap.set(t.category_id, entry);
+
+        const who = t.recorder_user_id === myId ? '我' : (nameById.get(t.recorder_user_id) ?? '成员');
+        const me = memMap.get(t.recorder_user_id) ?? { id: t.recorder_user_id, name: who, amount: 0 };
+        me.amount += t.amount;
+        memMap.set(t.recorder_user_id, me);
       }
     }
 
@@ -65,15 +93,13 @@ export default function ReportScreen() {
       balance: inc - exp,
       byCat: list,
       expenseTotal: list.reduce((s, x) => s + x.amount, 0),
+      members: Array.from(memMap.values()).sort((a, b) => b.amount - a.amount),
+      trend: trendBuckets(dimension, range, consumExpenses),
     };
-  }, [txnsQ.data, catsQ.data, period, catColors]);
+  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, range, dimension, catColors]);
 
   const loading = txnsQ.isLoading || catsQ.isLoading;
-  const shiftMonth = (delta: number) => {
-    const d = new Date(monthDate);
-    d.setMonth(d.getMonth() + delta);
-    setMonthDate(d);
-  };
+  const memberMax = Math.max(1, ...members.map((m) => m.amount));
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
@@ -82,16 +108,44 @@ export default function ReportScreen() {
           <ThemedText style={[styles.title, { color: palette.textPrimary }]}>报表</ThemedText>
         </View>
 
-        {/* 月份切换 */}
-        <View style={styles.monthBar}>
-          <Pressable hitSlop={10} onPress={() => shiftMonth(-1)}>
+        {/* 维度切换 */}
+        <View style={styles.dimRow}>
+          <View style={[styles.segment, { backgroundColor: palette.card }]}>
+            {DIMENSIONS.map((d) => {
+              const active = dimension === d.key;
+              return (
+                <Pressable
+                  key={d.key}
+                  style={[styles.segmentItem, active && { backgroundColor: palette.base, borderRadius: Radius.sm }]}
+                  onPress={() => {
+                    setDimension(d.key);
+                    setAnchor(new Date());
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: active ? palette.textPrimary : palette.textSecondary,
+                      fontWeight: active ? '600' : '400',
+                    }}
+                  >
+                    {d.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* 周期切换 */}
+        <View style={styles.periodBar}>
+          <Pressable hitSlop={10} onPress={() => setAnchor((a) => shiftAnchor(dimension, a, -1))}>
             <SymbolView name="chevron.left" tintColor={palette.textSecondary} size={18} />
           </Pressable>
-          <ThemedText style={[styles.monthLabel, { color: palette.textPrimary }]}>{monthLabel(monthDate)}</ThemedText>
-          <Pressable hitSlop={10} onPress={() => shiftMonth(1)} disabled={isCurrentMonth}>
+          <ThemedText style={[styles.periodLabel, { color: palette.textPrimary }]}>{range.label}</ThemedText>
+          <Pressable hitSlop={10} onPress={() => setAnchor((a) => shiftAnchor(dimension, a, 1))} disabled={isCurrent}>
             <SymbolView
               name="chevron.right"
-              tintColor={isCurrentMonth ? palette.textTertiary : palette.textSecondary}
+              tintColor={isCurrent ? palette.textTertiary : palette.textSecondary}
               size={18}
             />
           </Pressable>
@@ -125,13 +179,19 @@ export default function ReportScreen() {
               </View>
             </View>
 
+            {/* 消费趋势 */}
+            <View style={[styles.card, { backgroundColor: palette.card }]}>
+              <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>消费趋势</ThemedText>
+              <TrendChart buckets={trend} palette={palette} />
+            </View>
+
             {/* 支出分类占比 */}
             <View style={[styles.card, { backgroundColor: palette.card }]}>
               <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>支出分类占比</ThemedText>
               {byCat.length === 0 ? (
                 <View style={styles.emptyBox}>
                   <SymbolView name="chart.pie" tintColor={palette.textTertiary} size={40} />
-                  <ThemedText style={{ color: palette.textSecondary }}>这个月还没有支出记录</ThemedText>
+                  <ThemedText style={{ color: palette.textSecondary }}>这个周期还没有支出记录</ThemedText>
                 </View>
               ) : (
                 <>
@@ -143,8 +203,6 @@ export default function ReportScreen() {
                       </ThemedText>
                     </Donut>
                   </View>
-
-                  {/* 分类明细（按金额降序，可点进下钻） */}
                   <View style={styles.list}>
                     {byCat.map((c, i) => {
                       const pct = expenseTotal > 0 ? Math.round((c.amount / expenseTotal) * 100) : 0;
@@ -170,6 +228,46 @@ export default function ReportScreen() {
                 </>
               )}
             </View>
+
+            {/* 成员贡献 */}
+            {members.length > 0 ? (
+              <View style={[styles.card, { backgroundColor: palette.card }]}>
+                <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>成员贡献</ThemedText>
+                <View style={styles.memberList}>
+                  {members.map((m) => (
+                    <View key={m.id} style={styles.memberRow}>
+                      <ThemedText style={[styles.memberName, { color: palette.textPrimary }]} numberOfLines={1}>
+                        {m.name}
+                      </ThemedText>
+                      <View style={styles.memberBarWrap}>
+                        <View style={[styles.memberBarTrack, { backgroundColor: palette.base }]}>
+                          <View
+                            style={[
+                              styles.memberBarFill,
+                              { backgroundColor: palette.accent, width: `${(m.amount / memberMax) * 100}%` },
+                            ]}
+                          />
+                        </View>
+                      </View>
+                      <ThemedText style={[styles.memberAmount, { color: palette.textSecondary }]}>
+                        {formatAmount(m.amount, '')}
+                      </ThemedText>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
+            {/* 月度总结入口 */}
+            <Pressable
+              style={[styles.summaryEntry, { backgroundColor: palette.card }]}
+              onPress={() => setSummaryOpen(true)}
+            >
+              <SymbolView name="doc.text.fill" tintColor={palette.accent} size={20} />
+              <ThemedText style={[styles.summaryEntryText, { color: palette.textPrimary }]}>查看月度总结</ThemedText>
+              <View style={styles.flex} />
+              <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
+            </Pressable>
           </ScrollView>
         )}
       </SafeAreaView>
@@ -177,23 +275,96 @@ export default function ReportScreen() {
       {/* 分类流水明细下钻 */}
       <CategoryDetailSheet
         detail={detail}
-        period={period}
+        range={range}
         transactions={txnsQ.data ?? []}
         onClose={() => setDetail(null)}
       />
+
+      {/* 月度总结卡（按当前锚点所在月） */}
+      <MonthlySummarySheet visible={summaryOpen} period={currentPeriod(anchor)} onClose={() => setSummaryOpen(false)} />
     </View>
   );
 }
 
-// ── 某分类本月流水明细（下钻）─────────────────────────────────────────────────
+// ── 消费趋势折线（react-native-svg 自绘）──────────────────────────────────────
+function TrendChart({
+  buckets,
+  palette,
+}: {
+  buckets: { label: string; value: number }[];
+  palette: ReturnType<typeof usePalette>;
+}) {
+  const W = 320;
+  const H = 120;
+  const padX = 6;
+  const padY = 10;
+  const max = Math.max(1, ...buckets.map((b) => b.value));
+  const n = buckets.length;
+  const stepX = n > 1 ? (W - padX * 2) / (n - 1) : 0;
+  const points = buckets
+    .map((b, i) => {
+      const x = padX + i * stepX;
+      const y = padY + (H - padY * 2) * (1 - b.value / max);
+      return `${x},${y}`;
+    })
+    .join(' ');
+  const hasData = buckets.some((b) => b.value > 0);
+
+  // x 轴稀疏标签（最多约 6 个）
+  const labelEvery = Math.max(1, Math.ceil(n / 6));
+
+  return (
+    <View>
+      {!hasData ? (
+        <View style={styles.emptyBox}>
+          <SymbolView name="chart.xyaxis.line" tintColor={palette.textTertiary} size={36} />
+          <ThemedText style={{ color: palette.textSecondary }}>这个周期还没有消费</ThemedText>
+        </View>
+      ) : (
+        <>
+          <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+            <Polyline
+              points={points}
+              fill="none"
+              stroke={palette.expense}
+              strokeWidth={2}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+            {buckets.map((b, i) =>
+              b.value > 0 ? (
+                <Circle
+                  key={i}
+                  cx={padX + i * stepX}
+                  cy={padY + (H - padY * 2) * (1 - b.value / max)}
+                  r={2.5}
+                  fill={palette.expense}
+                />
+              ) : null,
+            )}
+          </Svg>
+          <View style={styles.trendLabels}>
+            {buckets.map((b, i) => (
+              <Text key={i} style={[styles.trendLabel, { color: palette.textTertiary }]}>
+                {i % labelEvery === 0 ? b.label : ''}
+              </Text>
+            ))}
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
+
+// ── 某分类区间流水明细（下钻）────────────────────────────────────────────────
 function CategoryDetailSheet({
   detail,
-  period,
+  range,
   transactions,
   onClose,
 }: {
   detail: { id: string; name: string } | null;
-  period: string;
+  range: { start: Date; end: Date };
   transactions: Transaction[];
   onClose: () => void;
 }) {
@@ -201,9 +372,9 @@ function CategoryDetailSheet({
   const rows = useMemo(() => {
     if (!detail) return [];
     return transactions
-      .filter((t) => t.category_id === detail.id && currentPeriod(new Date(t.occurred_at)) === period)
+      .filter((t) => t.category_id === detail.id && inRange(t.occurred_at, range.start, range.end))
       .sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
-  }, [detail, period, transactions]);
+  }, [detail, range, transactions]);
 
   return (
     <Modal visible={!!detail} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -239,14 +410,17 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   header: { paddingHorizontal: Space[4], paddingTop: Space[2], paddingBottom: Space[2] },
   title: { fontSize: 34, fontWeight: '700' },
-  monthBar: {
+  dimRow: { paddingHorizontal: Space[4], paddingBottom: Space[2] },
+  segment: { flexDirection: 'row', borderRadius: Radius.md, padding: 3 },
+  segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: Space[2] },
+  periodBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: Space[6],
     paddingBottom: Space[3],
   },
-  monthLabel: { fontSize: 17, fontWeight: '600', minWidth: 96, textAlign: 'center' },
+  periodLabel: { fontSize: 17, fontWeight: '600', minWidth: 120, textAlign: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: Space[4], paddingBottom: Space[12], gap: Space[4] },
   card: { borderRadius: Radius.lg, padding: Space[4] },
@@ -255,7 +429,7 @@ const styles = StyleSheet.create({
   summaryLabel: { fontSize: 13 },
   summaryAmount: { fontSize: 17, fontWeight: '600', fontVariant: ['tabular-nums'] },
   sectionTitle: { fontSize: 17, fontWeight: '600', marginBottom: Space[3] },
-  emptyBox: { alignItems: 'center', justifyContent: 'center', gap: Space[2], paddingVertical: Space[8] },
+  emptyBox: { alignItems: 'center', justifyContent: 'center', gap: Space[2], paddingVertical: Space[6] },
   donutWrap: { alignItems: 'center', paddingVertical: Space[2] },
   donutCaption: { fontSize: 12 },
   donutTotal: { fontSize: 22, fontWeight: '700', fontVariant: ['tabular-nums'] },
@@ -266,6 +440,23 @@ const styles = StyleSheet.create({
   catName: { fontSize: 16, fontWeight: '500' },
   catPct: { fontSize: 13, fontVariant: ['tabular-nums'] },
   catAmount: { fontSize: 16, fontWeight: '600', fontVariant: ['tabular-nums'], marginRight: Space[1] },
+  trendLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: Space[1] },
+  trendLabel: { fontSize: 10, flex: 1, textAlign: 'center' },
+  memberList: { gap: Space[3] },
+  memberRow: { flexDirection: 'row', alignItems: 'center', gap: Space[3] },
+  memberName: { fontSize: 14, width: 56 },
+  memberBarWrap: { flex: 1 },
+  memberBarTrack: { height: 10, borderRadius: Radius.full, overflow: 'hidden' },
+  memberBarFill: { height: '100%', borderRadius: Radius.full },
+  memberAmount: { fontSize: 13, fontVariant: ['tabular-nums'], width: 76, textAlign: 'right' },
+  summaryEntry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[3],
+    padding: Space[4],
+    borderRadius: Radius.lg,
+  },
+  summaryEntryText: { fontSize: 16, fontWeight: '500' },
   sheetBar: {
     flexDirection: 'row',
     alignItems: 'center',

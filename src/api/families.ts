@@ -135,6 +135,12 @@ export async function transferOwnership(newOwnerUserId: string): Promise<Family>
   return data;
 }
 
+/** 户主移除某成员（流程 6，成员变更走 RPC）。 */
+export async function removeMember(userId: string): Promise<void> {
+  const { error } = await supabase.rpc('remove_member', { p_user_id: userId });
+  if (error) throw error;
+}
+
 /** 普通成员退出家庭（户主须先转让/解散）。 */
 export async function leaveFamily(): Promise<void> {
   const { error } = await supabase.rpc('leave_family');
@@ -155,6 +161,10 @@ function useLifecycleMutation<TArgs>(fn: (args: TArgs) => Promise<unknown>) {
 
 export function useTransferOwnership() {
   return useLifecycleMutation((newOwnerUserId: string) => transferOwnership(newOwnerUserId));
+}
+
+export function useRemoveMember() {
+  return useLifecycleMutation((userId: string) => removeMember(userId));
 }
 
 /** 无参生命周期操作（退出/解散），mutateAsync() 不带参数。 */

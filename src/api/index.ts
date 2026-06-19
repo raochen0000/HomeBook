@@ -4,4 +4,5 @@ export * from './categories';
 export * from './transactions';
 export * from './families';
 export * from './savings';
+export * from './budgets';
 export * from './notifications';

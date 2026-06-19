@@ -7,7 +7,15 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useCreateFamily, useDissolveFamily, useLeaveFamily, useMemberships, useMyFamily, useMyProfile } from '@/api';
+import {
+  useCreateFamily,
+  useDissolveFamily,
+  useLeaveFamily,
+  useMemberships,
+  useMyFamily,
+  useMyProfile,
+  useRemoveMember,
+} from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { InviteSheet } from '@/features/family/invite-sheet';
@@ -22,6 +30,7 @@ export default function FamilyScreen() {
   const createFamilyM = useCreateFamily();
   const leaveM = useLeaveFamily();
   const dissolveM = useDissolveFamily();
+  const removeM = useRemoveMember();
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
@@ -72,6 +81,23 @@ export default function FamilyScreen() {
     ]);
   };
 
+  const onRemove = (m: (typeof members)[number]) => {
+    Alert.alert(`移除「${m.nickname}」`, '移除后 TA 将无法访问本家庭账本，TA 已记录的流水会保留在家里。确定移除吗？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '移除',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await removeM.mutateAsync(m.userId);
+          } catch (e) {
+            Alert.alert('移除失败', (e as Error).message ?? String(e));
+          }
+        },
+      },
+    ]);
+  };
+
   const onDissolve = () => {
     Alert.alert('解散家庭', '解散后全部成员将退出，账本不再可用。此操作不可恢复，确定解散吗？', [
       { text: '取消', style: 'cancel' },
@@ -90,7 +116,7 @@ export default function FamilyScreen() {
   };
 
   const loading = profileQ.isLoading || familyQ.isLoading;
-  const busy = createFamilyM.isPending || leaveM.isPending || dissolveM.isPending;
+  const busy = createFamilyM.isPending || leaveM.isPending || dissolveM.isPending || removeM.isPending;
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
@@ -137,24 +163,34 @@ export default function FamilyScreen() {
             <View style={styles.section}>
               <ThemedText style={[styles.sectionTitle, { color: palette.textSecondary }]}>成员</ThemedText>
               <View style={[styles.card, { backgroundColor: palette.card }]}>
-                {members.map((m, i) => (
-                  <View key={m.id}>
-                    {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
-                    <View style={styles.memberRow}>
-                      <SymbolView name="person.crop.circle.fill" tintColor={palette.textTertiary} size={36} />
-                      <ThemedText style={[styles.memberName, { color: palette.textPrimary }]}>
-                        {m.nickname}
-                        {m.userId === myId ? '（我）' : ''}
-                      </ThemedText>
-                      <View style={styles.flex} />
-                      {m.role === 'owner' ? (
-                        <View style={[styles.badge, { backgroundColor: palette.bannerTint }]}>
-                          <ThemedText style={[styles.badgeText, { color: palette.warning }]}>户主</ThemedText>
-                        </View>
-                      ) : null}
+                {members.map((m, i) => {
+                  // 户主可移除非户主成员（流程 6）；自己与其他户主不可移除。
+                  const removable = isOwner && m.userId !== myId && m.role !== 'owner';
+                  return (
+                    <View key={m.id}>
+                      {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
+                      <Pressable
+                        style={styles.memberRow}
+                        disabled={!removable}
+                        onPress={removable ? () => onRemove(m) : undefined}
+                      >
+                        <SymbolView name="person.crop.circle.fill" tintColor={palette.textTertiary} size={36} />
+                        <ThemedText style={[styles.memberName, { color: palette.textPrimary }]}>
+                          {m.nickname}
+                          {m.userId === myId ? '（我）' : ''}
+                        </ThemedText>
+                        <View style={styles.flex} />
+                        {m.role === 'owner' ? (
+                          <View style={[styles.badge, { backgroundColor: palette.bannerTint }]}>
+                            <ThemedText style={[styles.badgeText, { color: palette.warning }]}>户主</ThemedText>
+                          </View>
+                        ) : removable ? (
+                          <SymbolView name="minus.circle" tintColor={palette.danger} size={20} />
+                        ) : null}
+                      </Pressable>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             </View>
 

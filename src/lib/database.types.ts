@@ -506,9 +506,17 @@ export type Database = {
         Args: { p_goal_id: string; p_amount: number; p_note: string; p_expected_version: number };
         Returns: Database['public']['Tables']['savings_goals']['Row'];
       };
+      delete_savings_goal: {
+        Args: { p_goal_id: string };
+        Returns: undefined;
+      };
       transfer_ownership: {
         Args: { p_new_owner: string };
         Returns: Database['public']['Tables']['families']['Row'];
+      };
+      remove_member: {
+        Args: { p_user_id: string };
+        Returns: undefined;
       };
       leave_family: {
         Args: Record<string, never>;

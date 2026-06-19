@@ -202,7 +202,7 @@ export function BalanceCard({
 }
 
 // ── 月度总结提示条 ────────────────────────────────────────────────────────────
-export function InsightBanner({ message }: { message: string }) {
+export function InsightBanner({ message, onPress }: { message: string; onPress?: () => void }) {
   const palette = usePalette();
   return (
     <HStack
@@ -212,6 +212,7 @@ export function InsightBanner({ message }: { message: string }) {
         background(palette.bannerTint),
         cornerRadius(Radius.md),
         padding({ vertical: Space[3], horizontal: Space[3] }),
+        ...(onPress ? [onTapGesture(() => onPress())] : []),
       ]}
     >
       <Image systemName="sparkles" size={16} color={palette.warning} />
