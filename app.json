@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.anonymous.HomeBook"
+      "bundleIdentifier": "com.anonymous.HomeBook",
+      "usesAppleSignIn": true
     },
     "android": {
       "adaptiveIcon": {
@@ -27,6 +28,13 @@
     },
     "plugins": [
       "expo-router",
+      "expo-apple-authentication",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "允许「家账」使用相机以扫描邀请二维码加入家庭"
+        }
+      ],
       [
         "expo-splash-screen",
         {

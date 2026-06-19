@@ -6,15 +6,26 @@ import { Host, ScrollView, VStack } from '@expo/ui/swift-ui';
 import { padding } from '@expo/ui/swift-ui/modifiers';
 import { Link, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useCategories, useFamilyMembers, useMyFamily, useMyProfile, useTransactions, type Transaction } from '@/api';
+import {
+  useCategories,
+  useCreateFamily,
+  useFamilyMembers,
+  useMyFamily,
+  useMyProfile,
+  useTransactions,
+  type Transaction,
+} from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
-import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { BalanceCard, DayGroup, InsightBanner, type RowData } from '@/features/home/components';
+import { RecordSheet } from '@/features/record/record-sheet';
+import { SearchSheet } from '@/features/search/search-sheet';
+import { useSession } from '@/lib/auth';
+import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { currentPeriod, dayKey, humanDay, signForType } from '@/lib/format';
 
 type Group = { key: string; label: string; totalCents: number; rows: RowData[] };
@@ -23,13 +34,23 @@ export default function HomeScreen() {
   const palette = usePalette();
   const catColors = useCategoryColors();
 
+  const { session } = useSession();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
   const membersQ = useFamilyMembers();
   const categoriesQ = useCategories();
   const transactionsQ = useTransactions();
+  const createFamilyM = useCreateFamily();
 
   const multiMember = (familyQ.data?.member_count ?? 1) > 1;
+
+  // 记账面板状态：editing=null 为新建，否则编辑该流水。
+  const [sheet, setSheet] = useState<{ open: boolean; editing: Transaction | null; familyId: string }>({
+    open: false,
+    editing: null,
+    familyId: '',
+  });
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const { groups, balance, expense, income, monthCount } = useMemo(() => {
     const txns = transactionsQ.data ?? [];
@@ -90,8 +111,32 @@ export default function HomeScreen() {
     };
   }, [transactionsQ.data, categoriesQ.data, membersQ.data, profileQ.data, multiMember, catColors, palette]);
 
-  const onAdd = () => Alert.alert('记一笔', '记账面板开发中');
-  const onSearch = () => Alert.alert('搜索', '搜索页开发中');
+  // 记一笔：若当前用户还没有家庭，先自动建「单人家庭」（M1：登录 + 单人家庭自动创建）。
+  const openCreate = async () => {
+    // 记账人必须是有效用户 id；profile 拉取失败时不进面板，避免把空 id 发给后端。
+    if (!profileQ.data?.id) {
+      Alert.alert('暂时无法记账', '账号信息还没加载好，请稍后重试或重新进入「我的」。');
+      return;
+    }
+    let fid = familyQ.data?.id ?? profileQ.data?.current_family_id ?? null;
+    if (!fid) {
+      try {
+        const fam = (await createFamilyM.mutateAsync({ name: '我的家' })) as { id: string };
+        fid = fam.id;
+      } catch (e) {
+        Alert.alert('创建家庭失败', (e as Error).message ?? String(e));
+        return;
+      }
+    }
+    setSheet({ open: true, editing: null, familyId: fid });
+  };
+
+  const openEdit = (id: string) => {
+    const txn = (transactionsQ.data ?? []).find((t) => t.id === id);
+    if (txn) setSheet({ open: true, editing: txn, familyId: txn.family_id });
+  };
+
+  const onSearch = () => setSearchOpen(true);
 
   const month = new Date().getMonth() + 1;
   const loading = profileQ.isLoading || transactionsQ.isLoading || categoriesQ.isLoading;
@@ -111,7 +156,7 @@ export default function HomeScreen() {
           <View style={styles.center}>
             <ActivityIndicator />
           </View>
-        ) : !profileQ.data ? (
+        ) : !session ? (
           <View style={styles.center}>
             <ThemedText style={{ color: palette.textSecondary }}>请先登录</ThemedText>
             <Link href={'/mine' as Href}>
@@ -132,7 +177,7 @@ export default function HomeScreen() {
                   <InsightBanner message={`${month} 月家里一起记下了 ${monthCount} 笔 · 查看月度总结`} />
                 ) : null}
                 {groups.map((g) => (
-                  <DayGroup key={g.key} label={g.label} totalCents={g.totalCents} rows={g.rows} />
+                  <DayGroup key={g.key} label={g.label} totalCents={g.totalCents} rows={g.rows} onRowPress={openEdit} />
                 ))}
               </VStack>
             </ScrollView>
@@ -141,9 +186,21 @@ export default function HomeScreen() {
       </SafeAreaView>
 
       {/* 记一笔 悬浮钮（IA §2：Tab Bar 右上方常驻） */}
-      <Pressable onPress={onAdd} style={[styles.fab, { backgroundColor: palette.accent, shadowColor: '#000' }]}>
+      <Pressable onPress={openCreate} style={[styles.fab, { backgroundColor: palette.accent, shadowColor: '#000' }]}>
         <SymbolView name="plus" tintColor={palette.onAccent} size={28} weight="semibold" />
       </Pressable>
+
+      {/* 记账面板（流程 2 + 编辑/删除 流程 10） */}
+      <RecordSheet
+        visible={sheet.open}
+        editing={sheet.editing}
+        familyId={sheet.familyId}
+        recorderId={profileQ.data?.id ?? ''}
+        onClose={() => setSheet({ open: false, editing: null, familyId: '' })}
+      />
+
+      {/* 搜索（顶栏 🔍） */}
+      <SearchSheet visible={searchOpen} onClose={() => setSearchOpen(false)} />
     </View>
   );
 }

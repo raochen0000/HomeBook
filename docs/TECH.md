@@ -251,13 +251,13 @@ git --version
 
 **关键落地决策（相对初稿的修正）：**
 
-| 项 | 初稿 | 落地方案 | 理由 |
-| --- | --- | --- | --- |
-| 用户主表 | 自建 `USER`，`phone` 主键 | `auth.users` + `public.profiles`（见 §7.3） | 复用 Supabase Auth，避免手机号冗余 |
-| 枚举 | 仅列取值 | `text` + `CHECK` 约束 | 比原生 enum 灵活（加值不受事务限制） |
-| 时间类型 | `timestamp (UTC)` | 一律 `timestamptz` | 避免时区歧义 |
-| 主键 | UUID | `uuid default gen_random_uuid()` | PG13+ 内置，无需扩展 |
-| 软删除 | 文字约定 | `status` / `is_deleted` 字段 + 仅开放 update | — |
+| 项       | 初稿                      | 落地方案                                     | 理由                                 |
+| -------- | ------------------------- | -------------------------------------------- | ------------------------------------ |
+| 用户主表 | 自建 `USER`，`phone` 主键 | `auth.users` + `public.profiles`（见 §7.3）  | 复用 Supabase Auth，避免手机号冗余   |
+| 枚举     | 仅列取值                  | `text` + `CHECK` 约束                        | 比原生 enum 灵活（加值不受事务限制） |
+| 时间类型 | `timestamp (UTC)`         | 一律 `timestamptz`                           | 避免时区歧义                         |
+| 主键     | UUID                      | `uuid default gen_random_uuid()`             | PG13+ 内置，无需扩展                 |
+| 软删除   | 文字约定                  | `status` / `is_deleted` 字段 + 仅开放 update | —                                    |
 
 **RLS 模型：** 全部 `public` 表启用 RLS，策略遵循官方四要点——`(select auth.uid())` 包裹、一律 `TO authenticated`（anon 不授权）、每操作独立策略、跨表归属判断走 `private.*` 的 `SECURITY DEFINER` 辅助函数以避免递归。家庭隔离统一由 `private.is_family_member(family_id)` / `private.is_family_owner(family_id)` 等判定；`profiles` 可见性由 `private.shares_family()` 控制；`notifications` 仅本人可见。
 
@@ -265,19 +265,19 @@ git --version
 
 **迁移文件清单：**
 
-| 文件 | 内容 |
-| --- | --- |
-| `…0001_extensions.sql` | `private` schema、`set_updated_at()` 通用函数 |
-| `…0002_core_tables.sql` | `profiles` / `families` / `memberships`（含交叉外键、一人一家 / 户主唯一部分索引） |
-| `…0003_ledger_savings_tables.sql` | `categories` / `savings_goals` / `transactions` / `savings_entries` |
-| `…0004_budget_tables.sql` | `budgets` / `budget_categories` |
-| `…0005_aux_tables.sql` | `invitations` / `succession_requests` / `notifications` / `monthly_summaries` |
-| `…0006_constraints_triggers.sql` | `handle_new_user`、`updated_at` 触发器、`family_id` 不可变、成员 ≤8 / 目标 ≤5 计数触发器 |
-| `…0007_rls_helpers.sql` | `private.*` RLS 辅助函数 |
-| `…0008_rls_policies.sql` | 各表 RLS 策略 + 表权限 GRANT |
-| `…0009_rpc_functions.sql` | `create_family` / `join_family_by_code` / `savings_deposit` / `savings_withdraw` |
-| `…0010_seed_system_categories.sql` | 系统预设分类种子（含储蓄存入/取出，资金闭环依赖） |
-| `…0011_create_invitation_rpc.sql` | `create_invitation`（户主生成邀请码：仅户主 / 满 8 拦截 / 24h / 复用或刷新，PRD §5） |
+| 文件                               | 内容                                                                                     |
+| ---------------------------------- | ---------------------------------------------------------------------------------------- |
+| `…0001_extensions.sql`             | `private` schema、`set_updated_at()` 通用函数                                            |
+| `…0002_core_tables.sql`            | `profiles` / `families` / `memberships`（含交叉外键、一人一家 / 户主唯一部分索引）       |
+| `…0003_ledger_savings_tables.sql`  | `categories` / `savings_goals` / `transactions` / `savings_entries`                      |
+| `…0004_budget_tables.sql`          | `budgets` / `budget_categories`                                                          |
+| `…0005_aux_tables.sql`             | `invitations` / `succession_requests` / `notifications` / `monthly_summaries`            |
+| `…0006_constraints_triggers.sql`   | `handle_new_user`、`updated_at` 触发器、`family_id` 不可变、成员 ≤8 / 目标 ≤5 计数触发器 |
+| `…0007_rls_helpers.sql`            | `private.*` RLS 辅助函数                                                                 |
+| `…0008_rls_policies.sql`           | 各表 RLS 策略 + 表权限 GRANT                                                             |
+| `…0009_rpc_functions.sql`          | `create_family` / `join_family_by_code` / `savings_deposit` / `savings_withdraw`         |
+| `…0010_seed_system_categories.sql` | 系统预设分类种子（含储蓄存入/取出，资金闭环依赖）                                        |
+| `…0011_create_invitation_rpc.sql`  | `create_invitation`（户主生成邀请码：仅户主 / 满 8 拦截 / 24h / 复用或刷新，PRD §5）     |
 
 **迁移执行方式：** 当前后端为阿里云自托管 Supabase 兼容实例（非 Cloud），CLI 用直连 Postgres 连接串 `supabase db push`（不用 `supabase link`）；或在 Studio SQL Editor 按编号顺序粘贴执行。客户端仅持 anon key，无法执行 DDL。
 
@@ -287,10 +287,10 @@ git --version
 
 **测试账号**（A、B 两个，便于验证跨家庭隔离）：
 
-| | 邮箱 | 密码 |
-| --- | --- | --- |
-| A | `dev.a@homebook.test` | `devtest123456` |
-| B | `dev.b@homebook.test` | `devtest123456` |
+|     | 邮箱                  | 密码            |
+| --- | --------------------- | --------------- |
+| A   | `dev.a@homebook.test` | `devtest123456` |
+| B   | `dev.b@homebook.test` | `devtest123456` |
 
 **前端**：`src/app/dev.tsx` 是 `__DEV__` 门控的调试台（首页底部「→ Dev 调试台」入口，生产构建重定向回首页）；可一键登录 A/B、`create_family`、记一笔、读概览。复用逻辑在 `src/lib/dev-auth.ts`（`devSignIn` 不存在则自动注册、`ensureFamily`、`addSampleExpense`、`fetchOverview`）。
 

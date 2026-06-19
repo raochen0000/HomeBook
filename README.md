@@ -1,29 +1,34 @@
-# Welcome to your Expo app 👋
+# 家账 HomeBook
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+家庭协作记账 iOS App（Expo SDK 56 + React Native + TypeScript，后端 Supabase）。
+产品 / 技术文档见 [`docs/`](docs/)（PRD / MVP / IA / DESIGN / DATAMODEL / TECH）。
 
-## Get started
+## 本地开发与构建
 
-1. Install dependencies
+> 平台：iOS（模拟器开发）。首次需安装依赖：`pnpm install`（项目用 pnpm）。
 
-   ```bash
-   npm install
-   ```
+### 日常开发（改 JS / TSX）
 
-2. Start the app
+```bash
+npm run dev        # 启动 Metro（dev-client 模式）
+```
 
-   ```bash
-   npx expo start
-   ```
+App 已装在模拟器上时，改 `.tsx` 走 Fast Refresh 自动刷新，**无需重编原生**。
 
-In the output, you'll find options to open the app in a
+### 重新编译原生 App（加了原生模块 / 模拟器崩溃或被重置时）
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+```bash
+npm run ios:sim        # 编译（模拟器，免签名）+ 安装 + 启动到「已启动的模拟器」
+npm run ios:sim:clean  # 救援版：重装 Pod（源码模式）+ 清构建缓存 + 重编。pod/codegen 乱了时用
+```
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+### ⚠️ 重要约束
+
+- **不要用 `npm run ios`（`expo run:ios`）**：在当前 Xcode 26 / iOS 26 模拟器上，`@expo/cli` 会把模拟器误判成真机、索要签名证书而失败。统一用 `npm run ios:sim`。
+- **`ExpoModulesCore` 必须从源码编译**：`ios/Podfile.properties.json` 里的 `"EXPO_USE_PRECOMPILED_MODULES": "false"` 不能丢，否则启动会 dyld 崩溃（`Symbol not found: ExpoModulesCore.Record.from`）。`npx expo prebuild --clean` 会冲掉这行——若跑了它，需补回该行并执行 `npm run ios:sim:clean`。
+- 后端迁移（`supabase/migrations/`）数据库端口被墙，**用 Supabase Studio SQL Editor 按编号顺序粘贴执行**，不要用 CLI 直推。
+
+App 源码在 **`src/app`**（[expo-router](https://docs.expo.dev/router/introduction) 文件式路由）+ **`src/features`** / **`src/api`** / **`src/lib`**。
 
 ## Get a fresh project
 

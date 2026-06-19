@@ -14,6 +14,15 @@ export type NewTransaction = Pick<
   'family_id' | 'type' | 'amount' | 'category_id' | 'recorder_user_id' | 'note' | 'occurred_at'
 >;
 
+/** 编辑流水可改字段（family_id 创建后不可变，不在此列；recorder/occurred 暂不改）。 */
+export type EditTransaction = {
+  id: string;
+  type: 'expense' | 'income';
+  amount: number;
+  category_id: string;
+  note: string | null;
+};
+
 /** 当前家庭未删除流水，按记账时间倒序（RLS 已隔离家庭）。 */
 export async function fetchTransactions(): Promise<Transaction[]> {
   const { data, error } = await supabase
@@ -39,6 +48,22 @@ export function useCreateTransaction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: createTransaction,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+  });
+}
+
+/** 编辑流水：仅更新可改字段（family_id 不可变，由 DB 触发器兜底拒绝）。 */
+export async function updateTransaction(input: EditTransaction): Promise<Transaction> {
+  const { id, ...patch } = input;
+  const { data, error } = await supabase.from('transactions').update(patch).eq('id', id).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+export function useUpdateTransaction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: updateTransaction,
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),
   });
 }

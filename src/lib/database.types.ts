@@ -506,6 +506,18 @@ export type Database = {
         Args: { p_goal_id: string; p_amount: number; p_note: string; p_expected_version: number };
         Returns: Database['public']['Tables']['savings_goals']['Row'];
       };
+      transfer_ownership: {
+        Args: { p_new_owner: string };
+        Returns: Database['public']['Tables']['families']['Row'];
+      };
+      leave_family: {
+        Args: Record<string, never>;
+        Returns: undefined;
+      };
+      dissolve_family: {
+        Args: Record<string, never>;
+        Returns: undefined;
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

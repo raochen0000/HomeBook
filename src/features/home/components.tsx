@@ -11,6 +11,7 @@ import {
   font,
   foregroundColor,
   frame,
+  onTapGesture,
   padding,
   shadow,
 } from '@expo/ui/swift-ui/modifiers';
@@ -81,10 +82,17 @@ function Divider({ color }: { color: string }) {
   );
 }
 
-function TransactionRow({ row }: { row: RowData }) {
+function TransactionRow({ row, onPress }: { row: RowData; onPress?: (id: string) => void }) {
   const palette = usePalette();
   return (
-    <HStack spacing={Space[3]} alignment="center" modifiers={[padding({ vertical: Space[3], horizontal: Space[4] })]}>
+    <HStack
+      spacing={Space[3]}
+      alignment="center"
+      modifiers={[
+        padding({ vertical: Space[3], horizontal: Space[4] }),
+        ...(onPress ? [onTapGesture(() => onPress(row.id))] : []),
+      ]}
+    >
       <CategoryAvatar symbol={row.symbol} color={row.iconColor} />
       <VStack alignment="leading" spacing={2}>
         <Text modifiers={[font({ size: 17, weight: 'medium' }), foregroundColor(palette.textPrimary)]}>
@@ -108,7 +116,17 @@ function TransactionRow({ row }: { row: RowData }) {
 }
 
 // ── 按日分组：灰色日期头（含当日净额）+ 白卡内多行 ─────────────────────────────
-export function DayGroup({ label, totalCents, rows }: { label: string; totalCents: number; rows: RowData[] }) {
+export function DayGroup({
+  label,
+  totalCents,
+  rows,
+  onRowPress,
+}: {
+  label: string;
+  totalCents: number;
+  rows: RowData[];
+  onRowPress?: (id: string) => void;
+}) {
   const palette = usePalette();
   return (
     <VStack alignment="leading" spacing={Space[2]}>
@@ -130,7 +148,7 @@ export function DayGroup({ label, totalCents, rows }: { label: string; totalCent
         {rows.map((row, i) => (
           <VStack key={row.id} spacing={0}>
             {i > 0 ? <Divider color={palette.separator} /> : null}
-            <TransactionRow row={row} />
+            <TransactionRow row={row} onPress={onRowPress} />
           </VStack>
         ))}
       </VStack>

@@ -50,6 +50,13 @@ export function currentPeriod(date = new Date()): string {
   return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
 }
 
+/** 人性化月份标题：今年省略年份（如「6月」），往年带年（如「2025年6月」）。 */
+export function monthLabel(date: Date): string {
+  const now = new Date();
+  const m = `${date.getMonth() + 1}月`;
+  return date.getFullYear() === now.getFullYear() ? m : `${date.getFullYear()}年${m}`;
+}
+
 /** 取某时间戳的「年-月-日」key，用于按日分组。 */
 export function dayKey(iso: string): string {
   const d = new Date(iso);

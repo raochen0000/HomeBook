@@ -3,16 +3,35 @@
  */
 import { Link, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useMyProfile } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { signOut, useSession } from '@/lib/auth';
 
 export default function MineScreen() {
   const palette = usePalette();
+  const { session } = useSession();
   const { data: profile } = useMyProfile();
+
+  const onSignOut = () => {
+    Alert.alert('退出登录', '确定要退出当前账号吗？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '退出',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await signOut();
+          } catch (e) {
+            Alert.alert('退出失败', (e as Error).message ?? String(e));
+          }
+        },
+      },
+    ]);
+  };
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
@@ -26,10 +45,10 @@ export default function MineScreen() {
             <SymbolView name="person.crop.circle.fill" tintColor={palette.textTertiary} size={44} />
             <View>
               <ThemedText style={[styles.name, { color: palette.textPrimary }]}>
-                {profile?.nickname ?? '未登录'}
+                {profile?.nickname ?? (session ? '已登录' : '未登录')}
               </ThemedText>
               <ThemedText style={{ color: palette.textSecondary, fontSize: 13 }}>
-                {profile ? '已登录' : '请在 Dev 调试台登录'}
+                {session ? '已登录' : '请在 Dev 调试台登录'}
               </ThemedText>
             </View>
           </View>
@@ -38,6 +57,12 @@ export default function MineScreen() {
             <Link href={'/dev' as Href} style={[styles.row, { backgroundColor: palette.card }]}>
               <ThemedText style={{ color: palette.textPrimary }}>Dev 调试台</ThemedText>
             </Link>
+          ) : null}
+
+          {session ? (
+            <Pressable onPress={onSignOut} style={[styles.row, { backgroundColor: palette.card }]}>
+              <ThemedText style={{ color: palette.danger }}>退出登录</ThemedText>
+            </Pressable>
           ) : null}
         </View>
       </SafeAreaView>

@@ -63,7 +63,12 @@ export async function devAutoSignIn(acc: TestAccount = TEST_ACCOUNTS.a) {
 export async function getMyProfile() {
   const { data: sessionData } = await supabase.auth.getSession();
   if (!sessionData.session) return null;
-  const { data, error } = await supabase.from('profiles').select('id, nickname, current_family_id').single();
+  // 同 fetchMyProfile：按自己过滤，避免多人家庭下 RLS 返回多行导致 .single() 报错。
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, nickname, current_family_id')
+    .eq('id', sessionData.session.user.id)
+    .single();
   if (error) throw error;
   return data;
 }
