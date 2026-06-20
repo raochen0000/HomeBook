@@ -50,6 +50,35 @@ export function currentPeriod(date = new Date()): string {
   return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
 }
 
+/** 上一周期（YYYY-MM）。如 '2026-06' → '2026-05'。 */
+export function previousPeriod(period: string): string {
+  const [y, m] = period.split('-').map(Number);
+  const d = new Date(y, m - 1, 1);
+  d.setMonth(d.getMonth() - 1);
+  return currentPeriod(d);
+}
+
+/** 环比：当前 vs 上期。上期为 0（无可比基数）时返回 null（UI 显示「—」）。 */
+export function percentDelta(curr: number, prev: number): { pct: number; up: boolean } | null {
+  if (prev <= 0) return null;
+  return { pct: Math.round(((curr - prev) / prev) * 1000) / 10, up: curr >= prev };
+}
+
+/** 带符号的百分比文案，如 +8.3% / -12.5% / 0%。 */
+export function formatPercent(pct: number): string {
+  return `${pct > 0 ? '+' : ''}${pct}%`;
+}
+
+/** 按小时取问候语（顶栏副标题前半句）。 */
+export function greetingForHour(date = new Date()): string {
+  const h = date.getHours();
+  if (h < 6) return '夜深了';
+  if (h < 12) return '早上好';
+  if (h < 14) return '中午好';
+  if (h < 18) return '下午好';
+  return '晚上好';
+}
+
 /** 人性化月份标题：今年省略年份（如「6月」），往年带年（如「2025年6月」）。 */
 export function monthLabel(date: Date): string {
   const now = new Date();

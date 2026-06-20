@@ -2,22 +2,23 @@
  * 首页 UI 组件（@expo/ui/swift-ui 原生 SwiftUI 渲染）。
  * 视觉对齐参考图 + DESIGN.md：浅灰底 + 白卡、分类圆底图标、两段式金额、收支语义色。
  */
-import { HStack, Image, Spacer, Text, VStack } from '@expo/ui/swift-ui';
-import type { ComponentProps } from 'react';
+import { HStack, Image, RoundedRectangle, Spacer, Text, VStack, ZStack } from '@expo/ui/swift-ui';
 import {
   background,
   clipShape,
   cornerRadius,
   font,
   foregroundColor,
+  foregroundStyle,
   frame,
   onTapGesture,
   padding,
   shadow,
 } from '@expo/ui/swift-ui/modifiers';
+import type { ComponentProps } from 'react';
 
 import { Radius, Space, usePalette } from '@/constants/design';
-import { amountParts, formatAmount, signForNet } from '@/lib/format';
+import { amountParts, formatAmount, formatPercent, signForNet } from '@/lib/format';
 
 // ── 两段式金额：整数主字号 + 小数降一档（DESIGN §8）────────────────────────────
 export function AmountText({
@@ -156,69 +157,197 @@ export function DayGroup({
   );
 }
 
-// ── 本月概览卡 ────────────────────────────────────────────────────────────────
+// ── 本月概览卡（参考图蓝色 hero 渐变 + 眼睛显隐 + 较上月趋势）───────────────────
+/** 环比趋势：null 表示上月无可比基数，UI 显示「—」。 */
+export type Trend = { pct: number; up: boolean } | null;
+
+/**
+ * 金额：隐藏态用圆点遮罩，可见态走两段式金额。
+ * 圆点「•」与数字字形的行高/基线不一致（圆点会触发更高的行盒），
+ * 直接切换会让金额行高变化、卡片跳动。这里给两态统一套一个按主字号
+ * 计算的固定高度 frame（垂直居中），从而无论显/隐占位高度都一致。
+ */
+function MaskOrAmount({
+  cents,
+  sign,
+  color,
+  integerSize,
+  decimalSize,
+  weight = 'bold',
+  hidden,
+}: {
+  cents: number;
+  sign?: '+' | '-' | '';
+  color: string;
+  integerSize: number;
+  decimalSize: number;
+  weight?: 'regular' | 'medium' | 'semibold' | 'bold';
+  hidden: boolean;
+}) {
+  // SF Pro 正文行高约为字号的 1.2 倍，按主字号锁定金额行盒高度。
+  const boxHeight = Math.round(integerSize * 1.2);
+  const inner = hidden ? (
+    <HStack spacing={0} alignment="firstTextBaseline">
+      <Text modifiers={[font({ size: integerSize, weight }), foregroundColor(color)]}>¥••••</Text>
+      <Text modifiers={[font({ size: decimalSize, weight: 'regular' }), foregroundColor(color)]}>••</Text>
+    </HStack>
+  ) : (
+    <AmountText
+      cents={cents}
+      sign={sign}
+      color={color}
+      integerSize={integerSize}
+      decimalSize={decimalSize}
+      weight={weight}
+    />
+  );
+  return <HStack modifiers={[frame({ height: boxHeight })]}>{inner}</HStack>;
+}
+
+/** 较上月趋势：中性灰文案 + 方向箭头（不靠颜色表意，DESIGN §13）。 */
+function TrendRow({ trend }: { trend: Trend }) {
+  const palette = usePalette();
+  if (!trend) {
+    return <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textSecondary)]}>较上月 —</Text>;
+  }
+  return (
+    <HStack spacing={2} alignment="center">
+      <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textSecondary)]}>
+        {`较上月 ${formatPercent(trend.pct)}`}
+      </Text>
+      <Image systemName={trend.up ? 'arrow.up' : 'arrow.down'} size={9} color={palette.textSecondary} />
+    </HStack>
+  );
+}
+
+/**
+ * 概览卡固定高度：内容（标题行 + 结余 + 支出/收入两列）在固定字号下高度恒定，
+ * 锁死整卡高度后，眼睛在 eye/eye.slash、金额在数字/圆点之间切换都不会让卡片跳动。
+ */
+const BALANCE_CARD_HEIGHT = 188;
+
 export function BalanceCard({
   balanceCents,
   expenseCents,
   incomeCents,
+  hidden,
+  onToggleHidden,
+  expenseTrend,
+  incomeTrend,
 }: {
   balanceCents: number;
   expenseCents: number;
   incomeCents: number;
+  hidden: boolean;
+  onToggleHidden: () => void;
+  expenseTrend: Trend;
+  incomeTrend: Trend;
 }) {
   const palette = usePalette();
   return (
-    <VStack
-      alignment="leading"
-      spacing={Space[2]}
-      modifiers={[
-        background(palette.card),
-        cornerRadius(Radius.lg),
-        padding({ all: Space[4] }),
-        shadow({ radius: 8, x: 0, y: 1, color: palette.shadow }),
-      ]}
+    <ZStack
+      modifiers={[frame({ height: BALANCE_CARD_HEIGHT }), shadow({ radius: 10, x: 0, y: 2, color: palette.shadow })]}
     >
-      <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>本月结余</Text>
-      <AmountText
-        cents={balanceCents}
-        sign={signForNet(balanceCents)}
-        color={palette.textPrimary}
-        integerSize={34}
-        decimalSize={17}
-        weight="bold"
+      {/* 渐变底（左上 → 右下），用 RoundedRectangle 填充以避让 background 仅支持纯色 */}
+      <RoundedRectangle
+        cornerRadius={Radius.lg}
+        modifiers={[
+          foregroundStyle({
+            type: 'linearGradient',
+            colors: [palette.cardGradient[0], palette.cardGradient[1]],
+            startPoint: { x: 0, y: 0 },
+            endPoint: { x: 1, y: 1 },
+          }),
+          frame({ maxWidth: 9999, maxHeight: 9999 }),
+        ]}
       />
-      <HStack spacing={Space[8]} modifiers={[padding({ top: Space[2] })]}>
-        <VStack alignment="leading" spacing={2}>
-          <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>支出</Text>
-          <AmountText cents={expenseCents} color={palette.expense} integerSize={22} decimalSize={13} weight="bold" />
-        </VStack>
-        <VStack alignment="leading" spacing={2}>
-          <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>收入</Text>
-          <AmountText cents={incomeCents} color={palette.income} integerSize={22} decimalSize={13} weight="bold" />
-        </VStack>
-      </HStack>
-    </VStack>
+      <VStack alignment="leading" spacing={Space[2]} modifiers={[padding({ all: Space[4] })]}>
+        {/* 头：本月结余 + 眼睛显隐 · 右侧周期胶囊（暂为静态展示） */}
+        <HStack alignment="center" spacing={Space[2]}>
+          <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>本月结余</Text>
+          <Image
+            systemName={hidden ? 'eye.slash' : 'eye'}
+            size={15}
+            color={palette.textSecondary}
+            modifiers={[padding({ horizontal: Space[1], vertical: Space[1] }), onTapGesture(() => onToggleHidden())]}
+          />
+          <Spacer />
+          <HStack
+            spacing={Space[1]}
+            alignment="center"
+            modifiers={[
+              padding({ horizontal: Space[3], vertical: Space[1] }),
+              background(palette.cardPill),
+              cornerRadius(Radius.full),
+            ]}
+          >
+            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textPrimary)]}>本月</Text>
+            <Image systemName="chevron.down" size={10} color={palette.textSecondary} />
+          </HStack>
+        </HStack>
+
+        <MaskOrAmount
+          cents={balanceCents}
+          sign={signForNet(balanceCents)}
+          color={palette.textPrimary}
+          integerSize={34}
+          decimalSize={17}
+          weight="bold"
+          hidden={hidden}
+        />
+
+        <HStack spacing={Space[8]} modifiers={[padding({ top: Space[2] })]}>
+          <VStack alignment="leading" spacing={2}>
+            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>支出</Text>
+            <MaskOrAmount
+              cents={expenseCents}
+              color={palette.expense}
+              integerSize={22}
+              decimalSize={13}
+              weight="bold"
+              hidden={hidden}
+            />
+            <TrendRow trend={expenseTrend} />
+          </VStack>
+          <VStack alignment="leading" spacing={2}>
+            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>收入</Text>
+            <MaskOrAmount
+              cents={incomeCents}
+              color={palette.income}
+              integerSize={22}
+              decimalSize={13}
+              weight="bold"
+              hidden={hidden}
+            />
+            <TrendRow trend={incomeTrend} />
+          </VStack>
+        </HStack>
+      </VStack>
+    </ZStack>
   );
 }
 
-// ── 月度总结提示条 ────────────────────────────────────────────────────────────
-export function InsightBanner({ message, onPress }: { message: string; onPress?: () => void }) {
+// ── 家庭动态提示条（日历图标 + 两行文案）。可点时右侧带箭头并跳转，纯展示时不带箭头。──
+export function InsightBanner({ title, subtitle, onPress }: { title: string; subtitle: string; onPress?: () => void }) {
   const palette = usePalette();
   return (
     <HStack
-      spacing={Space[2]}
+      spacing={Space[3]}
       alignment="center"
       modifiers={[
+        padding({ vertical: Space[4], horizontal: Space[4] }),
         background(palette.bannerTint),
         cornerRadius(Radius.md),
-        padding({ vertical: Space[3], horizontal: Space[3] }),
         ...(onPress ? [onTapGesture(() => onPress())] : []),
       ]}
     >
-      <Image systemName="sparkles" size={16} color={palette.warning} />
-      <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textPrimary)]}>{message}</Text>
+      <Image systemName="calendar" size={22} color={palette.warning} />
+      <VStack alignment="leading" spacing={2}>
+        <Text modifiers={[font({ size: 15, weight: 'medium' }), foregroundColor(palette.textPrimary)]}>{title}</Text>
+        <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{subtitle}</Text>
+      </VStack>
       <Spacer />
-      <Image systemName="xmark" size={12} color={palette.textTertiary} />
+      {onPress ? <Image systemName="chevron.right" size={13} color={palette.textTertiary} /> : null}
     </HStack>
   );
 }

@@ -4,10 +4,11 @@
  */
 import { Host, ScrollView, VStack } from '@expo/ui/swift-ui';
 import { padding } from '@expo/ui/swift-ui/modifiers';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Link, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, PlatformColor, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -23,15 +24,26 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { BalanceCard, DayGroup, InsightBanner, type RowData } from '@/features/home/components';
-import { MonthlySummarySheet } from '@/features/report/monthly-summary';
 import { RecordSheet } from '@/features/record/record-sheet';
 import { SearchSheet } from '@/features/search/search-sheet';
 import { useSession } from '@/lib/auth';
 import { budgetLevel, expenseUsedInPeriod } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import { currentPeriod, dayKey, formatAmount, humanDay, signForType } from '@/lib/format';
+import {
+  currentPeriod,
+  dayKey,
+  formatAmount,
+  greetingForHour,
+  humanDay,
+  percentDelta,
+  previousPeriod,
+  signForType,
+} from '@/lib/format';
 
 type Group = { key: string; label: string; totalCents: number; rows: RowData[] };
+
+/** 「本月结余/收入/支出」金额显隐状态（眼睛），跨重启保留。 */
+const HIDE_AMOUNTS_KEY = 'home.amountsHidden';
 
 export default function HomeScreen() {
   const palette = usePalette();
@@ -68,9 +80,23 @@ export default function HomeScreen() {
     familyId: '',
   });
   const [searchOpen, setSearchOpen] = useState(false);
-  const [summaryOpen, setSummaryOpen] = useState(false);
 
-  const { groups, balance, expense, income, monthCount } = useMemo(() => {
+  // 金额显隐（眼睛）：启动时读回上次状态，切换时写入。
+  const [amountsHidden, setAmountsHidden] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem(HIDE_AMOUNTS_KEY).then((v) => {
+      if (v === '1') setAmountsHidden(true);
+    });
+  }, []);
+  const toggleAmounts = useCallback(() => {
+    setAmountsHidden((prev) => {
+      const next = !prev;
+      AsyncStorage.setItem(HIDE_AMOUNTS_KEY, next ? '1' : '0');
+      return next;
+    });
+  }, []);
+
+  const { groups, balance, expense, income, monthCount, expenseTrend, incomeTrend } = useMemo(() => {
     const txns = transactionsQ.data ?? [];
     const cats = categoriesQ.data ?? [];
     const members = membersQ.data ?? [];
@@ -78,10 +104,13 @@ export default function HomeScreen() {
     const nameById = new Map(members.map((m) => [m.id, m.nickname]));
     const myId = profileQ.data?.id;
     const period = currentPeriod();
+    const prevP = previousPeriod(period);
 
     let inc = 0;
     let exp = 0;
     let cnt = 0;
+    let prevInc = 0;
+    let prevExp = 0;
 
     const subtitle = (t: Transaction): string | null => {
       const who = t.recorder_user_id === myId ? '我' : (nameById.get(t.recorder_user_id) ?? '成员');
@@ -91,10 +120,14 @@ export default function HomeScreen() {
 
     const map = new Map<string, Group>();
     for (const t of txns) {
-      if (currentPeriod(new Date(t.occurred_at)) === period) {
+      const tp = currentPeriod(new Date(t.occurred_at));
+      if (tp === period) {
         cnt += 1;
         if (t.type === 'income') inc += t.amount;
         else exp += t.amount;
+      } else if (tp === prevP) {
+        if (t.type === 'income') prevInc += t.amount;
+        else prevExp += t.amount;
       }
 
       const cat = catById.get(t.category_id);
@@ -126,6 +159,8 @@ export default function HomeScreen() {
       expense: exp,
       income: inc,
       monthCount: cnt,
+      expenseTrend: percentDelta(exp, prevExp),
+      incomeTrend: percentDelta(inc, prevInc),
     };
   }, [transactionsQ.data, categoriesQ.data, membersQ.data, profileQ.data, multiMember, catColors, palette]);
 
@@ -162,10 +197,15 @@ export default function HomeScreen() {
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top']} style={styles.flex}>
-        {/* 顶栏：左上标题 + 右上搜索（IA §2） */}
+        {/* 顶栏：左上标题 + 问候副标题 · 右上搜索（IA §2） */}
         <View style={styles.header}>
-          <ThemedText style={[styles.title, { color: palette.textPrimary }]}>首页</ThemedText>
-          <Pressable hitSlop={12} onPress={onSearch}>
+          <View style={styles.headerText}>
+            <ThemedText style={[styles.title, { color: palette.textPrimary }]}>首页</ThemedText>
+            <ThemedText style={[styles.subtitle, { color: palette.textSecondary }]}>
+              {`${greetingForHour()}，掌握每一笔，生活更从容`}
+            </ThemedText>
+          </View>
+          <Pressable hitSlop={12} onPress={onSearch} style={styles.searchBtn}>
             <SymbolView name="magnifyingglass" tintColor={palette.textPrimary} size={22} />
           </Pressable>
         </View>
@@ -208,11 +248,19 @@ export default function HomeScreen() {
           <Host style={styles.flex}>
             <ScrollView>
               <VStack spacing={Space[5]} modifiers={[padding({ horizontal: Space[4], top: Space[2], bottom: 140 })]}>
-                <BalanceCard balanceCents={balance} expenseCents={expense} incomeCents={income} />
+                <BalanceCard
+                  balanceCents={balance}
+                  expenseCents={expense}
+                  incomeCents={income}
+                  hidden={amountsHidden}
+                  onToggleHidden={toggleAmounts}
+                  expenseTrend={expenseTrend}
+                  incomeTrend={incomeTrend}
+                />
                 {monthCount > 0 ? (
                   <InsightBanner
-                    message={`${month} 月家里一起记下了 ${monthCount} 笔 · 查看月度总结`}
-                    onPress={() => setSummaryOpen(true)}
+                    title={`${month} 月家里一起记下了 ${monthCount} 笔`}
+                    subtitle="每一笔都是一家人生活的痕迹"
                   />
                 ) : null}
                 {groups.map((g) => (
@@ -225,8 +273,12 @@ export default function HomeScreen() {
       </SafeAreaView>
 
       {/* 记一笔 悬浮钮（IA §2：Tab Bar 右上方常驻） */}
-      <Pressable onPress={openCreate} style={[styles.fab, { backgroundColor: palette.accent, shadowColor: '#000' }]}>
-        <SymbolView name="plus" tintColor={palette.onAccent} size={28} weight="semibold" />
+      {/* 蓝底白加号：用系统蓝（PlatformColor systemBlue），与底部 Tab Bar 高亮蓝同源 */}
+      <Pressable
+        onPress={openCreate}
+        style={[styles.fab, { backgroundColor: PlatformColor('systemBlue'), shadowColor: '#000' }]}
+      >
+        <SymbolView name="plus" tintColor="#FFFFFF" size={28} weight="semibold" />
       </Pressable>
 
       {/* 记账面板（流程 2 + 编辑/删除 流程 10） */}
@@ -240,9 +292,6 @@ export default function HomeScreen() {
 
       {/* 搜索（顶栏 🔍） */}
       <SearchSheet visible={searchOpen} onClose={() => setSearchOpen(false)} />
-
-      {/* 月度总结卡（首页条幅入口，流程 9） */}
-      <MonthlySummarySheet visible={summaryOpen} period={currentPeriod()} onClose={() => setSummaryOpen(false)} />
     </View>
   );
 }
@@ -253,13 +302,16 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[3] },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingHorizontal: Space[4],
     paddingTop: Space[2],
     paddingBottom: Space[3],
   },
+  headerText: { flex: 1, gap: 2 },
   title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
+  subtitle: { fontSize: 14, lineHeight: 18 },
+  searchBtn: { paddingTop: Space[2] },
   budgetBanner: {
     flexDirection: 'row',
     alignItems: 'center',
