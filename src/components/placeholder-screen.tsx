@@ -36,5 +36,5 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[3] },
   header: { paddingHorizontal: Space[4], paddingTop: Space[2], paddingBottom: Space[3] },
-  title: { fontSize: 34, fontWeight: '700' },
+  title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
 });

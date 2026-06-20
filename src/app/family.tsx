@@ -17,7 +17,7 @@ import {
   useRemoveMember,
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
-import { Radius, Space, usePalette } from '@/constants/design';
+import { Radius, Space, TabBarInset, usePalette } from '@/constants/design';
 import { InviteSheet } from '@/features/family/invite-sheet';
 import { ScanSheet } from '@/features/family/scan-sheet';
 import { TransferSheet } from '@/features/family/transfer-sheet';
@@ -152,7 +152,7 @@ export default function FamilyScreen() {
           </View>
         ) : (
           // ── 有家庭：成员 + 操作 ──
-          <ScrollView contentContainerStyle={styles.content}>
+          <ScrollView contentContainerStyle={styles.content} scrollIndicatorInsets={{ bottom: TabBarInset }}>
             <View style={[styles.familyCard, { backgroundColor: palette.card }]}>
               <ThemedText style={[styles.familyName, { color: palette.textPrimary }]}>{family.name}</ThemedText>
               <ThemedText style={{ color: palette.textSecondary, fontSize: 13 }}>
@@ -254,8 +254,8 @@ function ActionRow({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
-  header: { paddingHorizontal: Space[4], paddingTop: Space[2], paddingBottom: Space[3] },
-  title: { fontSize: 34, fontWeight: '700' },
+  header: { paddingHorizontal: Space[4], paddingTop: Space[4], paddingBottom: Space[3] },
+  title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[3], paddingHorizontal: Space[6] },
   emptyActions: { width: '100%', gap: Space[3], marginTop: Space[4] },
   primary: { height: 50, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
-  content: { paddingHorizontal: Space[4], paddingBottom: Space[12], gap: Space[6] },
+  content: { paddingHorizontal: Space[4], paddingBottom: TabBarInset, gap: Space[6] },
   familyCard: { padding: Space[5], borderRadius: Radius.lg, gap: Space[1] },
   familyName: { fontSize: 24, fontWeight: '700' },
   section: { gap: Space[2] },

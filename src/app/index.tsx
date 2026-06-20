@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
     paddingTop: Space[2],
     paddingBottom: Space[3],
   },
-  title: { fontSize: 34, fontWeight: '700' },
+  title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
   budgetBanner: {
     flexDirection: 'row',
     alignItems: 'center',

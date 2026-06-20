@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useMyProfile, useUnreadNotifications } from '@/api';
 import { ThemedText } from '@/components/themed-text';
-import { Radius, Space, usePalette } from '@/constants/design';
+import { Radius, Space, TabBarInset, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import { CategoryManageSheet } from '@/features/category/manage-sheet';
 import { NotificationCenterSheet } from '@/features/notifications/center-sheet';
@@ -52,7 +52,7 @@ export default function MineScreen() {
           <ThemedText style={[styles.title, { color: palette.textPrimary }]}>我的</ThemedText>
         </View>
 
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={styles.content} scrollIndicatorInsets={{ bottom: TabBarInset }}>
           <View style={[styles.card, { backgroundColor: palette.card }]}>
             <SymbolView name="person.crop.circle.fill" tintColor={palette.textTertiary} size={44} />
             <View>
@@ -133,8 +133,8 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   header: { paddingHorizontal: Space[4], paddingTop: Space[2], paddingBottom: Space[3] },
-  title: { fontSize: 34, fontWeight: '700' },
-  content: { paddingHorizontal: Space[4], gap: Space[3], paddingBottom: Space[12] },
+  title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
+  content: { paddingHorizontal: Space[4], gap: Space[3], paddingBottom: TabBarInset },
   card: {
     flexDirection: 'row',
     alignItems: 'center',

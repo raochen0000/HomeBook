@@ -12,7 +12,7 @@ import Svg, { Circle, Polyline } from 'react-native-svg';
 
 import { useCategories, useFamilyMembers, useMyProfile, useTransactions, type Transaction } from '@/api';
 import { ThemedText } from '@/components/themed-text';
-import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
+import { Radius, Space, TabBarInset, useCategoryColors, usePalette } from '@/constants/design';
 import { Donut } from '@/features/report/donut';
 import { MonthlySummarySheet } from '@/features/report/monthly-summary';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
@@ -156,7 +156,7 @@ export default function ReportScreen() {
             <ActivityIndicator />
           </View>
         ) : (
-          <ScrollView contentContainerStyle={styles.content}>
+          <ScrollView contentContainerStyle={styles.content} scrollIndicatorInsets={{ bottom: TabBarInset }}>
             {/* 收支结余概览 */}
             <View style={[styles.card, styles.summary, { backgroundColor: palette.card }]}>
               <View style={styles.summaryItem}>
@@ -409,7 +409,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   header: { paddingHorizontal: Space[4], paddingTop: Space[2], paddingBottom: Space[2] },
-  title: { fontSize: 34, fontWeight: '700' },
+  title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
   dimRow: { paddingHorizontal: Space[4], paddingBottom: Space[2] },
   segment: { flexDirection: 'row', borderRadius: Radius.md, padding: 3 },
   segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: Space[2] },
@@ -422,7 +422,7 @@ const styles = StyleSheet.create({
   },
   periodLabel: { fontSize: 17, fontWeight: '600', minWidth: 120, textAlign: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { paddingHorizontal: Space[4], paddingBottom: Space[12], gap: Space[4] },
+  content: { paddingHorizontal: Space[4], paddingBottom: TabBarInset, gap: Space[4] },
   card: { borderRadius: Radius.lg, padding: Space[4] },
   summary: { flexDirection: 'row', justifyContent: 'space-between' },
   summaryItem: { gap: Space[1] },

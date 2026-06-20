@@ -27,6 +27,13 @@ export const Space = {
   12: 48,
 } as const;
 
+/**
+ * iOS 26 原生 NativeTabs 的悬浮 Tab Bar 半透明覆盖在内容之上（不会自动避让），
+ * 因此可滚动页面的内容底部需预留此高度，最后一项才能滚到 Tab Bar 上方完整展示。
+ * 取值≈悬浮条高度 + 底部安全区 + 余量，对齐首页 @expo/ui 列表的底部留白。
+ */
+export const TabBarInset = 120;
+
 type Palette = {
   /** 收入：红 */
   income: string;
