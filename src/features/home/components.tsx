@@ -327,6 +327,37 @@ export function BalanceCard({
   );
 }
 
+// ── 预算预警条幅（流程 8）：原生渲染以便随 @expo/ui 列表一起滚动。──
+export function BudgetBanner({ text, danger }: { text: string; danger: boolean }) {
+  const palette = usePalette();
+  const bg = danger ? palette.danger : palette.bannerTint;
+  const iconColor = danger ? '#FFFFFF' : palette.warning;
+  const textColor = danger ? '#FFFFFF' : palette.textPrimary;
+  return (
+    <HStack
+      spacing={Space[2]}
+      alignment="center"
+      modifiers={[padding({ horizontal: Space[3], vertical: Space[3] }), background(bg), cornerRadius(Radius.md)]}
+    >
+      <Image systemName={danger ? 'exclamationmark.triangle.fill' : 'bell.fill'} size={15} color={iconColor} />
+      <Text modifiers={[font({ size: 13, weight: 'medium' }), foregroundColor(textColor)]}>{text}</Text>
+      <Spacer />
+    </HStack>
+  );
+}
+
+// ── 列表到底提示：居中浅灰文案，置于流水列表末尾，表示「没有更多了」。──
+export function EndOfListHint({ text = '暂无更多数据' }: { text?: string }) {
+  const palette = usePalette();
+  return (
+    <HStack modifiers={[padding({ vertical: Space[2] })]}>
+      <Spacer />
+      <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>{text}</Text>
+      <Spacer />
+    </HStack>
+  );
+}
+
 // ── 家庭动态提示条（日历图标 + 两行文案）。可点时右侧带箭头并跳转，纯展示时不带箭头。──
 export function InsightBanner({ title, subtitle, onPress }: { title: string; subtitle: string; onPress?: () => void }) {
   const palette = usePalette();

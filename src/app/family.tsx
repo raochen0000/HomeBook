@@ -4,8 +4,9 @@
  */
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
+import Animated from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   useCreateFamily,
@@ -21,9 +22,12 @@ import { Radius, Space, TabBarInset, usePalette } from '@/constants/design';
 import { InviteSheet } from '@/features/family/invite-sheet';
 import { ScanSheet } from '@/features/family/scan-sheet';
 import { TransferSheet } from '@/features/family/transfer-sheet';
+import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 
 export default function FamilyScreen() {
   const palette = usePalette();
+  const insets = useSafeAreaInsets();
+  const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 69);
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
   const membershipsQ = useMemberships();
@@ -120,11 +124,7 @@ export default function FamilyScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView edges={['top']} style={styles.flex}>
-        <View style={styles.header}>
-          <ThemedText style={[styles.title, { color: palette.textPrimary }]}>家庭</ThemedText>
-        </View>
-
+      <View style={styles.flex}>
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator />
@@ -152,7 +152,12 @@ export default function FamilyScreen() {
           </View>
         ) : (
           // ── 有家庭：成员 + 操作 ──
-          <ScrollView contentContainerStyle={styles.content} scrollIndicatorInsets={{ bottom: TabBarInset }}>
+          <Animated.ScrollView
+            ref={scrollRef}
+            scrollEventThrottle={16}
+            contentContainerStyle={[styles.content, { paddingTop: headerHeight + Space[2] }]}
+            scrollIndicatorInsets={{ top: headerHeight, bottom: TabBarInset }}
+          >
             <View style={[styles.familyCard, { backgroundColor: palette.card }]}>
               <ThemedText style={[styles.familyName, { color: palette.textPrimary }]}>{family.name}</ThemedText>
               <ThemedText style={{ color: palette.textSecondary, fontSize: 13 }}>
@@ -215,9 +220,19 @@ export default function FamilyScreen() {
                 </View>
               )}
             </View>
-          </ScrollView>
+          </Animated.ScrollView>
         )}
-      </SafeAreaView>
+
+        {/* 标题：绝对覆盖层，随滚动上移淡出 */}
+        <View style={[styles.headerClip, { height: headerHeight }]} pointerEvents="box-none">
+          <Animated.View
+            style={[styles.header, { backgroundColor: palette.base, paddingTop: insets.top + Space[4] }, headerStyle]}
+            onLayout={onHeaderLayout}
+          >
+            <ThemedText style={[styles.title, { color: palette.textPrimary }]}>家庭</ThemedText>
+          </Animated.View>
+        </View>
+      </View>
 
       <InviteSheet visible={inviteOpen} onClose={() => setInviteOpen(false)} />
       <ScanSheet visible={scanOpen} onClose={() => setScanOpen(false)} />
@@ -254,6 +269,7 @@ function ActionRow({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
+  headerClip: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden', zIndex: 10 },
   header: { paddingHorizontal: Space[4], paddingTop: Space[4], paddingBottom: Space[3] },
   title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[3], paddingHorizontal: Space[6] },

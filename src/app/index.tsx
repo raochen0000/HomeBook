@@ -9,7 +9,8 @@ import { Link, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, PlatformColor, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   useBudget,
@@ -23,9 +24,17 @@ import {
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
-import { BalanceCard, DayGroup, InsightBanner, type RowData } from '@/features/home/components';
+import {
+  BalanceCard,
+  BudgetBanner,
+  DayGroup,
+  EndOfListHint,
+  InsightBanner,
+  type RowData,
+} from '@/features/home/components';
 import { RecordSheet } from '@/features/record/record-sheet';
 import { SearchSheet } from '@/features/search/search-sheet';
+import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { useSession } from '@/lib/auth';
 import { budgetLevel, expenseUsedInPeriod } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
@@ -48,6 +57,11 @@ const HIDE_AMOUNTS_KEY = 'home.amountsHidden';
 export default function HomeScreen() {
   const palette = usePalette();
   const catColors = useCategoryColors();
+  const insets = useSafeAreaInsets();
+  const { scrollGeometry, headerHeight, headerStyle, onHeaderLayout } = useManualCollapsibleHeader(
+    insets.top + 84,
+    insets.top,
+  );
 
   const { session } = useSession();
   const profileQ = useMyProfile();
@@ -196,38 +210,7 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView edges={['top']} style={styles.flex}>
-        {/* 顶栏：左上标题 + 问候副标题 · 右上搜索（IA §2） */}
-        <View style={styles.header}>
-          <View style={styles.headerText}>
-            <ThemedText style={[styles.title, { color: palette.textPrimary }]}>首页</ThemedText>
-            <ThemedText style={[styles.subtitle, { color: palette.textSecondary }]}>
-              {`${greetingForHour()}，掌握每一笔，生活更从容`}
-            </ThemedText>
-          </View>
-          <Pressable hitSlop={12} onPress={onSearch} style={styles.searchBtn}>
-            <SymbolView name="magnifyingglass" tintColor={palette.textPrimary} size={22} />
-          </Pressable>
-        </View>
-
-        {/* 预算预警条幅（流程 8） */}
-        {session && budgetAlert ? (
-          <View
-            style={[styles.budgetBanner, { backgroundColor: budgetAlert.danger ? palette.danger : palette.bannerTint }]}
-          >
-            <SymbolView
-              name={budgetAlert.danger ? 'exclamationmark.triangle.fill' : 'bell.fill'}
-              tintColor={budgetAlert.danger ? '#FFFFFF' : palette.warning}
-              size={15}
-            />
-            <ThemedText
-              style={[styles.budgetBannerText, { color: budgetAlert.danger ? '#FFFFFF' : palette.textPrimary }]}
-            >
-              {budgetAlert.text}
-            </ThemedText>
-          </View>
-        ) : null}
-
+      <View style={styles.flex}>
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator />
@@ -246,8 +229,18 @@ export default function HomeScreen() {
           </View>
         ) : (
           <Host style={styles.flex}>
-            <ScrollView>
-              <VStack spacing={Space[5]} modifiers={[padding({ horizontal: Space[4], top: Space[2], bottom: 140 })]}>
+            <ScrollView modifiers={scrollGeometry ? [scrollGeometry] : []}>
+              <VStack
+                spacing={Space[5]}
+                // 顶/底都需扣掉 SwiftUI ScrollView 的自动安全区避让，避免双重计入：
+                // - 顶部：headerHeight 已含 insets.top，减去一次，否则标题与主体间多出约一个安全区的空隙。
+                // - 底部：ScrollView 已自动为悬浮 Tab Bar 预留安全区，故这里只留一个小的视觉间距；
+                //   若再叠加 TabBarInset 会在列表末尾留出约一个 Tab Bar 高度的大片空白。
+                modifiers={[
+                  padding({ horizontal: Space[4], top: headerHeight - insets.top + Space[2], bottom: Space[6] }),
+                ]}
+              >
+                {session && budgetAlert ? <BudgetBanner text={budgetAlert.text} danger={budgetAlert.danger} /> : null}
                 <BalanceCard
                   balanceCents={balance}
                   expenseCents={expense}
@@ -266,11 +259,30 @@ export default function HomeScreen() {
                 {groups.map((g) => (
                   <DayGroup key={g.key} label={g.label} totalCents={g.totalCents} rows={g.rows} onRowPress={openEdit} />
                 ))}
+                <EndOfListHint />
               </VStack>
             </ScrollView>
           </Host>
         )}
-      </SafeAreaView>
+
+        {/* 顶栏：绝对覆盖层，随滚动上移淡出，越接近顶部越显现（IA §2） */}
+        <View style={[styles.headerClip, { height: headerHeight }]} pointerEvents="box-none">
+          <Animated.View
+            style={[styles.header, { backgroundColor: palette.base, paddingTop: insets.top + Space[2] }, headerStyle]}
+            onLayout={onHeaderLayout}
+          >
+            <View style={styles.headerText}>
+              <ThemedText style={[styles.title, { color: palette.textPrimary }]}>首页</ThemedText>
+              <ThemedText style={[styles.subtitle, { color: palette.textSecondary }]}>
+                {`${greetingForHour()}，掌握每一笔，生活更从容`}
+              </ThemedText>
+            </View>
+            <Pressable hitSlop={12} onPress={onSearch} style={styles.searchBtn}>
+              <SymbolView name="magnifyingglass" tintColor={palette.textPrimary} size={22} />
+            </Pressable>
+          </Animated.View>
+        </View>
+      </View>
 
       {/* 记一笔 悬浮钮（IA §2：Tab Bar 右上方常驻） */}
       {/* 蓝底白加号：用系统蓝（PlatformColor systemBlue），与底部 Tab Bar 高亮蓝同源 */}
@@ -300,6 +312,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[3] },
+  headerClip: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden', zIndex: 10 },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -312,17 +325,6 @@ const styles = StyleSheet.create({
   title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
   subtitle: { fontSize: 14, lineHeight: 18 },
   searchBtn: { paddingTop: Space[2] },
-  budgetBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space[2],
-    marginHorizontal: Space[4],
-    marginBottom: Space[2],
-    paddingHorizontal: Space[3],
-    paddingVertical: Space[2],
-    borderRadius: Radius.md,
-  },
-  budgetBannerText: { flex: 1, fontSize: 13, fontWeight: '500' },
   fab: {
     position: 'absolute',
     right: Space[4],

@@ -7,7 +7,8 @@
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated from 'react-native-reanimated';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Polyline } from 'react-native-svg';
 
 import { useCategories, useFamilyMembers, useMyProfile, useTransactions, type Transaction } from '@/api';
@@ -15,6 +16,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, TabBarInset, useCategoryColors, usePalette } from '@/constants/design';
 import { Donut } from '@/features/report/donut';
 import { MonthlySummarySheet } from '@/features/report/monthly-summary';
+import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { currentPeriod, formatAmount, signForNet } from '@/lib/format';
 import { inRange, isCurrentPeriod, periodRange, shiftAnchor, trendBuckets, type Dimension } from '@/lib/report';
@@ -31,6 +33,10 @@ const DIMENSIONS: { key: Dimension; label: string }[] = [
 export default function ReportScreen() {
   const palette = usePalette();
   const catColors = useCategoryColors();
+  const insets = useSafeAreaInsets();
+  // estimate 必须等于实测头高（paddingTop 8 + 标题 41 + paddingBottom 12），否则裁切框（overflow:hidden）
+  // 偏小会在首帧切掉标题底部。
+  const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 61);
   const txnsQ = useTransactions();
   const catsQ = useCategories();
   const membersQ = useFamilyMembers();
@@ -103,60 +109,63 @@ export default function ReportScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView edges={['top']} style={styles.flex}>
-        <View style={styles.header}>
-          <ThemedText style={[styles.title, { color: palette.textPrimary }]}>报表</ThemedText>
-        </View>
-
-        {/* 维度切换 */}
-        <View style={styles.dimRow}>
-          <View style={[styles.segment, { backgroundColor: palette.card }]}>
-            {DIMENSIONS.map((d) => {
-              const active = dimension === d.key;
-              return (
-                <Pressable
-                  key={d.key}
-                  style={[styles.segmentItem, active && { backgroundColor: palette.base, borderRadius: Radius.sm }]}
-                  onPress={() => {
-                    setDimension(d.key);
-                    setAnchor(new Date());
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: active ? palette.textPrimary : palette.textSecondary,
-                      fontWeight: active ? '600' : '400',
-                    }}
-                  >
-                    {d.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* 周期切换 */}
-        <View style={styles.periodBar}>
-          <Pressable hitSlop={10} onPress={() => setAnchor((a) => shiftAnchor(dimension, a, -1))}>
-            <SymbolView name="chevron.left" tintColor={palette.textSecondary} size={18} />
-          </Pressable>
-          <ThemedText style={[styles.periodLabel, { color: palette.textPrimary }]}>{range.label}</ThemedText>
-          <Pressable hitSlop={10} onPress={() => setAnchor((a) => shiftAnchor(dimension, a, 1))} disabled={isCurrent}>
-            <SymbolView
-              name="chevron.right"
-              tintColor={isCurrent ? palette.textTertiary : palette.textSecondary}
-              size={18}
-            />
-          </Pressable>
-        </View>
-
+      <View style={styles.flex}>
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator />
           </View>
         ) : (
-          <ScrollView contentContainerStyle={styles.content} scrollIndicatorInsets={{ bottom: TabBarInset }}>
+          <Animated.ScrollView
+            ref={scrollRef}
+            scrollEventThrottle={16}
+            contentContainerStyle={[styles.content, { paddingTop: headerHeight + Space[2] }]}
+            scrollIndicatorInsets={{ top: headerHeight, bottom: TabBarInset }}
+          >
+            {/* 维度切换 */}
+            <View style={[styles.segment, { backgroundColor: palette.card }]}>
+              {DIMENSIONS.map((d) => {
+                const active = dimension === d.key;
+                return (
+                  <Pressable
+                    key={d.key}
+                    style={[styles.segmentItem, active && { backgroundColor: palette.base, borderRadius: Radius.sm }]}
+                    onPress={() => {
+                      setDimension(d.key);
+                      setAnchor(new Date());
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: active ? palette.textPrimary : palette.textSecondary,
+                        fontWeight: active ? '600' : '400',
+                      }}
+                    >
+                      {d.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* 周期切换 */}
+            <View style={styles.periodBar}>
+              <Pressable hitSlop={10} onPress={() => setAnchor((a) => shiftAnchor(dimension, a, -1))}>
+                <SymbolView name="chevron.left" tintColor={palette.textSecondary} size={18} />
+              </Pressable>
+              <ThemedText style={[styles.periodLabel, { color: palette.textPrimary }]}>{range.label}</ThemedText>
+              <Pressable
+                hitSlop={10}
+                onPress={() => setAnchor((a) => shiftAnchor(dimension, a, 1))}
+                disabled={isCurrent}
+              >
+                <SymbolView
+                  name="chevron.right"
+                  tintColor={isCurrent ? palette.textTertiary : palette.textSecondary}
+                  size={18}
+                />
+              </Pressable>
+            </View>
+
             {/* 收支结余概览 */}
             <View style={[styles.card, styles.summary, { backgroundColor: palette.card }]}>
               <View style={styles.summaryItem}>
@@ -268,9 +277,19 @@ export default function ReportScreen() {
               <View style={styles.flex} />
               <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
             </Pressable>
-          </ScrollView>
+          </Animated.ScrollView>
         )}
-      </SafeAreaView>
+
+        {/* 标题：绝对覆盖层，随滚动上移淡出 */}
+        <View style={[styles.headerClip, { height: headerHeight }]} pointerEvents="box-none">
+          <Animated.View
+            style={[styles.header, { backgroundColor: palette.base, paddingTop: insets.top + Space[2] }, headerStyle]}
+            onLayout={onHeaderLayout}
+          >
+            <ThemedText style={[styles.title, { color: palette.textPrimary }]}>报表</ThemedText>
+          </Animated.View>
+        </View>
+      </View>
 
       {/* 分类流水明细下钻 */}
       <CategoryDetailSheet
@@ -408,9 +427,9 @@ function CategoryDetailSheet({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
-  header: { paddingHorizontal: Space[4], paddingTop: Space[2], paddingBottom: Space[2] },
+  headerClip: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden', zIndex: 10 },
+  header: { paddingHorizontal: Space[4], paddingTop: Space[2], paddingBottom: Space[3] },
   title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
-  dimRow: { paddingHorizontal: Space[4], paddingBottom: Space[2] },
   segment: { flexDirection: 'row', borderRadius: Radius.md, padding: 3 },
   segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: Space[2] },
   periodBar: {
@@ -418,7 +437,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: Space[6],
-    paddingBottom: Space[3],
   },
   periodLabel: { fontSize: 17, fontWeight: '600', minWidth: 120, textAlign: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },

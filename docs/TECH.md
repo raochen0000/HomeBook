@@ -374,6 +374,7 @@ supabase/                 # 后端工程（与客户端同仓或独立仓）
 9. **可访问性**：Dynamic Type、VoiceOver、减弱动态、Light/Night 两套对比度（DESIGN §13），组件层内建。
 10. **图表性能**：Victory Native（Skia）需 Dev Build；大数据量时注意 Reanimated 共享值更新频率。
 11. **OTA 边界**：EAS Update 仅能热更新 JS 层；改动原生模块仍需重新提审。
+12. **@expo/ui（SwiftUI）ScrollView 自动避让安全区**：SwiftUI `ScrollView` 会**自动**按安全区内缩内容（顶部 `insets.top`、底部含悬浮 Tab Bar）。若在其上再手动叠加 `insets.top` / `TabBarInset`，会**双重计入**，表现为三类症状：①标题与主体间多出约一个安全区高度的空隙；②列表末尾留出约一个 Tab Bar 高度的大片空白；③滚动折叠头部出现起始「死区」——`useScrollGeometryChange` 上报的 `contentOffsetY` 在停靠顶部时为 `-insets.top`，需 `+insets.top` 归一化后再驱动折叠。首页已据此处理（[src/app/index.tsx](../src/app/index.tsx)：顶部 padding 减 `insets.top`、底部只留小间距 `Space[6]`；[src/features/shared/use-collapsible-header.ts](../src/features/shared/use-collapsible-header.ts)：折叠偏移量 `+topInset` 归一化）。**RN 的 `ScrollView` 不会自动避让**（报表/家庭页仍需手动 `TabBarInset` 底部 padding 才能让内容滚到悬浮 Tab Bar 上方）——SwiftUI 与 RN 两条滚动链路非对称，勿照搬彼此的留白处理。
 
 ---
 
