@@ -1,32 +1,71 @@
 /**
- * 我的（Tab 4）：账号信息 + 管理入口（分类 / 储蓄目标 / 预算 / 通知中心）+ 开发期入口。
- * 二级页面统一以 Modal Sheet 呈现（沿用全局 Sheet 模式）。
+ * 我的（Tab 4）：账号信息 + 设置入口。
+ * 视觉对齐参考图（灰底 + 白分组卡 + 灰色圆角图标底片）。
+ * 多数入口为占位（尚无对应功能）：点击弹「敬请期待」轻提示；仅「退出登录」为真实操作。
+ * 手机号为参考图占位假数据（profiles 表暂无手机号字段，登录用邮箱/Apple）。
+ *
+ * 滚动机制与其它 Tab（首页/报表/家庭）一致：内容贴边滚动、可滑入状态栏下方，
+ * 沿用 useCollapsibleHeader 的「绝对头部覆盖层」方案——只是头部不渲染大标题/搜索，
+ * 仅作顶部背景与安全区让位。
  */
-import { Link, type Href } from 'expo-router';
+import { Image } from 'expo-image';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import Animated from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useMyProfile, useUnreadNotifications } from '@/api';
+import { useMyProfile } from '@/api';
 import { ThemedText } from '@/components/themed-text';
+import { Toast } from '@/components/toast';
 import { Radius, Space, TabBarInset, usePalette } from '@/constants/design';
-import { BudgetSheet } from '@/features/budget/budget-sheet';
-import { CategoryManageSheet } from '@/features/category/manage-sheet';
-import { NotificationCenterSheet } from '@/features/notifications/center-sheet';
-import { SavingsSheet } from '@/features/savings/savings-sheet';
+import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { signOut, useSession } from '@/lib/auth';
 
-type SheetKey = 'savings' | 'budget' | 'categories' | 'notifications' | null;
+/** 参考图占位手机号（脱敏样式）；接入真实手机号绑定后替换。 */
+const PLACEHOLDER_PHONE = '138 **** 5678';
+const APP_VERSION = 'v1.0.0';
+/** 灰色圆角图标底片 / 头像兜底底色（iOS secondarySystemFill 观感，明暗通用）。 */
+const CHIP_FILL = 'rgba(120,120,128,0.16)';
+
+type Row = {
+  icon: SymbolViewProps['name'];
+  label: string;
+  /** 行尾灰色值文本（如「简体中文」「v1.0.0」）。 */
+  value?: string;
+};
+
+const GROUPS: Row[][] = [
+  [
+    { icon: 'person.fill', label: '个人信息' },
+    { icon: 'lock.fill', label: '账号与安全' },
+    { icon: 'iphone', label: '绑定手机号', value: PLACEHOLDER_PHONE },
+    { icon: 'bell.fill', label: '通知设置' },
+  ],
+  [
+    { icon: 'moon.fill', label: '深色模式', value: '跟随系统' },
+    { icon: 'globe', label: '语言设置', value: '简体中文' },
+    { icon: 'ruler.fill', label: '记账设置' },
+    { icon: 'square.and.arrow.down', label: '导出数据' },
+  ],
+  [
+    { icon: 'questionmark.circle.fill', label: '帮助中心' },
+    { icon: 'text.bubble.fill', label: '意见反馈' },
+    { icon: 'info.circle.fill', label: '关于家账', value: APP_VERSION },
+  ],
+];
 
 export default function MineScreen() {
   const palette = usePalette();
+  const insets = useSafeAreaInsets();
+  // 与其它 Tab 同款滚动折叠脚手架；本页无大标题，估计高度只含安全区。
+  const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top);
   const { session } = useSession();
   const { data: profile } = useMyProfile();
-  const unreadQ = useUnreadNotifications();
-  const [sheet, setSheet] = useState<SheetKey>(null);
+  const [toast, setToast] = useState(false);
 
-  const unreadCount = unreadQ.data?.length ?? 0;
+  // 占位入口：尚无对应功能，统一轻提示。
+  const onPlaceholder = () => setToast(true);
 
   const onSignOut = () => {
     Alert.alert('退出登录', '确定要退出当前账号吗？', [
@@ -47,120 +86,141 @@ export default function MineScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView edges={['top']} style={styles.flex}>
-        <View style={styles.header}>
-          <ThemedText style={[styles.title, { color: palette.textPrimary }]}>我的</ThemedText>
-        </View>
-
-        <ScrollView contentContainerStyle={styles.content} scrollIndicatorInsets={{ bottom: TabBarInset }}>
-          <View style={[styles.card, { backgroundColor: palette.card }]}>
-            <SymbolView name="person.crop.circle.fill" tintColor={palette.textTertiary} size={44} />
-            <View>
-              <ThemedText style={[styles.name, { color: palette.textPrimary }]}>
-                {profile?.nickname ?? (session ? '已登录' : '未登录')}
+      <Animated.ScrollView
+        ref={scrollRef}
+        scrollEventThrottle={16}
+        contentContainerStyle={[styles.content, { paddingTop: headerHeight + Space[2] }]}
+        scrollIndicatorInsets={{ top: headerHeight, bottom: TabBarInset }}
+      >
+        {/* 账号信息（点击占位） */}
+        <Pressable style={styles.profile} onPress={onPlaceholder}>
+          <Avatar url={profile?.avatar_url ?? null} />
+          <View style={styles.profileText}>
+            <ThemedText style={[styles.name, { color: palette.textPrimary }]} numberOfLines={1}>
+              {profile?.nickname ?? '小满'}
+            </ThemedText>
+            <View style={styles.phoneRow}>
+              <ThemedText style={[styles.phone, { color: palette.textSecondary }]} numberOfLines={1}>
+                手机号：{PLACEHOLDER_PHONE}
               </ThemedText>
-              <ThemedText style={{ color: palette.textSecondary, fontSize: 13 }}>
-                {session ? '已登录' : '请在 Dev 调试台登录'}
-              </ThemedText>
+              <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
             </View>
           </View>
+        </Pressable>
 
-          {/* 管理入口 */}
-          <View style={[styles.group, { backgroundColor: palette.card }]}>
-            <MenuRow icon="bell.fill" label="通知中心" badge={unreadCount} onPress={() => setSheet('notifications')} />
-            <Divider palette={palette} />
-            <MenuRow icon="target" label="储蓄目标" onPress={() => setSheet('savings')} />
-            <Divider palette={palette} />
-            <MenuRow icon="chart.pie.fill" label="预算" onPress={() => setSheet('budget')} />
-            <Divider palette={palette} />
-            <MenuRow icon="tag.fill" label="分类管理" onPress={() => setSheet('categories')} />
+        {/* 设置分组 */}
+        {GROUPS.map((rows, gi) => (
+          <View key={gi} style={[styles.group, { backgroundColor: palette.card }]}>
+            {rows.map((row, ri) => (
+              <View key={row.label}>
+                {ri > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
+                <SettingRow row={row} palette={palette} onPress={onPlaceholder} />
+              </View>
+            ))}
           </View>
+        ))}
 
-          {__DEV__ ? (
-            <Link href={'/dev' as Href} style={[styles.row, { backgroundColor: palette.card }]}>
-              <ThemedText style={{ color: palette.textPrimary }}>Dev 调试台</ThemedText>
-            </Link>
-          ) : null}
+        {/* 退出登录（真实操作） */}
+        {session ? (
+          <Pressable
+            onPress={onSignOut}
+            style={({ pressed }) => [styles.signOut, { backgroundColor: palette.card, opacity: pressed ? 0.6 : 1 }]}
+          >
+            <ThemedText style={[styles.signOutText, { color: palette.danger }]}>退出登录</ThemedText>
+          </Pressable>
+        ) : null}
+      </Animated.ScrollView>
 
-          {session ? (
-            <Pressable onPress={onSignOut} style={[styles.row, { backgroundColor: palette.card }]}>
-              <ThemedText style={{ color: palette.danger }}>退出登录</ThemedText>
-            </Pressable>
-          ) : null}
-        </ScrollView>
-      </SafeAreaView>
+      {/* 顶部覆盖层：与其它 Tab 同款机制，但不渲染大标题/搜索，仅作背景与安全区让位。 */}
+      <View style={[styles.headerClip, { height: headerHeight }]} pointerEvents="none">
+        <Animated.View
+          style={[styles.header, { backgroundColor: palette.base, paddingTop: insets.top }, headerStyle]}
+          onLayout={onHeaderLayout}
+        />
+      </View>
 
-      <SavingsSheet visible={sheet === 'savings'} onClose={() => setSheet(null)} />
-      <BudgetSheet visible={sheet === 'budget'} onClose={() => setSheet(null)} />
-      <CategoryManageSheet visible={sheet === 'categories'} onClose={() => setSheet(null)} />
-      <NotificationCenterSheet visible={sheet === 'notifications'} onClose={() => setSheet(null)} />
+      <Toast visible={toast} text="敬请期待" onHide={() => setToast(false)} />
     </View>
   );
 }
 
-function MenuRow({
-  icon,
-  label,
-  badge,
+function Avatar({ url }: { url: string | null }) {
+  const palette = usePalette();
+  if (url) {
+    return <Image source={url} style={styles.avatar} contentFit="cover" transition={120} />;
+  }
+  return (
+    <View style={[styles.avatar, styles.avatarFallback]}>
+      <SymbolView name="person.fill" tintColor={palette.textTertiary} size={44} />
+    </View>
+  );
+}
+
+function SettingRow({
+  row,
+  palette,
   onPress,
 }: {
-  icon: SymbolViewProps['name'];
-  label: string;
-  badge?: number;
+  row: Row;
+  palette: ReturnType<typeof usePalette>;
   onPress: () => void;
 }) {
-  const palette = usePalette();
   return (
-    <Pressable onPress={onPress} style={styles.menuRow}>
-      <SymbolView name={icon} tintColor={palette.accent} size={20} />
-      <ThemedText style={[styles.menuLabel, { color: palette.textPrimary }]}>{label}</ThemedText>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && { backgroundColor: CHIP_FILL }]}>
+      <View style={styles.chip}>
+        <SymbolView name={row.icon} tintColor={palette.textPrimary} size={19} />
+      </View>
+      <ThemedText style={[styles.rowLabel, { color: palette.textPrimary }]}>{row.label}</ThemedText>
       <View style={styles.flex} />
-      {badge && badge > 0 ? (
-        <View style={[styles.badge, { backgroundColor: palette.danger }]}>
-          <ThemedText style={styles.badgeText}>{badge > 99 ? '99+' : badge}</ThemedText>
-        </View>
+      {row.value ? (
+        <ThemedText style={[styles.rowValue, { color: palette.textSecondary }]} numberOfLines={1}>
+          {row.value}
+        </ThemedText>
       ) : null}
       <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
     </Pressable>
   );
 }
 
-function Divider({ palette }: { palette: ReturnType<typeof usePalette> }) {
-  return <View style={[styles.divider, { backgroundColor: palette.separator }]} />;
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
-  header: { paddingHorizontal: Space[4], paddingTop: Space[2], paddingBottom: Space[3] },
-  title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
-  content: { paddingHorizontal: Space[4], gap: Space[3], paddingBottom: TabBarInset },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space[3],
-    padding: Space[4],
-    borderRadius: Radius.lg,
-  },
-  name: { fontSize: 17, fontWeight: '600' },
-  row: { padding: Space[4], borderRadius: Radius.lg },
+  // paddingTop 由 headerHeight 在运行时注入（让内容贴边滚动、可滑入状态栏下）。
+  content: { paddingHorizontal: Space[4], paddingBottom: TabBarInset, gap: Space[5] },
+  headerClip: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden', zIndex: 10 },
+  header: { width: '100%' },
+
+  profile: { flexDirection: 'row', alignItems: 'center', gap: Space[4], paddingVertical: Space[2] },
+  avatar: { width: 88, height: 88, borderRadius: Radius.full },
+  avatarFallback: { backgroundColor: CHIP_FILL, alignItems: 'center', justifyContent: 'center' },
+  profileText: { flex: 1, gap: Space[2] },
+  // 须显式给 lineHeight：ThemedText 默认 type 带 lineHeight:24，会裁掉更大字号的顶部。
+  name: { fontSize: 26, lineHeight: 34, fontWeight: '700' },
+  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: Space[1] },
+  phone: { fontSize: 15 },
+
   group: { borderRadius: Radius.lg, overflow: 'hidden' },
-  menuRow: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space[3],
     paddingHorizontal: Space[4],
-    paddingVertical: Space[4],
+    paddingVertical: Space[3],
+    minHeight: 60,
   },
-  menuLabel: { fontSize: 16, fontWeight: '500' },
-  divider: { height: StyleSheet.hairlineWidth, marginLeft: 52 },
-  badge: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: Radius.full,
+  chip: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.md,
+    backgroundColor: CHIP_FILL,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 6,
   },
-  badgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
+  rowLabel: { fontSize: 17, fontWeight: '500' },
+  rowValue: { fontSize: 15 },
+  // chip(40) + paddingLeft(16) + gap(12) = 68，分割线在标签下方对齐起。
+  divider: { height: StyleSheet.hairlineWidth, marginLeft: 68 },
+
+  signOut: { borderRadius: Radius.lg, alignItems: 'center', justifyContent: 'center', paddingVertical: Space[4] },
+  signOutText: { fontSize: 17, fontWeight: '600' },
 });

@@ -16,6 +16,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, TabBarInset, useCategoryColors, usePalette } from '@/constants/design';
 import { Donut } from '@/features/report/donut';
 import { MonthlySummarySheet } from '@/features/report/monthly-summary';
+import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { currentPeriod, formatAmount, signForNet } from '@/lib/format';
@@ -287,6 +288,7 @@ export default function ReportScreen() {
             onLayout={onHeaderLayout}
           >
             <ThemedText style={[styles.title, { color: palette.textPrimary }]}>报表</ThemedText>
+            <HeaderSearchButton />
           </Animated.View>
         </View>
       </View>
@@ -428,7 +430,14 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   headerClip: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden', zIndex: 10 },
-  header: { paddingHorizontal: Space[4], paddingTop: Space[2], paddingBottom: Space[3] },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Space[4],
+    paddingTop: Space[2],
+    paddingBottom: Space[3],
+  },
   title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
   segment: { flexDirection: 'row', borderRadius: Radius.md, padding: 3 },
   segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: Space[2] },

@@ -7,6 +7,7 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
 import { LoginScreen } from '@/features/auth/login-screen';
 import { NotificationGate } from '@/features/notifications/notification-gate';
+import { SearchProvider } from '@/features/search/search-provider';
 import { useSession } from '@/lib/auth';
 import { devAutoSignIn } from '@/lib/dev-auth';
 import { queryClient } from '@/lib/query-client';
@@ -33,7 +34,10 @@ export default function TabLayout() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <AnimatedSplashOverlay />
-        <AppTabs />
+        {/* 搜索单例：根级挂全屏搜索页，各 Tab 顶栏 🔍 共用（流程 14）。 */}
+        <SearchProvider>
+          <AppTabs />
+        </SearchProvider>
         {/* 已登录：关键通知兜底（被移除/解散/转让，流程 13）。 */}
         {session ? <NotificationGate /> : null}
         {/* 未登录时以全屏覆盖层显示登录页（流程 1）；session 出现后自动卸载。 */}

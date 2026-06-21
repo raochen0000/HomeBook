@@ -34,7 +34,7 @@ import {
   type RowData,
 } from '@/features/home/components';
 import { RecordSheet } from '@/features/record/record-sheet';
-import { SearchSheet } from '@/features/search/search-sheet';
+import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { useSession } from '@/lib/auth';
 import { budgetLevel, expenseUsedInPeriod } from '@/lib/budget';
@@ -94,7 +94,6 @@ export default function HomeScreen() {
     editing: null,
     familyId: '',
   });
-  const [searchOpen, setSearchOpen] = useState(false);
   // 保存成功的顶部轻提示。
   const [savedToast, setSavedToast] = useState(false);
 
@@ -206,8 +205,6 @@ export default function HomeScreen() {
     if (txn) setSheet({ open: true, editing: txn, familyId: txn.family_id });
   };
 
-  const onSearch = () => setSearchOpen(true);
-
   const month = new Date().getMonth() + 1;
   const loading = profileQ.isLoading || transactionsQ.isLoading || categoriesQ.isLoading;
 
@@ -280,9 +277,7 @@ export default function HomeScreen() {
                 {`${greetingForHour()}，掌握每一笔，生活更从容`}
               </ThemedText>
             </View>
-            <Pressable hitSlop={12} onPress={onSearch} style={styles.searchBtn}>
-              <SymbolView name="magnifyingglass" tintColor={palette.textPrimary} size={22} />
-            </Pressable>
+            <HeaderSearchButton style={styles.searchBtn} />
           </Animated.View>
         </View>
       </View>
@@ -305,9 +300,6 @@ export default function HomeScreen() {
         onSaved={() => setSavedToast(true)}
         onClose={() => setSheet({ open: false, editing: null, familyId: '' })}
       />
-
-      {/* 搜索（顶栏 🔍） */}
-      <SearchSheet visible={searchOpen} onClose={() => setSearchOpen(false)} />
 
       {/* 保存成功顶部轻提示 */}
       <Toast visible={savedToast} text="已记一笔" onHide={() => setSavedToast(false)} />

@@ -22,6 +22,7 @@ import { Radius, Space, TabBarInset, usePalette } from '@/constants/design';
 import { InviteSheet } from '@/features/family/invite-sheet';
 import { ScanSheet } from '@/features/family/scan-sheet';
 import { TransferSheet } from '@/features/family/transfer-sheet';
+import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 
 export default function FamilyScreen() {
@@ -230,6 +231,7 @@ export default function FamilyScreen() {
             onLayout={onHeaderLayout}
           >
             <ThemedText style={[styles.title, { color: palette.textPrimary }]}>家庭</ThemedText>
+            <HeaderSearchButton />
           </Animated.View>
         </View>
       </View>
@@ -270,7 +272,14 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   headerClip: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden', zIndex: 10 },
-  header: { paddingHorizontal: Space[4], paddingTop: Space[4], paddingBottom: Space[3] },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Space[4],
+    paddingTop: Space[4],
+    paddingBottom: Space[3],
+  },
   title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[3], paddingHorizontal: Space[6] },
   emptyActions: { width: '100%', gap: Space[3], marginTop: Space[4] },
