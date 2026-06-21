@@ -23,6 +23,7 @@ import {
   type Transaction,
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
+import { Toast } from '@/components/toast';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import {
   BalanceCard,
@@ -94,6 +95,8 @@ export default function HomeScreen() {
     familyId: '',
   });
   const [searchOpen, setSearchOpen] = useState(false);
+  // 保存成功的顶部轻提示。
+  const [savedToast, setSavedToast] = useState(false);
 
   // 金额显隐（眼睛）：启动时读回上次状态，切换时写入。
   const [amountsHidden, setAmountsHidden] = useState(false);
@@ -299,11 +302,15 @@ export default function HomeScreen() {
         editing={sheet.editing}
         familyId={sheet.familyId}
         recorderId={profileQ.data?.id ?? ''}
+        onSaved={() => setSavedToast(true)}
         onClose={() => setSheet({ open: false, editing: null, familyId: '' })}
       />
 
       {/* 搜索（顶栏 🔍） */}
       <SearchSheet visible={searchOpen} onClose={() => setSearchOpen(false)} />
+
+      {/* 保存成功顶部轻提示 */}
+      <Toast visible={savedToast} text="已记一笔" onHide={() => setSavedToast(false)} />
     </View>
   );
 }

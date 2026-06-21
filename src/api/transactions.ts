@@ -14,13 +14,15 @@ export type NewTransaction = Pick<
   'family_id' | 'type' | 'amount' | 'category_id' | 'recorder_user_id' | 'note' | 'occurred_at'
 >;
 
-/** 编辑流水可改字段（family_id 创建后不可变，不在此列；recorder/occurred 暂不改）。 */
+/** 编辑流水可改字段（family_id 创建后不可变，不在此列）。 */
 export type EditTransaction = {
   id: string;
   type: 'expense' | 'income';
   amount: number;
   category_id: string;
   note: string | null;
+  occurred_at: string;
+  recorder_user_id: string;
 };
 
 /** 当前家庭未删除流水，按记账时间倒序（RLS 已隔离家庭）。 */
