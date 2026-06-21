@@ -92,3 +92,73 @@ export function trendBuckets(
   }
   return buckets;
 }
+
+/** 维度 + 区间起点 → bucket 索引函数（与 trendBuckets 内部口径一致）。 */
+function bucketIndexer(dim: Dimension, rangeStart: Date): (d: Date) => number {
+  if (dim === 'week') return (d) => Math.floor((startOfDay(d).getTime() - startOfDay(rangeStart).getTime()) / 86400000);
+  if (dim === 'year') return (d) => d.getMonth();
+  return (d) => d.getDate() - 1;
+}
+
+export type CumulativeSeries = {
+  labels: string[];
+  /** 本期累计（进行中周期在「至今」之后为 null，不绘制）。 */
+  curr: (number | null)[];
+  /** 上期同区间累计（对齐到本期 bucket 数）。 */
+  prev: number[];
+  /** 截至「至今」的本期累计额。 */
+  currToDate: number;
+  /** 上期同期（同 bucket 位）累计额。 */
+  prevToDate: number;
+};
+
+/**
+ * 累计同期对比（PRD §11.5.1）：本期至今累计支出 vs 上期同区间累计支出。
+ * 两序列对齐到「本期」bucket 数（月维度下上月天数不同则按日序号对齐，越界数据丢弃）；
+ * 进行中周期的本期线在「今天」之后置 null（不绘制未来）。传入均为已按各自区间过滤的日常支出。
+ */
+export function cumulativeSeries(
+  dim: Dimension,
+  range: { start: Date },
+  prevRange: { start: Date },
+  isCurrent: boolean,
+  curExpenses: { occurred_at: string; amount: number }[],
+  prevExpenses: { occurred_at: string; amount: number }[],
+): CumulativeSeries {
+  const base = trendBuckets(dim, range, curExpenses);
+  const len = base.length;
+  const labels = base.map((b) => b.label);
+
+  const prevDaily = new Array<number>(len).fill(0);
+  const prevIdx = bucketIndexer(dim, prevRange.start);
+  for (const e of prevExpenses) {
+    const i = prevIdx(new Date(e.occurred_at));
+    if (i >= 0 && i < len) prevDaily[i] += e.amount;
+  }
+
+  const cutoff = isCurrent ? Math.min(len - 1, Math.max(0, bucketIndexer(dim, range.start)(new Date()))) : len - 1;
+
+  const curr: (number | null)[] = [];
+  const prev: number[] = [];
+  let ca = 0;
+  let pa = 0;
+  let currToDate = 0;
+  let prevToDate = 0;
+  for (let i = 0; i < len; i++) {
+    ca += base[i].value;
+    pa += prevDaily[i];
+    curr.push(i <= cutoff ? ca : null);
+    prev.push(pa);
+    if (i === cutoff) {
+      currToDate = ca;
+      prevToDate = pa;
+    }
+  }
+  return { labels, curr, prev, currToDate, prevToDate };
+}
+
+/** 结余率 = 结余 ÷ 收入（对账口径）。收入 ≤ 0 时无可比基数，返回 null。可为负（超支）。 */
+export function balanceRate(income: number, balance: number): number | null {
+  if (income <= 0) return null;
+  return balance / income;
+}

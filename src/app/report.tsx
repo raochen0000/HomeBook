@@ -1,8 +1,10 @@
 /**
- * 报表（Tab 2，流程 9 完整版）：周/月/年维度切换 + 收支结余概览 + 支出分类占比环形图
- * + 成员贡献条形图 + 消费趋势折线图 + 月度总结入口 + 分类明细下钻。
- * 口径（PRD §11）：收支结余统计全部流水（含储蓄类，对账）；分类占比/趋势/成员贡献仅算
- * 「支出 + source=normal」（排除储蓄类）。
+ * 报表（Tab 2，流程 9 完整版）：周/月/年维度切换 + 收支结余概览 + 结余率仪表 + 消费趋势折线
+ * + 累计同期对比双线 + 支出分类占比环形图 + 分类环比 + 成员贡献条形图 + 大额支出 Top 5
+ * + 收入结构环形图 + 月度总结入口 + 分类明细下钻。
+ * 口径（PRD §11）：收支结余 / 结余率统计全部流水（含储蓄类，对账）；分类占比 / 趋势 / 累计同期
+ * / 分类环比 / 成员贡献 / 大额 Top N 仅算「支出 + source=normal」；收入结构仅算 source=normal 收入
+ * （均排除储蓄类）。
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
@@ -14,13 +16,32 @@ import Svg, { Circle, Polyline } from 'react-native-svg';
 import { useCategories, useFamilyMembers, useMyProfile, useTransactions, type Transaction } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, TabBarInset, useCategoryColors, usePalette } from '@/constants/design';
+import {
+  BalanceGaugeCard,
+  CategoryMomCard,
+  CumulativeCard,
+  IncomeStructureCard,
+  TopExpensesCard,
+  type IncomeSlice,
+  type MomItem,
+  type TopItem,
+} from '@/features/report/advanced';
 import { Donut } from '@/features/report/donut';
 import { MonthlySummarySheet } from '@/features/report/monthly-summary';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { currentPeriod, formatAmount, signForNet } from '@/lib/format';
-import { inRange, isCurrentPeriod, periodRange, shiftAnchor, trendBuckets, type Dimension } from '@/lib/report';
+import {
+  balanceRate,
+  cumulativeSeries,
+  inRange,
+  isCurrentPeriod,
+  periodRange,
+  shiftAnchor,
+  trendBuckets,
+  type Dimension,
+} from '@/lib/report';
 
 type CatSlice = { id: string; name: string; amount: number; color: string; symbol: string };
 type Member = { id: string; name: string; amount: number };
@@ -49,9 +70,23 @@ export default function ReportScreen() {
   const [summaryOpen, setSummaryOpen] = useState(false);
 
   const range = useMemo(() => periodRange(dimension, anchor), [dimension, anchor]);
+  const prevRange = useMemo(() => periodRange(dimension, shiftAnchor(dimension, anchor, -1)), [dimension, anchor]);
   const isCurrent = isCurrentPeriod(dimension, anchor);
 
-  const { income, expense, balance, byCat, expenseTotal, members, trend } = useMemo(() => {
+  const {
+    income,
+    expense,
+    balance,
+    byCat,
+    expenseTotal,
+    members,
+    trend,
+    balRate,
+    cumulative,
+    momItems,
+    topItems,
+    incomeSlices,
+  } = useMemo(() => {
     const txns = txnsQ.data ?? [];
     const cats = catsQ.data ?? [];
     const mem = membersQ.data ?? [];
@@ -59,30 +94,60 @@ export default function ReportScreen() {
     const nameById = new Map(mem.map((m) => [m.id, m.nickname]));
     const myId = profileQ.data?.id;
 
+    // 分类展示信息（识别色 + 图标），分类环比里上期独有分类也要用。
+    const catDisplay = (id: string, type: 'income' | 'expense') => {
+      const cat = catById.get(id);
+      const cname = cat?.name ?? (type === 'income' ? '其他收入' : '未分类');
+      return {
+        name: cname,
+        color: catColors[categoryColorKey(cname, type)],
+        symbol: categorySymbol(cat?.icon ?? null, type),
+      };
+    };
+
     let inc = 0;
     let exp = 0;
     const catMap = new Map<string, CatSlice>();
     const memMap = new Map<string, Member>();
+    const incomeMap = new Map<string, IncomeSlice>();
     const consumExpenses: { occurred_at: string; amount: number }[] = [];
+    const prevConsumExpenses: { occurred_at: string; amount: number }[] = [];
+    const prevCatMap = new Map<string, number>(); // 上期分类消费额（环比基数）
+    const bigExpenses: TopItem[] = [];
 
     for (const t of txns) {
-      if (!inRange(t.occurred_at, range.start, range.end)) continue;
+      const inCur = inRange(t.occurred_at, range.start, range.end);
+      const inPrev = inRange(t.occurred_at, prevRange.start, prevRange.end);
+      if (!inCur && !inPrev) continue;
+
+      const isConsumExpense = t.type === 'expense' && t.source === 'normal';
+
+      if (inPrev) {
+        if (isConsumExpense) {
+          prevConsumExpenses.push({ occurred_at: t.occurred_at, amount: t.amount });
+          prevCatMap.set(t.category_id, (prevCatMap.get(t.category_id) ?? 0) + t.amount);
+        }
+        if (!inCur) continue; // 仅用于环比基数 / 累计上期线，不参与本期统计
+      }
+
+      // —— 以下为本期（inCur）——
       if (t.type === 'income') inc += t.amount;
       else exp += t.amount;
 
-      // 分类占比 / 成员贡献 / 趋势：仅支出 + 普通流水（排除储蓄类）
-      if (t.type === 'expense' && t.source === 'normal') {
+      // 收入结构：仅 source=normal 收入（排除储蓄取出）
+      if (t.type === 'income' && t.source === 'normal') {
+        const d = catDisplay(t.category_id, 'income');
+        const entry = incomeMap.get(t.category_id) ?? { id: t.category_id, ...d, amount: 0 };
+        entry.amount += t.amount;
+        incomeMap.set(t.category_id, entry);
+      }
+
+      // 分类占比 / 成员贡献 / 趋势 / 大额 Top N：仅支出 + 普通流水（排除储蓄类）
+      if (isConsumExpense) {
         consumExpenses.push({ occurred_at: t.occurred_at, amount: t.amount });
 
-        const cat = catById.get(t.category_id);
-        const cname = cat?.name ?? '未分类';
-        const entry = catMap.get(t.category_id) ?? {
-          id: t.category_id,
-          name: cname,
-          amount: 0,
-          color: catColors[categoryColorKey(cname, 'expense')],
-          symbol: categorySymbol(cat?.icon ?? null, 'expense'),
-        };
+        const d = catDisplay(t.category_id, 'expense');
+        const entry = catMap.get(t.category_id) ?? { id: t.category_id, ...d, amount: 0 };
         entry.amount += t.amount;
         catMap.set(t.category_id, entry);
 
@@ -90,10 +155,39 @@ export default function ReportScreen() {
         const me = memMap.get(t.recorder_user_id) ?? { id: t.recorder_user_id, name: who, amount: 0 };
         me.amount += t.amount;
         memMap.set(t.recorder_user_id, me);
+
+        bigExpenses.push({
+          id: t.id,
+          note: t.note ?? '',
+          category: d.name,
+          color: d.color,
+          symbol: d.symbol,
+          amount: t.amount,
+          date: new Date(t.occurred_at).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }),
+        });
       }
     }
 
     const list = Array.from(catMap.values()).sort((a, b) => b.amount - a.amount);
+
+    // 分类环比：本期分类 + 仅上期出现的分类（本期为 0），按本期金额降序。
+    const momMap = new Map<string, MomItem>();
+    for (const c of list)
+      momMap.set(c.id, {
+        id: c.id,
+        name: c.name,
+        color: c.color,
+        symbol: c.symbol,
+        cur: c.amount,
+        prev: prevCatMap.get(c.id) ?? 0,
+      });
+    for (const [id, prevAmt] of prevCatMap) {
+      if (momMap.has(id)) continue;
+      const d = catDisplay(id, 'expense');
+      momMap.set(id, { id, ...d, cur: 0, prev: prevAmt });
+    }
+    const mom = Array.from(momMap.values()).sort((a, b) => b.cur - a.cur || b.prev - a.prev);
+
     return {
       income: inc,
       expense: exp,
@@ -102,8 +196,13 @@ export default function ReportScreen() {
       expenseTotal: list.reduce((s, x) => s + x.amount, 0),
       members: Array.from(memMap.values()).sort((a, b) => b.amount - a.amount),
       trend: trendBuckets(dimension, range, consumExpenses),
+      balRate: balanceRate(inc, inc - exp),
+      cumulative: cumulativeSeries(dimension, range, prevRange, isCurrent, consumExpenses, prevConsumExpenses),
+      momItems: mom,
+      topItems: bigExpenses.sort((a, b) => b.amount - a.amount).slice(0, 5),
+      incomeSlices: Array.from(incomeMap.values()).sort((a, b) => b.amount - a.amount),
     };
-  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, range, dimension, catColors]);
+  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, range, prevRange, isCurrent, dimension, catColors]);
 
   const loading = txnsQ.isLoading || catsQ.isLoading;
   const memberMax = Math.max(1, ...members.map((m) => m.amount));
@@ -189,11 +288,17 @@ export default function ReportScreen() {
               </View>
             </View>
 
+            {/* 结余率仪表 */}
+            <BalanceGaugeCard rate={balRate} palette={palette} />
+
             {/* 消费趋势 */}
             <View style={[styles.card, { backgroundColor: palette.card }]}>
               <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>消费趋势</ThemedText>
               <TrendChart buckets={trend} palette={palette} />
             </View>
+
+            {/* 累计同期对比 */}
+            <CumulativeCard series={cumulative} palette={palette} />
 
             {/* 支出分类占比 */}
             <View style={[styles.card, { backgroundColor: palette.card }]}>
@@ -239,6 +344,9 @@ export default function ReportScreen() {
               )}
             </View>
 
+            {/* 分类环比 */}
+            <CategoryMomCard items={momItems} palette={palette} />
+
             {/* 成员贡献 */}
             {members.length > 0 ? (
               <View style={[styles.card, { backgroundColor: palette.card }]}>
@@ -267,6 +375,12 @@ export default function ReportScreen() {
                 </View>
               </View>
             ) : null}
+
+            {/* 大额支出 Top 5 */}
+            <TopExpensesCard items={topItems} palette={palette} />
+
+            {/* 收入结构 */}
+            <IncomeStructureCard slices={incomeSlices} palette={palette} />
 
             {/* 月度总结入口 */}
             <Pressable
