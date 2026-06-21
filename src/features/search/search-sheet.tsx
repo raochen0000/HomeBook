@@ -19,6 +19,7 @@ import {
 } from '@expo/ui/swift-ui';
 import {
   background,
+  contentShape,
   cornerRadius,
   datePickerStyle,
   font,
@@ -28,6 +29,7 @@ import {
   onTapGesture,
   padding,
   shadow,
+  shapes,
 } from '@expo/ui/swift-ui/modifiers';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
@@ -502,7 +504,12 @@ function ResultRow({ row, onPress }: { row: ResultRowData; onPress: (id: string)
     <HStack
       spacing={Space[3]}
       alignment="center"
-      modifiers={[padding({ vertical: Space[3], horizontal: Space[4] }), onTapGesture(() => onPress(row.id))]}
+      modifiers={[
+        padding({ vertical: Space[3], horizontal: Space[4] }),
+        // 整行（含 Spacer 空隙）都可点，否则结果行留白处点不动
+        contentShape(shapes.rectangle()),
+        onTapGesture(() => onPress(row.id)),
+      ]}
     >
       <CategoryAvatar symbol={row.symbol} color={row.iconColor} />
       <VStack alignment="leading" spacing={2}>

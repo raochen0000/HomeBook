@@ -6,6 +6,7 @@ import { HStack, Image, RoundedRectangle, Spacer, Text, VStack, ZStack } from '@
 import {
   background,
   clipShape,
+  contentShape,
   cornerRadius,
   font,
   foregroundColor,
@@ -14,6 +15,7 @@ import {
   onTapGesture,
   padding,
   shadow,
+  shapes,
 } from '@expo/ui/swift-ui/modifiers';
 import type { ComponentProps } from 'react';
 
@@ -91,7 +93,8 @@ function TransactionRow({ row, onPress }: { row: RowData; onPress?: (id: string)
       alignment="center"
       modifiers={[
         padding({ vertical: Space[3], horizontal: Space[4] }),
-        ...(onPress ? [onTapGesture(() => onPress(row.id))] : []),
+        // 整行（含 Spacer 空隙）都可点：SwiftUI 默认只命中 Text/Image，缺此则标题与金额间的留白点不动
+        ...(onPress ? [contentShape(shapes.rectangle()), onTapGesture(() => onPress(row.id))] : []),
       ]}
     >
       <CategoryAvatar symbol={row.symbol} color={row.iconColor} />
