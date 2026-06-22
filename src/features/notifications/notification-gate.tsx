@@ -62,7 +62,7 @@ function Banner({ notif, onDismiss }: { notif: Notification; onDismiss: () => vo
   const famName = payload?.family_name ? `「${payload.family_name}」` : '家庭';
   return (
     <View style={[styles.banner, { backgroundColor: palette.bannerTint }]}>
-      <SymbolView name="checkmark.seal.fill" tintColor={palette.warning} size={18} />
+      <SymbolView name="checkmark.seal.fill" tintColor={palette.textSecondary} size={18} />
       <Text style={[styles.bannerText, { color: palette.textPrimary }]}>你已成为{famName}的户主</Text>
       <Pressable hitSlop={8} onPress={onDismiss}>
         <SymbolView name="xmark" tintColor={palette.textTertiary} size={14} />

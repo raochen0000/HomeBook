@@ -242,7 +242,7 @@ function Body({ period, onClose }: { period: string; onClose: () => void }) {
             </View>
 
             <View style={[styles.warmCard, { backgroundColor: palette.bannerTint }]}>
-              <SymbolView name="sparkles" tintColor={palette.warning} size={18} />
+              <SymbolView name="sparkles" tintColor={palette.textSecondary} size={18} />
               <Text style={[styles.warmText, { color: palette.textPrimary }]}>{summary.warm}</Text>
             </View>
           </ScrollView>

@@ -367,7 +367,7 @@ export function InsightBanner({ title, subtitle, onPress }: { title: string; sub
         ...(onPress ? [onTapGesture(() => onPress())] : []),
       ]}
     >
-      <Image systemName="calendar" size={22} color={palette.warning} />
+      <Image systemName="calendar" size={22} color={palette.textSecondary} />
       <VStack alignment="leading" spacing={2}>
         <Text modifiers={[font({ size: 15, weight: 'medium' }), foregroundColor(palette.textPrimary)]}>{title}</Text>
         <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{subtitle}</Text>

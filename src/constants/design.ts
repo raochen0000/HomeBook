@@ -55,7 +55,7 @@ type Palette = {
   /** 强调（主 CTA / FAB） */
   accent: string;
   onAccent: string;
-  /** 信息条幅暖底 */
+  /** 信息条幅 / 徽标底（中性 systemFill，DESIGN v0.5.0 去暖色） */
   bannerTint: string;
   shadow: string;
   /** 卡内胶囊（周期选择器）底色（中性 systemFill） */
@@ -81,7 +81,7 @@ const light: Palette = {
   separator: 'rgba(60,60,67,0.18)',
   accent: '#1C1C1E',
   onAccent: '#FFFFFF',
-  bannerTint: '#FBE6D4',
+  bannerTint: 'rgba(120,120,128,0.12)',
   shadow: 'rgba(0,0,0,0.06)',
   cardPill: 'rgba(120,120,128,0.12)',
 };
@@ -101,7 +101,7 @@ const dark: Palette = {
   separator: 'rgba(84,84,88,0.6)',
   accent: '#F2F2F7',
   onAccent: '#1C1C1E',
-  bannerTint: '#2E2820',
+  bannerTint: 'rgba(120,120,128,0.24)',
   shadow: 'rgba(0,0,0,0.4)',
   cardPill: 'rgba(255,255,255,0.12)',
 };

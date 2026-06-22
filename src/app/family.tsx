@@ -268,8 +268,8 @@ export default function FamilyScreen() {
             <View style={[styles.hero, { backgroundColor: palette.bannerTint }]}>
               <View style={styles.heroHead}>
                 <View style={styles.heroTop}>
-                  <View style={[styles.heroBadge, { backgroundColor: palette.warning }]}>
-                    <ThemedText style={styles.heroBadgeText}>家</ThemedText>
+                  <View style={[styles.heroBadge, { backgroundColor: palette.accent }]}>
+                    <ThemedText style={[styles.heroBadgeText, { color: palette.onAccent }]}>家</ThemedText>
                   </View>
                   <View style={styles.flex}>
                     <ThemedText style={[styles.heroName, { color: palette.textPrimary }]}>{family.name}</ThemedText>
@@ -279,13 +279,13 @@ export default function FamilyScreen() {
                         {family.member_count} 位成员
                       </ThemedText>
                       {isOwner ? (
-                        <View style={[styles.roleBadge, { backgroundColor: palette.card }]}>
-                          <ThemedText style={[styles.roleBadgeText, { color: palette.warning }]}>户主</ThemedText>
+                        <View style={[styles.roleBadge, { backgroundColor: palette.bannerTint }]}>
+                          <ThemedText style={[styles.roleBadgeText, { color: palette.textPrimary }]}>户主</ThemedText>
                         </View>
                       ) : null}
                     </View>
                   </View>
-                  <SymbolView name="house.fill" tintColor={palette.warning} size={34} style={styles.heroHouse} />
+                  <SymbolView name="house.fill" tintColor={palette.textTertiary} size={34} style={styles.heroHouse} />
                 </View>
                 <ThemedText style={[styles.heroTagline, { color: palette.textSecondary }]}>
                   一起记录生活，温暖每一天
@@ -293,25 +293,11 @@ export default function FamilyScreen() {
               </View>
 
               <View style={[styles.heroStats, { backgroundColor: palette.card }]}>
-                <HeroStat
-                  icon="book.closed.fill"
-                  tint={palette.income}
-                  bg="#FDE8E3"
-                  value={`${stats.monthCount}`}
-                  unit="笔"
-                  label="本月已记账"
-                />
+                <HeroStat icon="book.closed.fill" value={`${stats.monthCount}`} unit="笔" label="本月已记账" />
                 <View style={[styles.heroStatDivider, { backgroundColor: palette.separator }]} />
-                <HeroStat
-                  icon="flame.fill"
-                  tint={palette.info}
-                  bg="#E3EEFB"
-                  value={`${stats.streak}`}
-                  unit="天"
-                  label="已连续记账"
-                />
+                <HeroStat icon="flame.fill" value={`${stats.streak}`} unit="天" label="已连续记账" />
                 <View style={[styles.heroStatDivider, { backgroundColor: palette.separator }]} />
-                <HeroStat icon="calendar" tint={palette.expense} bg="#E4F3EB" value={createdLabel} label="创建家庭" />
+                <HeroStat icon="calendar" value={createdLabel} label="创建家庭" />
               </View>
             </View>
 
@@ -392,7 +378,7 @@ export default function FamilyScreen() {
                               <ThemedText
                                 style={[
                                   styles.roleBadgeText,
-                                  { color: m.role === 'owner' ? palette.warning : palette.textSecondary },
+                                  { color: m.role === 'owner' ? palette.textPrimary : palette.textSecondary },
                                 ]}
                               >
                                 {m.role === 'owner' ? '户主' : '成员'}
@@ -431,35 +417,15 @@ export default function FamilyScreen() {
               <View style={styles.quickRow}>
                 <QuickTile
                   icon="chart.pie.fill"
-                  tint={palette.warning}
                   title="预算管理"
                   sub="查看与设置"
                   onPress={() => setBudgetOpen(true)}
                 />
-                <QuickTile
-                  icon="target"
-                  tint={palette.expense}
-                  title="储蓄目标"
-                  sub="共同攒钱"
-                  onPress={() => setSavingsOpen(true)}
-                />
-                <QuickTile
-                  icon="person.crop.circle.badge.plus"
-                  tint={palette.info}
-                  title="邀请家人"
-                  sub="加入家庭"
-                  onPress={onInvite}
-                />
-                <QuickTile
-                  icon="bell.fill"
-                  tint="#9B6DD6"
-                  title="家庭通知"
-                  sub="重要提醒"
-                  onPress={() => setNotifyOpen(true)}
-                />
+                <QuickTile icon="target" title="储蓄目标" sub="共同攒钱" onPress={() => setSavingsOpen(true)} />
+                <QuickTile icon="person.crop.circle.badge.plus" title="邀请家人" sub="加入家庭" onPress={onInvite} />
+                <QuickTile icon="bell.fill" title="家庭通知" sub="重要提醒" onPress={() => setNotifyOpen(true)} />
                 <QuickTile
                   icon="square.grid.2x2.fill"
-                  tint="#2AB3C0"
                   title="分类管理"
                   sub="增改分类"
                   onPress={() => setCategoryOpen(true)}
@@ -544,15 +510,11 @@ export default function FamilyScreen() {
 // ── Hero 单项统计：图标 + 数值 + 标签 ──
 function HeroStat({
   icon,
-  tint,
-  bg,
   value,
   unit,
   label,
 }: {
   icon: SymbolViewProps['name'];
-  tint: string;
-  bg: string;
   value: string;
   unit?: string;
   label: string;
@@ -560,8 +522,8 @@ function HeroStat({
   const palette = usePalette();
   return (
     <View style={styles.heroStat}>
-      <View style={[styles.heroStatIcon, { backgroundColor: bg }]}>
-        <SymbolView name={icon} tintColor={tint} size={15} />
+      <View style={[styles.heroStatIcon, { backgroundColor: palette.bannerTint }]}>
+        <SymbolView name={icon} tintColor={palette.textSecondary} size={15} />
       </View>
       <View style={styles.heroStatBody}>
         <View style={styles.heroStatValueRow}>
@@ -632,13 +594,11 @@ function OverviewCol({
 // ── 快捷功能瓦片 ──
 function QuickTile({
   icon,
-  tint,
   title,
   sub,
   onPress,
 }: {
   icon: SymbolViewProps['name'];
-  tint: string;
   title: string;
   sub: string;
   onPress: () => void;
@@ -646,7 +606,7 @@ function QuickTile({
   const palette = usePalette();
   return (
     <Pressable onPress={onPress} style={[styles.quickTile, { backgroundColor: palette.card }]}>
-      <SymbolView name={icon} tintColor={tint} size={26} />
+      <SymbolView name={icon} tintColor={palette.accent} size={26} />
       <ThemedText style={[styles.quickTitle, { color: palette.textPrimary }]}>{title}</ThemedText>
       <ThemedText style={[styles.quickSub, { color: palette.textTertiary }]}>{sub}</ThemedText>
     </Pressable>
@@ -715,7 +675,7 @@ const styles = StyleSheet.create({
   heroHead: { gap: Space[2] },
   heroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Space[3] },
   heroBadge: { width: 52, height: 52, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
-  heroBadgeText: { color: '#FFFFFF', fontSize: 26, lineHeight: 32, fontWeight: '700' },
+  heroBadgeText: { fontSize: 26, lineHeight: 32, fontWeight: '700' },
   heroName: { fontSize: 22, lineHeight: 28, fontWeight: '700' },
   heroMetaRow: { flexDirection: 'row', alignItems: 'center', gap: Space[1], marginTop: 2 },
   heroMeta: { fontSize: 13, lineHeight: 18 },
