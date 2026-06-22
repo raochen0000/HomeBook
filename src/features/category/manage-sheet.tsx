@@ -68,6 +68,9 @@ const ICON_CHOICES = [
 
 type ViewState = { mode: 'list' } | { mode: 'new'; type: CategoryType } | { mode: 'edit'; category: Category };
 
+/** 兜底分类不可隐藏，保证记账时每种类型至少有一个可选分类。 */
+const PROTECTED_SYSTEM_NAMES = new Set(['其他支出', '其他收入']);
+
 export function CategoryManageSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -100,9 +103,14 @@ function List({
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
   const catsQ = useCategories();
+  const hiddenQ = useHiddenCategoryIds();
   const archiveM = useArchiveCategory();
+  const hideM = useHideSystemCategory();
+  const unhideM = useUnhideSystemCategory();
 
   const isOwner = !!familyQ.data && familyQ.data.owner_user_id === profileQ.data?.id;
+  const familyId = familyQ.data?.id;
+  const hidden = hiddenQ.data ?? new Set<string>();
   const [type, setType] = useState<CategoryType>('expense');
 
   const { system, custom } = useMemo(() => {
@@ -134,8 +142,35 @@ function List({
     ]);
   };
 
+  const onToggleHide = (c: Category) => {
+    if (!isOwner) {
+      Alert.alert('仅户主可操作', '隐藏/显示系统分类会影响全家，请联系户主操作。');
+      return;
+    }
+    if (!familyId) return;
+    const isHidden = hidden.has(c.id);
+    const run = async () => {
+      try {
+        if (isHidden) await unhideM.mutateAsync({ familyId, categoryId: c.id });
+        else await hideM.mutateAsync({ familyId, categoryId: c.id });
+      } catch (e) {
+        Alert.alert(isHidden ? '显示失败' : '隐藏失败', (e as Error).message ?? String(e));
+      }
+    };
+    if (isHidden) {
+      void run(); // 恢复显示无需确认
+      return;
+    }
+    Alert.alert('隐藏分类', `隐藏「${c.name}」后，记账时将不再出现；可随时恢复。已记录的流水不受影响。`, [
+      { text: '取消', style: 'cancel' },
+      { text: '隐藏', style: 'destructive', onPress: () => void run() },
+    ]);
+  };
+
   const renderRow = (c: Category, editable: boolean) => {
     const color = catColors[categoryColorKey(c.name, type)];
+    const isHidden = c.is_system && hidden.has(c.id);
+    const isProtected = c.is_system && PROTECTED_SYSTEM_NAMES.has(c.name);
     return (
       <Pressable
         key={c.id}
@@ -143,13 +178,22 @@ function List({
         disabled={!editable}
         onPress={editable ? () => setView({ mode: 'edit', category: c }) : undefined}
       >
-        <View style={[styles.iconDot, { backgroundColor: color }]}>
+        <View style={[styles.iconDot, { backgroundColor: color, opacity: isHidden ? 0.4 : 1 }]}>
           <SymbolView name={(c.icon ?? 'circle.fill') as SymbolViewProps['name']} tintColor="#FFFFFF" size={17} />
         </View>
-        <Text style={[styles.rowName, { color: palette.textPrimary }]}>{c.name}</Text>
+        <Text style={[styles.rowName, { color: palette.textPrimary, opacity: isHidden ? 0.4 : 1 }]}>{c.name}</Text>
         <View style={styles.flex} />
         {c.is_system ? (
-          <Text style={[styles.sysTag, { color: palette.textTertiary }]}>系统</Text>
+          isProtected ? (
+            <Text style={[styles.sysTag, { color: palette.textTertiary }]}>系统</Text>
+          ) : (
+            <>
+              {isHidden ? <Text style={[styles.sysTag, { color: palette.textTertiary }]}>已隐藏</Text> : null}
+              <Pressable hitSlop={10} onPress={() => onToggleHide(c)} style={styles.archiveBtn}>
+                <SymbolView name={isHidden ? 'eye.slash' : 'eye'} tintColor={palette.textSecondary} size={20} />
+              </Pressable>
+            </>
+          )
         ) : (
           <>
             <Pressable hitSlop={10} onPress={() => onArchive(c)} style={styles.archiveBtn}>
