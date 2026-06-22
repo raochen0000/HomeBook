@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   useBudget,
   useCategories,
+  useHiddenCategoryIds,
   useMyFamily,
   useMyProfile,
   useSaveBudget,
@@ -211,12 +212,15 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
   const familyQ = useMyFamily();
   const budgetQ = useBudget(period);
   const catsQ = useCategories('expense');
+  const hiddenQ = useHiddenCategoryIds();
   const saveM = useSaveBudget();
 
-  const expenseCats = useMemo<Category[]>(
-    () => (catsQ.data ?? []).filter((c) => !c.name.startsWith('储蓄·')),
-    [catsQ.data],
-  );
+  // 选择器剔除本家庭隐藏的系统分类；但保留「已设过预算」的分类，避免编辑时丢失既有分配。
+  const expenseCats = useMemo<Category[]>(() => {
+    const hidden = hiddenQ.data ?? new Set<string>();
+    const budgeted = new Set((budgetQ.data?.categories ?? []).map((c) => c.category_id));
+    return (catsQ.data ?? []).filter((c) => !c.name.startsWith('储蓄·') && (!hidden.has(c.id) || budgeted.has(c.id)));
+  }, [catsQ.data, hiddenQ.data, budgetQ.data]);
 
   const [total, setTotal] = useState(
     budgetQ.data?.budget?.total_amount ? (budgetQ.data.budget.total_amount / 100).toString() : '',

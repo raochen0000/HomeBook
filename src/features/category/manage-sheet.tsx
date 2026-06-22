@@ -1,7 +1,8 @@
 /**
- * 分类管理（流程 11）：查看系统/自定义分类，新增、编辑、停用自定义分类。
- * - 所有成员可新增/编辑；仅户主可停用自定义分类（UI 校验，RLS 允许家庭成员写）。
- * - 系统预设分类只读（family_id=null 全局只读，停用/隐藏需后端扩展，本期不做）。
+ * 分类管理（流程 11）：查看系统/自定义分类，新增、编辑、停用自定义分类，按家庭隐藏系统分类。
+ * - 所有成员可新增/编辑；仅户主可停用自定义分类、隐藏/显示系统分类（UI 校验，RLS 允许家庭成员写）。
+ * - 系统预设分类全局只读，但家庭可隐藏不用的系统分类（family_hidden_categories 覆盖表，MVP §2.4）。
+ *   「其他支出 / 其他收入」作兜底不可隐藏；「储蓄·*」走专门入口、从列表过滤。
  * 单 Modal 内以 view 状态在「列表 / 编辑器」间切换，避免嵌套 Modal。
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
@@ -13,8 +14,11 @@ import {
   useArchiveCategory,
   useCategories,
   useCreateCategory,
+  useHiddenCategoryIds,
+  useHideSystemCategory,
   useMyFamily,
   useMyProfile,
+  useUnhideSystemCategory,
   useUpdateCategory,
   type Category,
   type CategoryType,

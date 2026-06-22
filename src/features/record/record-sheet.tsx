@@ -29,6 +29,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   useCategories,
   useCreateTransaction,
+  useHiddenCategoryIds,
   useMemberships,
   useSoftDeleteTransaction,
   useUpdateTransaction,
@@ -90,6 +91,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   const catColors = useCategoryColors();
 
   const categoriesQ = useCategories();
+  const hiddenQ = useHiddenCategoryIds();
   const membersQ = useMemberships();
   const createM = useCreateTransaction();
   const updateM = useUpdateTransaction();
@@ -113,12 +115,16 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   const showRecorder = members.length > 0;
   const recorderName = members.find((m) => m.userId === recorderUserId)?.nickname ?? '我';
 
-  // 可手动选择的分类：当前类型 + 排除储蓄类系统分类（储蓄走专门入口，PRD 口径）。
+  // 可手动选择的分类：当前类型 + 排除储蓄类系统分类（储蓄走专门入口，PRD 口径）+ 排除本家庭隐藏的系统分类。
   // 仅显示当前 Tab 类型——支出 Tab 不混入收入分类，反之亦然。
+  // 编辑时若该笔原分类已被家庭隐藏，仍保留它，便于查看/保留原分类。
   const categories = useMemo<Category[]>(() => {
+    const hidden = hiddenQ.data ?? new Set<string>();
     const all = categoriesQ.data ?? [];
-    return all.filter((c) => c.type === type && !c.name.startsWith('储蓄·'));
-  }, [categoriesQ.data, type]);
+    return all.filter(
+      (c) => c.type === type && !c.name.startsWith('储蓄·') && (!hidden.has(c.id) || c.id === editing?.category_id),
+    );
+  }, [categoriesQ.data, hiddenQ.data, type, editing?.category_id]);
 
   // 有效分类：用户已选且仍合法则用之，否则落到当前类型第一项（在 render 期派生，不用 effect）。
   const effectiveCategoryId = useMemo(() => {

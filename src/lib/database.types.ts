@@ -150,6 +150,24 @@ export type Database = {
         };
         Relationships: [];
       };
+      family_hidden_categories: {
+        Row: {
+          family_id: string;
+          category_id: string;
+          created_at: string;
+        };
+        Insert: {
+          family_id: string;
+          category_id: string;
+          created_at?: string;
+        };
+        Update: {
+          family_id?: string;
+          category_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       savings_goals: {
         Row: {
           id: string;
