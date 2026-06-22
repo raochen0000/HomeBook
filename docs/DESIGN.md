@@ -1,10 +1,35 @@
 # 家账 · 视觉设计规范 & 设计系统（DESIGN）
 
-> 文档版本：v0.4.2（新增「加入家庭」专项控件：6 段邀请码输入（自定义层）+ 家庭预览卡（封面 banner + 户主显名 + 成员头像堆叠 + 影响提示行）+ 邀请页文本码 3+3 分段展示与一键复制 + 家庭设置页封面选择器；对应 PRD 流程 3/4、§3.5）
-> 最后更新：2026-06-21
+> 文档版本：v0.5.0（**去品牌温度，回归 iOS 26 原生中性风格**——参考「提醒事项」式的克制系统观感：移除强调橙、暖色插画、蓝渐变 hero、暖色信息底、今日格言条、礼花/庆祝粒子与 Warm 画布变体；仅保留 Light / Night 两种模式。**功能色保留**：收支红绿语义色、分类识别彩色圆底。详见下「v0.5.0 变更摘要」）
+> 最后更新：2026-06-22
 > 关联文档：PRD.md（v0.1.1，对应 §22）、IA.md、MVP.md、DATAMODEL.md、TECH.md
 > 负责人：产品组 / 设计 / 客户端
 > 用途：作为「家账」App 视觉与组件实现的单一事实来源（Single Source of Truth）。
+
+---
+
+## v0.5.0 变更摘要（相对 v0.4.2）
+
+**主旨：从「温暖家庭」品牌叙事切换为「iOS 26 原生中性」叙事**，对齐「提醒事项」式的克制系统观感，页面尽量简洁、不堆无关色彩、不设主题色 / 家庭温暖色，仅保留 **Light / Night** 两种模式。
+
+**移除（品牌温度元素）：**
+
+1. **强调橙 `#FF8A4C`**（§5.2 记一笔 FAB）：FAB 不再用品牌橙，改用 `accent/primary`（近黑 / 近白）或系统 tint。
+2. **蓝渐变 hero 卡 `cardGradient`**（§5.3 / 首页结余卡）：去渐变，改纯色卡 + 灰阶/分隔线表达层级。
+3. **暖色信息底 `bannerTint`（`#FBE6D4`）**（家庭页 hero / 角标 / 预警条 / 月度卡 / 通知条）：改中性 `bg/card` / 系统语义底。
+4. **今日格言条**（§5.3 记账面板底部）：删除（纯装饰）。
+5. **礼花 / 庆祝粒子**（§5.8 / §12 储蓄达成、首次记账、月度总结）：删除，达成反馈退化为系统级 `success` haptic + 轻量文案。
+6. **暖色手绘插画**（空状态 / 家庭页 / 庆祝）：改 SF Symbols + 中性文案。
+7. **Warm 画布变体**（§4.3）：删除（v1 本就固定 Cool，现彻底移除暖色变体预案）。
+8. **远期「引入品牌色（品牌橙）」预案**（§16）：移除——明确不引入主题色。
+
+**保留（功能色，非品牌色）：**
+
+- **收支红绿语义色**（§4.2.2）：记账 App 的功能色，配合 `+/-` 符号与文案，非装饰。
+- **分类识别彩色圆底**（§9.1）：功能识别色（类比「提醒事项」每个清单的彩色图标圆），纯前端映射、不入库。
+- 中性灰阶 / 间距 / 圆角令牌：本就对齐 iOS systemGray，无需改。
+
+> 一句话：**系统外壳交给系统、内容主体中性实心、颜色只在「收支」与「分类识别」两处承担功能含义，不再承载品牌温度。**
 
 ---
 
@@ -54,7 +79,7 @@
 - **核心原则（优先级从高到低）**：
   1. **能用 `@expo/ui/swift-ui` 原生件实现的，一律用原生件**（Button、List、Form、Section、TabView、BottomSheet、Picker、DatePicker、Toggle、Slider、ProgressView、Gauge、Text、Image 等）。
   2. 原生件能渲染但需要调样式的，**通过 `modifiers`（`@expo/ui/swift-ui/modifiers`）调整**，不绕过框架。
-  3. **库确实做不到的**（自定义数字键盘、报表图表、礼花/庆祝粒子、滑动确认控件等），才退回**自定义 RN 组件 / `react-native-skia` / `react-native-reanimated`**，并经 `RNHostView` / `Host` 边界与原生界面拼接。
+  3. **库确实做不到的**（自定义数字键盘、报表图表、滑动确认控件等），才退回**自定义 RN 组件 / `react-native-skia` / `react-native-reanimated`**，并经 `RNHostView` / `Host` 边界与原生界面拼接。
 - **判定顺序**：做任一界面前，先问「`@expo/ui/swift-ui` 有没有对应组件？」→ 有则用 → 样式不够则加 modifier →（仅在）确实不行 → 自定义并在 §5 登记。
 
 ### 1.2 三类实现层（设计与工程的共同语言）
@@ -63,15 +88,17 @@
 | --------------------- | ------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------ |
 | **L-Native 原生层**   | `@expo/ui/swift-ui` 原生 SwiftUI 件  | 通过 `modifiers` 传入（见 §4.4 矩阵）         | 设置 / 家庭 / 成员列表（Form/List）、按钮、开关、选择器、进度、原生 Sheet 外壳 |
 | **L-Bridge 桥接层**   | 原生件包裹自定义内容（`RNHostView`） | 外壳令牌走原生 modifier，内部令牌走自定义画布 | 记账 BottomSheet（原生壳 + 自定义键盘）                                        |
-| **L-Custom 自定义层** | RN `View`/`Text` / Skia / Reanimated | 令牌**全量生效**（直接读 theme 对象）         | 报表图表、礼花庆祝、滑动确认、金额大数键盘                                     |
+| **L-Custom 自定义层** | RN `View`/`Text` / Skia / Reanimated | 令牌**全量生效**（直接读 theme 对象）         | 报表图表、滑动确认、金额大数键盘                                               |
 
 > **工程纪律**：进入 `Host` 内部后**没有 flexbox / Yoga**，布局只能用 `HStack` / `VStack` / `Spacer`；自定义层才回到 RN 的 flexbox。两层切换必须显式跨 `Host` 边界。
 
-### 1.3 品牌气质与核心张力
+### 1.3 设计气质与核心原则
 
-- **关键词**：温暖（Warm）、克制（Calm）、归属感（Belonging）。
-- **核心张力与解法**：金融数据要「理性、精确、可信」，家庭场景要「柔软、有温度」。
-  解法 = **结构理性（原生 iOS 组件骨架、8pt 节奏、等宽数字、清晰层级）+ 表皮柔软（中性留白、圆角、暖色手绘插画、收支柔和语义色）**。
+- **关键词**：克制（Calm）、清晰（Clear）、原生（Native）。
+- **核心原则**：**视觉服从内容**——金融数据要「理性、精确、可信」，界面就该安静、不抢戏。
+  做法 = **结构理性（原生 iOS 组件骨架、8pt 节奏、等宽数字、清晰层级）+ 表皮中性（系统灰阶留白、圆角、SF Symbols、收支与分类的功能色）**。
+- **不设主题色 / 品牌温暖色**：颜色只在两处承担**功能**含义——收支语义（红 / 绿）与分类识别（彩色圆底）；其余一律中性。强调色取近黑 / 近白（`accent/primary`），跟随 Light / Night 反相。
+- 参照「提醒事项」式的系统观感：大量留白、系统材质 chrome、列表为主、装饰极少。
 - 原生件天然带来一致的 iOS 观感、Dynamic Type、VoiceOver、Light/Night、同心圆角，这些是 native-first 的「免费红利」，设计上应主动借力而非重造（见 §13、§15）。
 
 ### 1.4 与流程图配色的关系
@@ -112,9 +139,9 @@ iOS 26 的系统材质是 **Liquid Glass**。原生 SwiftUI 的系统 chrome（`
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | **系统 chrome**（导航栏 / Tab Bar / 原生 Sheet 外壳 / toolbar） | **顺应 iOS 26 系统材质**（可含 Liquid Glass），不主动覆盖、不强制实心                    |
 | **内容层**（卡片、流水行、报表、金额区、表单分组）              | **保持实心**：**不主动施加 `glassEffect`**，保证金额数字清晰可读、跨设备稳定             |
-| **庆祝 / 特殊视觉**                                             | 可在插画背景上**点状使用** `glassEffect`（如目标达成卡），属克制的「温度释放点」，非默认 |
 
-> 一句话：**系统外壳交给系统（含玻璃），内容主体保持实心，玻璃只在庆祝时刻按需点缀。**
+> 一句话：**系统外壳交给系统（含玻璃），内容主体保持实心，不额外使用 `glassEffect`。**
+> （v0.5.0：原「庆祝时刻点状使用玻璃」随礼花 / 庆祝粒子的移除一并取消，见 §12。）
 
 ### 3.3 海拔与分层（实心内容层如何不平淡）
 
@@ -146,11 +173,13 @@ iOS 26 的系统材质是 **Liquid Glass**。原生 SwiftUI 的系统 chrome（`
 
 ### 4.2 语义令牌（L2）
 
-#### 4.2.1 强调色（替代品牌色）
+#### 4.2.1 强调色（中性，无品牌色）
+
+> **不设主题色**：强调色取近黑 / 近白，跟随 Light / Night 反相；记一笔 FAB 同样用此色（不再用品牌橙）。
 
 | 角色                 | 令牌               | Light             | Night             | 用途                                   |
 | -------------------- | ------------------ | ----------------- | ----------------- | -------------------------------------- |
-| 主强调               | `accent/primary`   | `#1C1C1E`（近黑） | `#F2F2F7`（近白） | 主 CTA、选中态、激活态、➕（若自定义） |
+| 主强调               | `accent/primary`   | `#1C1C1E`（近黑） | `#F2F2F7`（近白） | 主 CTA、选中态、激活态、➕ FAB         |
 | 强调反色（按钮文字） | `accent/onPrimary` | `#FFFFFF`         | `#1C1C1E`         | 主按钮上的文字 / 图标                  |
 | 浅强调底             | `accent/tint`      | `gray/50`         | `gray/100`        | 选中行 / 浅底 / 分段选中               |
 
@@ -192,15 +221,9 @@ iOS 26 的系统材质是 **Liquid Glass**。原生 SwiftUI 的系统 chrome（`
 
 > 破坏性操作用「危险红」表达严重性，但**文案保持温和**（PRD §1.5）。原生 `ConfirmationDialog` 的破坏性项用 SwiftUI `role: 'destructive'`，颜色由系统给到红，与本令牌语义一致。
 
-### 4.3 画布变体：Cool（默认）/ Warm（可选）
+### 4.3 画布：单一中性（无 Warm 变体）
 
-| 令牌        | Cool（默认）Light     | Warm（可选）Light     | Night                |
-| ----------- | --------------------- | --------------------- | -------------------- |
-| `bg/base`   | `#FFFFFF`             | `#FBFAF8`             | `#000000`            |
-| `bg/card`   | `#F2F2F7`             | `#FFFFFF`             | `#1C1C1E`            |
-| `separator` | `rgba(60,60,67,0.29)` | `rgba(70,60,50,0.22)` | `rgba(84,84,88,0.6)` |
-
-> **v1 首发固定 Cool**（iOS 原生观感）。注意：原生 `Form`/`List` 的分组底色由系统语义色驱动，Warm 变体在原生件上**只能整体覆盖 `bg/base`（如用自定义 `ScrollView` 背景）**，对系统 grouped 背景的改写有限；故 Warm 暂定仅作用于自定义层与可控背景，作为远期完善项。（Warm 反转后其 card 需重新校准为暖灰，首发只用 Cool。）
+> v0.5.0：**移除 Warm 暖色画布变体**。只保留一套中性画布（对齐 iOS 系统语义色），跟随 Light / Night 切换，不提供暖色调可选项。背景层级见 §4.2.3（`bg/base` / `bg/card` / `bg/elevated`）。
 
 ### 4.4 令牌可达性矩阵（L1/L2 → `@expo/ui/swift-ui/modifiers`）
 
@@ -218,11 +241,11 @@ iOS 26 的系统材质是 **Liquid Glass**。原生 SwiftUI 的系统 chrome（`
 | 描边 `border/*`               | `overlay` + 自定义边 / 自定义 modifier                                  | ⚠️ 部分      | 复杂描边可经「Extending with SwiftUI」自定义 modifier                    |
 | 按钮样式                      | `buttonStyle('plain' / 'bordered' / 'borderedProminent' / 'glass' ...)` | ✅ 完全      | `'plain'` 去除系统默认蓝；glass 系需 iOS 26                              |
 | 不透明度 `opacity/*`          | `opacity(n)`                                                            | ✅ 完全      | 禁用 / 遮罩 / 骨架；**禁止用来做玻璃**（见 §3）                          |
-| 动效 `motion/*`               | `animation(Animation.spring/..., dep)`                                  | ✅ 部分      | 复杂庆祝动效走自定义层（Reanimated/Skia）                                |
+| 动效 `motion/*`               | `animation(Animation.spring/..., dep)`                                  | ✅ 部分      | 复杂动效（滑动确认等）走自定义层（Reanimated/Skia）                      |
 | 分类彩色圆底                  | `frame` + `background('#hex')` + `clipShape`                            | ✅ 完全      | 见 §5 设置示例同款写法                                                   |
-| 玻璃 `glassEffect`            | `glassEffect({ glass: { variant } })`                                   | ✅（限场景） | 仅庆祝 / 特殊点缀，内容层默认不加（§3）                                  |
+| 玻璃 `glassEffect`            | `glassEffect({ glass: { variant } })`                                   | ✅（限场景） | v0.5.0 内容层不使用；仅系统 chrome 由系统材质负责（§3）                  |
 
-> **不可达 / 走自定义层的**：报表图表、自定义数字键盘、礼花粒子、滑动确认、复杂自绘进度——见 §5 对应行。
+> **不可达 / 走自定义层的**：报表图表、自定义数字键盘、滑动确认、复杂自绘进度——见 §5 对应行。
 
 ---
 
@@ -252,7 +275,7 @@ Tab Bar  ：首页(house) 报表(chart.pie) 家庭(person.2) 我的(person.crop.
 **视觉**
 
 - Tab Bar 顺应 iOS 26 系统材质（Liquid Glass），系统负责；内容层保持实心。
-- ➕ 浮钮：圆形 56×56，强调色 `#FF8A4C` 实底 + 白色 ➕（SF Symbols `plus`），轻柔投影；右边距 16。
+- ➕ 浮钮：圆形 56×56，`accent/primary` 实底（近黑 / 近白）+ `accent/onPrimary` ➕（SF Symbols `plus`），轻柔投影；右边距 16。**不用品牌橙**（v0.5.0）。
 - 搜索图标：顶栏右上 SF Symbols `magnifyingglass`；push 进入**独立全屏搜索页（非 Sheet）**，承接关键词 + 类型 / 分类 / 成员 / 日期 / 金额区间筛选 + 结果合计条 + 搜索历史。
 - 顶栏标题：左上显示当前 Tab 名大标题；**「我的」页除外**（顶部为个人资料头，不放标题）。
 
@@ -265,13 +288,13 @@ Tab Bar  ：首页(house) 报表(chart.pie) 家庭(person.2) 我的(person.crop.
 | ➕ 记一笔浮钮      | 自定义悬浮层（覆盖于内容与 Tab Bar 之上），`onPress` → 弹 Sheet（§5.3）                                                                       |
 | 搜索页（独立全屏） | 关键词 + 类型/分类/成员/日期/金额区间多维筛选 + 结果合计条 + 搜索历史；本地 WatermelonDB 检索。规格见 PRD 流程 14；联想/常用搜索/自然语言后置 |
 
-> 今日格言不再出现在底部，移入记账面板顶部（§5.3）。原 v0.3.1 的「三栏条 + 三状态 + NativeTabs alpha 联动 spike」随本方案废弃；四 Tab + 悬浮主操作钮为成熟模式，实现风险大幅降低。
+> 原 v0.3.1 的「三栏条 + 三状态 + NativeTabs alpha 联动 spike」随四 Tab 方案废弃；四 Tab + 悬浮主操作钮为成熟模式，实现风险大幅降低。今日格言条已于 v0.5.0 整体移除（见 §5.3）。
 
 ### 5.3 记账面板（流程 2，最高频，L-Bridge 桥接层）
 
 **呈现方式（定稿）**：从底部升起的 **大号 detent Sheet**（iOS `.large` detent，顶部留「父页压暗缝」+ 抓手，下滑即关）——**不是 `fullScreenCover`**。几乎占满屏以承载温度与留白，又保留 Sheet 的「快进快出」，契合「金额唯一必填、3 步内完成」（PRD §4）。
 
-**背景**：中性 `bg/base` / `bg/card`（Light/Night），**不使用分类色背景**（已定，回归中性骨架）；温度交给格言、配图与分类图标圆底承载。
+**背景**：中性 `bg/base` / `bg/card`（Light/Night），**不使用分类色背景**（已定，回归中性骨架）。v0.5.0：面板回归纯功能骨架，不再承载格言 / 配图等装饰。
 
 | 部位                          | 实现                                                                                                    |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -281,10 +304,9 @@ Tab Bar  ：首页(house) 报表(chart.pie) 家庭(person.2) 我的(person.crop.
 | 分类选择                      | 原生 `LazyHStack` + 彩色圆底 `Image`（`frame`+`background`+`clipShape`）                                |
 | 时间 / 记账人 / 备注          | `DatePicker` ／ `Picker`·`Menu`（**单人家庭隐藏记账人**，PRD §4.4）／ `TextField`                       |
 | 保存按钮                      | 原生 `Button` + `buttonStyle`，金额 > 0 才 enabled                                                      |
-| **底部「今日格言」条**        | 今日格言（marquee：减弱动态停滚、可截断、VoiceOver 读全文）。**格言现仅在本面板展示**（底部已无格言条） |
 
-> 区域对应：主内容区＝记账主体（金额/分类/字段/保存）；底部条＝今日格言。这是「原生壳 + 自定义内容」的标杆案例，其它需自定义输入的 Sheet 复用同一模式。
-> （v0.4.0：原「格言从小条位移展开」共享元素转场随小条取消而失效，§16 对应远期项可删。）
+> v0.5.0：**移除底部「今日格言」条**，记账面板只承载记账主体（金额 / 分类 / 字段 / 保存），无装饰条。
+> 这仍是「原生壳 + 自定义内容」的标杆案例（原生 BottomSheet + 自定义数字键盘），其它需自定义输入的 Sheet 复用同一模式。
 
 ### 5.4 按钮
 
@@ -322,7 +344,7 @@ Tab Bar  ：首页(house) 报表(chart.pie) 家庭(person.2) 我的(person.crop.
 | 元素                 | 实现要点                                                                                                                                                                                                                                                                                                                |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 6 段邀请码输入       | 6 个独立框（建议 3+3 分组），`radius/md`、8pt 栅格；**全键盘 + 强制大写、关闭自动更正 / 联想**；自动进位、退格回上格、**整串粘贴自动分配**；满 6 位回调触发拉取，改动任一格清除已拉取结果（PRD 流程 4）                                                                                                                 |
-| 家庭预览卡           | 原生卡容器（`radius/lg`）承载：顶部封面 banner（`FAMILY.cover_url`，无封面→暖色默认底 / 插画）；家庭名 `type/headline`；户主行（头像 §9.2 + 昵称 + 「户主」`type/caption` 角标）；成员头像堆叠（**仅头像、不显昵称**）+ `共 X/8 人` `type/footnote`；影响提示行：警告 `state/warning`、户主阻止 / 破坏性 `state/danger` |
+| 家庭预览卡           | 原生卡容器（`radius/lg`）承载：顶部封面 banner（`FAMILY.cover_url`，无封面→中性灰默认底，不用暖色 / 插画）；家庭名 `type/headline`；户主行（头像 §9.2 + 昵称 + 「户主」`type/caption` 角标）；成员头像堆叠（**仅头像、不显昵称**）+ `共 X/8 人` `type/footnote`；影响提示行：警告 `state/warning`、户主阻止 / 破坏性 `state/danger` |
 | 加入按钮             | 主 CTA（§5.4），文案带家庭名「加入「XXX」」；仅在拉取出有效家庭**且非户主阻止态**时 enabled；破坏性影响（单人有记账将删原家庭）点击后走 `ConfirmationDialog`                                                                                                                                                            |
 | 邀请码展示（邀请页） | 6 位文本码 **3+3 分段**、等宽数字（monospaced）、`type/title1` 级字号醒目；「一键复制」按钮默认「复制邀请码」（SF Symbol `doc.on.doc`），点击切「已复制 ✓」短暂态（~1.5s 复位）+ `impact` haptic，复制内容为纯 6 位（不含分隔 / 空格）；与二维码同屏并列（PRD 流程 3）                                                  |
 | 家庭封面选择器       | 新用户「完善家庭」步骤与「家庭设置页」共用：系统预设图库 + 自定义上传（与储蓄目标封面一致，上传走阿里云 OSS）；**仅户主可改**（PRD §3.5）                                                                                                                                                                               |
@@ -339,15 +361,15 @@ Tab Bar  ：首页(house) 报表(chart.pie) 家庭(person.2) 我的(person.crop.
 
 > 备选：若需深度原生图表，可经「Extending with SwiftUI」封装一个 Swift Charts 自定义组件并接入 modifiers 体系（远期评估）。**储蓄类流水不进消费占比 / 趋势图**（PRD 口径）。
 
-### 5.8 反馈 / 庆祝 / 滑动确认
+### 5.8 反馈 / 滑动确认 / 空状态
 
-| 元素                | 实现                                                                               |
-| ------------------- | ---------------------------------------------------------------------------------- |
-| 顶部条幅 Banner     | 自定义层（RN）或原生 `Overlay`；预警 `state/warning`、超支 `state/danger`          |
-| Toast / 同步态      | 自定义轻提示，`state/info`                                                         |
-| **滑动确认控件**    | **自定义层**（Reanimated 手势）——原生无此件；到位触发 `impact` haptic（PRD §7/§8） |
-| **礼花 / 庆祝粒子** | **自定义层**（Skia / Reanimated / Lottie）；可叠 `glassEffect` 点缀                |
-| 空状态              | 暖色手绘插画（`Image`）+ 一句温暖引导 + 主 `Button`                                |
+| 元素             | 实现                                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------------- |
+| 顶部条幅 Banner  | 自定义层（RN）或原生 `Overlay`；预警 `state/warning`、超支 `state/danger`；底色用中性 `bg/card` |
+| Toast / 同步态   | 自定义轻提示，`state/info`                                                                      |
+| **滑动确认控件** | **自定义层**（Reanimated 手势）——原生无此件；到位触发 `impact` haptic（PRD §7/§8）             |
+| 达成 / 成功反馈  | **不用礼花 / 庆祝粒子**（v0.5.0 移除）；改 `success` haptic + 一行中性文案 / 系统轻 toast        |
+| 空状态           | **SF Symbols 大图标（`text/tertiary` 单色）+ 一句中性引导 + 主 `Button`**，不用暖色手绘插画     |
 
 ---
 
@@ -414,8 +436,8 @@ Tab Bar  ：首页(house) 报表(chart.pie) 家庭(person.2) 我的(person.crop.
 ## 9. 图标系统
 
 - **系统 / 功能图标**：一律 **SF Symbols**（原生 `Image systemName="..."`，自动适配粗细 / 深浅色）。
-- **分类图标**：统一描边、单色可着色图标族 + §5.1 低饱和彩色圆底（`frame` + `background('#hex')` + `clipShape('roundedRectangle' / 'circle')`）。
-- **品牌 / 庆祝插画**：暖色调手绘风格（家、屋檐、存钱罐、一家人），作为温度集中释放点。
+- **分类图标**：统一描边、单色可着色图标族 + §9.1 低饱和彩色圆底（`frame` + `background('#hex')` + `clipShape('roundedRectangle' / 'circle')`）——分类色为**功能识别色**（类比「提醒事项」每个清单的彩色图标圆），非品牌色。
+- **插画**：v0.5.0 **不使用暖色手绘插画**；空状态等场景改用 SF Symbols 大图标（单色 `text/tertiary`）。
 
 | 令牌        | 数值 | 用途           |
 | ----------- | ---- | -------------- |
@@ -475,25 +497,28 @@ Tab Bar  ：首页(house) 报表(chart.pie) 家庭(person.2) 我的(person.crop.
 | `motion/micro`       | 150ms    | 小元素出现 / 选中     |
 | `motion/base`        | 250ms    | 标准过渡 / Sheet 切换 |
 | `motion/emphasized`  | 350ms    | 页面 / Sheet 转场     |
-| `motion/celebration` | ≤ 1500ms | 庆祝动效上限          |
+
+> v0.5.0：移除 `motion/celebration`（庆祝动效上限）——已无礼花 / 粒子动效，达成反馈仅 haptic + 文案（§12）。
 
 - 系统转场（Sheet 上滑、Push）用原生默认；原生件内动效用 `animation(Animation.spring(...), dep)`。
 - **Haptics**：保存成功 `success`、达成目标 `success` 重、删除 `warning`、滑动确认到位 `impact`（经 `expo-haptics`）。
-- **减弱动态（Reduce Motion）**：所有 `motion/*` 退化为即时 / 淡入；庆祝粒子改静态文案，时长归零。
+- **减弱动态（Reduce Motion）**：所有 `motion/*` 退化为即时 / 淡入。
 
 ---
 
-## 12. 暖心时刻 Celebration（统一规范）
+## 12. 达成反馈（统一规范，v0.5.0 去庆祝化）
 
-| 触发点（PRD）       | 视觉                                               | 文案来源                    | 实现层   |
-| ------------------- | -------------------------------------------------- | --------------------------- | -------- |
-| 首次记账（§4.3）    | 面板内轻量缩放 + 礼花                              | 固定欢迎文案                | 自定义层 |
-| 储蓄目标达成（§9）  | 进度环高亮 + 礼花 + 暖色插画（可叠 `glassEffect`） | 目标相关文案                | 自定义层 |
-| 月度总结生成（§11） | 首页条幅 + 进入总结卡                              | 暖心文案池随机（PRD §11.8） | 自定义层 |
+> v0.5.0：**移除礼花 / 庆祝粒子与暖色插画**。达成 / 成功时刻回归系统级克制反馈，不阻断主流程、不强制停留。
 
-- 统一规格：暖色手绘插画 + 克制粒子，时长 ≤ `motion/celebration`，`success` haptic。
-- **尊重减弱动态**：粒子退化为静态插画 + 文案。
-- 度的把握：点到为止，不阻断主流程、不强制全屏停留。
+| 触发点（PRD）       | 反馈                                          | 文案来源                  | 实现层   |
+| ------------------- | --------------------------------------------- | ------------------------- | -------- |
+| 首次记账（§4.3）    | `success` haptic + 一行中性欢迎文案           | 固定文案                  | 自定义层 |
+| 储蓄目标达成（§9）  | 进度环填满高亮 + `success` haptic（重）+ 文案 | 目标相关文案              | 自定义层 |
+| 月度总结生成（§11） | 首页条幅（中性底）+ 进入总结卡                | 文案池随机（PRD §11.8）   | 自定义层 |
+
+- 统一规格：无粒子 / 无插画，`success` haptic（达成可加重），文案中性简洁。
+- **尊重减弱动态**：haptic 仍触发，文案不变。
+- 度的把握：点到为止。
 
 ---
 
@@ -520,7 +545,7 @@ Tab Bar  ：首页(house) 报表(chart.pie) 家庭(person.2) 我的(person.crop.
 | ---------------------------------------------- | ------------------------------------------ |
 | Dynamic Type、VoiceOver、Light/Night、同心圆角 | 须自行补齐无障碍标签、字号适配、深浅色切换 |
 | iOS 26 一致材质与系统转场                      | 须自管材质一致性，勿与系统 chrome 风格脱节 |
-| 系统语义色自动对比度达标                       | 须自测对比度（含 Warm 变体）               |
+| 系统语义色自动对比度达标                       | 须自测对比度（Light / Night 各一遍）       |
 | `Form`/`List` 自带分组背景与分隔               | 自绘卡片须自管分隔与海拔                   |
 
 ---
@@ -529,9 +554,7 @@ Tab Bar  ：首页(house) 报表(chart.pie) 家庭(person.2) 我的(person.crop.
 
 | 远期能力        | 预留                                                                                                                                      |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| 引入品牌色      | 将 `accent/primary` 语义令牌重映射为品牌橙（如 `#FF8A4C`），`accent/onPrimary` 设白；原生层只改传给 modifier 的色值，全局生效             |
 | Android / 多端  | 走 `@expo/ui/jetpack-compose` 平行映射，复用本规范设计意图层                                                                              |
-| 格言位移转场    | 记一笔小条的「今日格言」原地位移展开进全屏弹层（共享元素转场）；首发用「同源 + 淡入」，待 Reanimated 跨 RN↔原生模态转场稳定后再做（§5.3） |
 | NativeTabs 退路 | 若 `unstable-native-tabs` alpha 阶段不稳，临时退回自定义 RN Tab Bar（自定义层，牺牲原生玻璃），登记为「过渡例外」                         |
 | 原生图表        | 经「Extending with SwiftUI」封装 Swift Charts 接入 modifiers                                                                              |
 | 账单导入        | 流水行预留「来源标签」（复用 `icon/sm`）                                                                                                  |
@@ -549,24 +572,25 @@ radius: sm8 / md12 / lg16 / lg+20 / xl28 / full
 icon: sm16 / md20 / base24 / lg28 ；touchTarget 44
 elevation: 0(无) / 1(r8 y1 黑8%) / 2(r16 y2 黑10%)
 opacity: disabled .35 / pressed .12 / scrim .40 / skeleton .08–.16
-motion: tap100 micro150 base250 emphasized350 celebration≤1500
+motion: tap100 micro150 base250 emphasized350
 font: PingFang SC + SF Pro；金额=Tabular 等宽
 
 // —— L2 语义（浅 / 深）——
 accent/primary    #1C1C1E / #F2F2F7      accent/onPrimary #FFFFFF / #1C1C1E
 accent/tint       gray/50 / gray/100
-semantic/expense  #E2563D / #FF7461 （带 -）   semantic/income #2FA36B / #46C98A （带 +）
+semantic/income   #E2563D / #FF7461 （带 +，红）   semantic/expense #2FA36B / #46C98A （带 -，绿）
 state/warning #F5A623 / #FFB84D   state/danger #E2563D / #FF7461
 state/success #2FA36B / #46C98A   state/info   #4A90D9 / #5AA7F0
-text / bg / separator → §4.2.3 ；cat/* → §9.1 ；头像 → §9.2（系统默认，不取首字）
+text / bg / separator → §4.2.3 ；cat/* → §9.1（功能识别色）；头像 → §9.2（系统默认，不取首字）
+// 不设主题色 / 品牌色；强调=近黑/近白；颜色仅在收支与分类两处承担功能含义
 
 // —— 实现策略 ——
 default: @expo/ui/swift-ui 原生件 + modifiers（§4.4 矩阵）；底部 Tab Bar 用 expo-router NativeTabs（iOS 26 Liquid Glass）
-fallback: 自定义 RN / Skia / Reanimated（图表 / 数字键盘 / 礼花 / 滑动确认 / NativeTabs alpha 不稳时退自定义 Tab Bar）
-Tab Bar: iOS 26 标准四 Tab（首页/报表/家庭/我的）+ 记一笔悬浮圆钮（Tab Bar 右上方，全 Tab 常驻）+ 顶栏右上搜索图标；详见 §5.2
-记账面板: 大号 detent Sheet（.large，非 fullScreenCover）+ 中性背景 + 底部格言条（§5.3）
+fallback: 自定义 RN / Skia / Reanimated（图表 / 数字键盘 / 滑动确认 / NativeTabs alpha 不稳时退自定义 Tab Bar）
+Tab Bar: iOS 26 标准四 Tab（首页/报表/家庭/我的）+ 记一笔悬浮圆钮（accent 实底，非橙；全 Tab 常驻）+ 顶栏右上搜索图标；详见 §5.2
+记账面板: 大号 detent Sheet（.large，非 fullScreenCover）+ 中性背景（无格言条 / 无装饰，§5.3）
 材质: 系统 chrome 顺应 iOS 26（含 Liquid Glass）；内容层实心，不主动加 glassEffect
-平台: v1 纯 iOS（iOS 26+）；UI 模式 Light / Night；画布 v1 固定 Cool
+平台: v1 纯 iOS（iOS 26+）；UI 模式 Light / Night；单一中性画布（无 Warm 变体）；不用礼花 / 暖色插画
 ```
 
 ---
@@ -586,7 +610,7 @@ shadow({ radius, x, y, color })                 阴影（海拔）
 font({ size, weight, design:'monospaced' })     字阶 / 等宽数字
 buttonStyle('plain'|'bordered'|'borderedProminent'|'glass')  按钮样式
 opacity(n)                                      不透明度（禁做玻璃）
-glassEffect({ glass:{ variant:'clear'|'regular' } })  仅庆祝/点缀，需 iOS 26
+glassEffect({ glass:{ variant:'clear'|'regular' } })  v0.5.0 内容层不用；系统 chrome 由系统负责
 animation(Animation.spring({duration}), dep)    原生动效
 ```
 
