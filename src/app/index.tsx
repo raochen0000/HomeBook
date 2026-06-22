@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Link, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, PlatformColor, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -283,12 +283,9 @@ export default function HomeScreen() {
       </View>
 
       {/* 记一笔 悬浮钮（IA §2：Tab Bar 右上方常驻） */}
-      {/* 蓝底白加号：用系统蓝（PlatformColor systemBlue），与底部 Tab Bar 高亮蓝同源 */}
-      <Pressable
-        onPress={openCreate}
-        style={[styles.fab, { backgroundColor: PlatformColor('systemBlue'), shadowColor: '#000' }]}
-      >
-        <SymbolView name="plus" tintColor="#FFFFFF" size={28} weight="semibold" />
+      {/* 中性强调底 + 反色加号：accent 近黑/近白（DESIGN §5.2 v0.5.0，不用品牌橙/系统蓝） */}
+      <Pressable onPress={openCreate} style={[styles.fab, { backgroundColor: palette.accent, shadowColor: '#000' }]}>
+        <SymbolView name="plus" tintColor={palette.onAccent} size={28} weight="semibold" />
       </Pressable>
 
       {/* 记账面板（流程 2 + 编辑/删除 流程 10） */}
