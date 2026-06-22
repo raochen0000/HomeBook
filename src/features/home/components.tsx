@@ -2,7 +2,7 @@
  * 首页 UI 组件（@expo/ui/swift-ui 原生 SwiftUI 渲染）。
  * 视觉对齐参考图 + DESIGN.md：浅灰底 + 白卡、分类圆底图标、两段式金额、收支语义色。
  */
-import { HStack, Image, RoundedRectangle, Spacer, Text, VStack, ZStack } from '@expo/ui/swift-ui';
+import { HStack, Image, Spacer, Text, VStack } from '@expo/ui/swift-ui';
 import {
   background,
   clipShape,
@@ -10,7 +10,6 @@ import {
   cornerRadius,
   font,
   foregroundColor,
-  foregroundStyle,
   frame,
   onTapGesture,
   padding,
@@ -160,7 +159,7 @@ export function DayGroup({
   );
 }
 
-// ── 本月概览卡（参考图蓝色 hero 渐变 + 眼睛显隐 + 较上月趋势）───────────────────
+// ── 本月概览卡（中性实色卡 + 眼睛显隐 + 较上月趋势，DESIGN v0.5.0）─────────────
 /** 环比趋势：null 表示上月无可比基数，UI 显示「—」。 */
 export type Trend = { pct: number; up: boolean } | null;
 
@@ -248,85 +247,78 @@ export function BalanceCard({
 }) {
   const palette = usePalette();
   return (
-    <ZStack
-      modifiers={[frame({ height: BALANCE_CARD_HEIGHT }), shadow({ radius: 10, x: 0, y: 2, color: palette.shadow })]}
+    <VStack
+      alignment="leading"
+      spacing={Space[2]}
+      modifiers={[
+        padding({ all: Space[4] }),
+        frame({ height: BALANCE_CARD_HEIGHT }),
+        background(palette.card),
+        cornerRadius(Radius.lg),
+        shadow({ radius: 10, x: 0, y: 2, color: palette.shadow }),
+      ]}
     >
-      {/* 渐变底（左上 → 右下），用 RoundedRectangle 填充以避让 background 仅支持纯色 */}
-      <RoundedRectangle
-        cornerRadius={Radius.lg}
-        modifiers={[
-          foregroundStyle({
-            type: 'linearGradient',
-            colors: [palette.cardGradient[0], palette.cardGradient[1]],
-            startPoint: { x: 0, y: 0 },
-            endPoint: { x: 1, y: 1 },
-          }),
-          frame({ maxWidth: 9999, maxHeight: 9999 }),
-        ]}
-      />
-      <VStack alignment="leading" spacing={Space[2]} modifiers={[padding({ all: Space[4] })]}>
-        {/* 头：本月结余 + 眼睛显隐 · 右侧周期胶囊（暂为静态展示） */}
-        <HStack alignment="center" spacing={Space[2]}>
-          <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>本月结余</Text>
-          <Image
-            systemName={hidden ? 'eye.slash' : 'eye'}
-            size={15}
-            color={palette.textSecondary}
-            modifiers={[padding({ horizontal: Space[1], vertical: Space[1] }), onTapGesture(() => onToggleHidden())]}
-          />
-          <Spacer />
-          <HStack
-            spacing={Space[1]}
-            alignment="center"
-            modifiers={[
-              padding({ horizontal: Space[3], vertical: Space[1] }),
-              background(palette.cardPill),
-              cornerRadius(Radius.full),
-            ]}
-          >
-            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textPrimary)]}>本月</Text>
-            <Image systemName="chevron.down" size={10} color={palette.textSecondary} />
-          </HStack>
-        </HStack>
-
-        <MaskOrAmount
-          cents={balanceCents}
-          sign={signForNet(balanceCents)}
-          color={palette.textPrimary}
-          integerSize={34}
-          decimalSize={17}
-          weight="bold"
-          hidden={hidden}
+      {/* 头：本月结余 + 眼睛显隐 · 右侧周期胶囊（暂为静态展示） */}
+      <HStack alignment="center" spacing={Space[2]}>
+        <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>本月结余</Text>
+        <Image
+          systemName={hidden ? 'eye.slash' : 'eye'}
+          size={15}
+          color={palette.textSecondary}
+          modifiers={[padding({ horizontal: Space[1], vertical: Space[1] }), onTapGesture(() => onToggleHidden())]}
         />
-
-        <HStack spacing={Space[8]} modifiers={[padding({ top: Space[2] })]}>
-          <VStack alignment="leading" spacing={2}>
-            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>支出</Text>
-            <MaskOrAmount
-              cents={expenseCents}
-              color={palette.expense}
-              integerSize={22}
-              decimalSize={13}
-              weight="bold"
-              hidden={hidden}
-            />
-            <TrendRow trend={expenseTrend} />
-          </VStack>
-          <VStack alignment="leading" spacing={2}>
-            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>收入</Text>
-            <MaskOrAmount
-              cents={incomeCents}
-              color={palette.income}
-              integerSize={22}
-              decimalSize={13}
-              weight="bold"
-              hidden={hidden}
-            />
-            <TrendRow trend={incomeTrend} />
-          </VStack>
+        <Spacer />
+        <HStack
+          spacing={Space[1]}
+          alignment="center"
+          modifiers={[
+            padding({ horizontal: Space[3], vertical: Space[1] }),
+            background(palette.cardPill),
+            cornerRadius(Radius.full),
+          ]}
+        >
+          <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textPrimary)]}>本月</Text>
+          <Image systemName="chevron.down" size={10} color={palette.textSecondary} />
         </HStack>
-      </VStack>
-    </ZStack>
+      </HStack>
+
+      <MaskOrAmount
+        cents={balanceCents}
+        sign={signForNet(balanceCents)}
+        color={palette.textPrimary}
+        integerSize={34}
+        decimalSize={17}
+        weight="bold"
+        hidden={hidden}
+      />
+
+      <HStack spacing={Space[8]} modifiers={[padding({ top: Space[2] })]}>
+        <VStack alignment="leading" spacing={2}>
+          <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>支出</Text>
+          <MaskOrAmount
+            cents={expenseCents}
+            color={palette.expense}
+            integerSize={22}
+            decimalSize={13}
+            weight="bold"
+            hidden={hidden}
+          />
+          <TrendRow trend={expenseTrend} />
+        </VStack>
+        <VStack alignment="leading" spacing={2}>
+          <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>收入</Text>
+          <MaskOrAmount
+            cents={incomeCents}
+            color={palette.income}
+            integerSize={22}
+            decimalSize={13}
+            weight="bold"
+            hidden={hidden}
+          />
+          <TrendRow trend={incomeTrend} />
+        </VStack>
+      </HStack>
+    </VStack>
   );
 }
 

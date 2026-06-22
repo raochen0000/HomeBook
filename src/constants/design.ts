@@ -58,9 +58,7 @@ type Palette = {
   /** 信息条幅暖底 */
   bannerTint: string;
   shadow: string;
-  /** 本月结余卡渐变（参考图蓝色 hero，左上 → 右下） */
-  cardGradient: readonly [string, string];
-  /** 卡内胶囊（周期选择器）底色 */
+  /** 卡内胶囊（周期选择器）底色（中性 systemFill） */
   cardPill: string;
 };
 
@@ -85,8 +83,7 @@ const light: Palette = {
   onAccent: '#FFFFFF',
   bannerTint: '#FBE6D4',
   shadow: 'rgba(0,0,0,0.06)',
-  cardGradient: ['#D6E4FB', '#EFF4FD'],
-  cardPill: 'rgba(255,255,255,0.55)',
+  cardPill: 'rgba(120,120,128,0.12)',
 };
 
 const dark: Palette = {
@@ -106,7 +103,6 @@ const dark: Palette = {
   onAccent: '#1C1C1E',
   bannerTint: '#2E2820',
   shadow: 'rgba(0,0,0,0.4)',
-  cardGradient: ['#1B2A4A', '#13203A'],
   cardPill: 'rgba(255,255,255,0.12)',
 };
 
