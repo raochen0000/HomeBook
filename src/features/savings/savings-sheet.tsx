@@ -1,7 +1,7 @@
 /**
  * 储蓄目标（流程 7）：列表 / 详情 / 新建·编辑 / 存入·取出，单 Modal 内 view 状态切换。
  * - 所有成员可创建、存入、取出；仅户主可删除（删除回吐余额为收入流水，走 RPC）。
- * - 每家最多 5 个进行中目标。存满 100% 首次达成触发庆祝。
+ * - 每家最多 5 个进行中目标。存满 100% 首次达成弹中性达成提示（DESIGN §12，去礼花/庆祝）。
  * - 存入生成「储蓄·目标存入」支出流水、取出生成「储蓄·目标取出」收入流水（资金可对账）。
  */
 import { SymbolView } from 'expo-symbols';
@@ -31,6 +31,7 @@ import {
   useUpdateGoal,
   type SavingsGoal,
 } from '@/api';
+import { Toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { formatAmount } from '@/lib/format';
 
@@ -69,7 +70,7 @@ function Body({ onClose }: { onClose: () => void }) {
   const palette = usePalette();
   const goalsQ = useSavingsGoals();
   const [view, setView] = useState<ViewState>({ mode: 'list' });
-  const [celebrate, setCelebrate] = useState<string | null>(null);
+  const [achievedName, setAchievedName] = useState<string | null>(null);
 
   const goals = goalsQ.data ?? [];
   const currentGoal = (id: string) => goals.find((g) => g.id === id) ?? null;
@@ -88,7 +89,7 @@ function Body({ onClose }: { onClose: () => void }) {
         goal={g}
         dir={view.dir}
         onBack={() => setView({ mode: 'detail', goalId: g.id })}
-        onCelebrate={setCelebrate}
+        onAchieved={setAchievedName}
       />
     ) : null;
   } else {
@@ -99,7 +100,11 @@ function Body({ onClose }: { onClose: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       {content}
-      {celebrate ? <Celebration name={celebrate} onDone={() => setCelebrate(null)} /> : null}
+      <Toast
+        visible={!!achievedName}
+        text={achievedName ? `「${achievedName}」已达成` : ''}
+        onHide={() => setAchievedName(null)}
+      />
     </View>
   );
 }
@@ -492,12 +497,12 @@ function TxnForm({
   goal,
   dir,
   onBack,
-  onCelebrate,
+  onAchieved,
 }: {
   goal: SavingsGoal;
   dir: 'deposit' | 'withdraw';
   onBack: () => void;
-  onCelebrate: (name: string) => void;
+  onAchieved: (name: string) => void;
 }) {
   const palette = usePalette();
   const depositM = useSavingsDeposit();
@@ -523,8 +528,8 @@ function TxnForm({
           note,
         })) as SavingsGoal;
         onBack();
-        // 首次达成 → 庆祝（PRD §9.6：仅首次触发一次）
-        if (!wasAchieved && updated?.achieved_at) onCelebrate(goal.name);
+        // 首次达成 → 中性达成提示（PRD §9.6：仅首次触发一次；DESIGN §12 去礼花）
+        if (!wasAchieved && updated?.achieved_at) onAchieved(goal.name);
       } else {
         await withdrawM.mutateAsync({ goalId: goal.id, amountCents: cents, version: goal.version, note });
         onBack();
@@ -585,25 +590,6 @@ function ProgressBar({ pct, palette, big }: { pct: number; palette: ReturnType<t
       <View
         style={[styles.fill, { backgroundColor: pct >= 100 ? palette.income : palette.accent, width: `${pct}%` }]}
       />
-    </View>
-  );
-}
-
-// ── 达成庆祝 ─────────────────────────────────────────────────────────────────
-function Celebration({ name, onDone }: { name: string; onDone: () => void }) {
-  const palette = usePalette();
-  return (
-    <View style={styles.celebrate}>
-      <View style={[styles.celebrateCard, { backgroundColor: palette.card }]}>
-        <Text style={styles.celebrateEmoji}>🎉</Text>
-        <Text style={[styles.celebrateTitle, { color: palette.textPrimary }]}>目标达成！</Text>
-        <Text style={[styles.celebrateBody, { color: palette.textSecondary }]}>
-          「{name}」攒满啦，一家人的努力开花结果 🎊
-        </Text>
-        <Pressable onPress={onDone} style={[styles.primary, { backgroundColor: palette.accent }]}>
-          <Text style={[styles.primaryText, { color: palette.onAccent }]}>太棒了</Text>
-        </Pressable>
-      </View>
     </View>
   );
 }
@@ -700,19 +686,4 @@ const styles = StyleSheet.create({
   },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Space[2] },
   chip: { paddingHorizontal: Space[3], paddingVertical: Space[2], borderRadius: Radius.full },
-  celebrate: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    padding: Space[6],
-  },
-  celebrateCard: { borderRadius: Radius.lg, padding: Space[6], alignItems: 'center', gap: Space[2], width: '100%' },
-  celebrateEmoji: { fontSize: 56 },
-  celebrateTitle: { fontSize: 22, fontWeight: '700' },
-  celebrateBody: { fontSize: 15, textAlign: 'center', lineHeight: 22 },
 });
