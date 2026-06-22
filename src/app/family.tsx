@@ -25,6 +25,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Toast } from '@/components/toast';
 import { Radius, Space, TabBarInset, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
+import { CategoryManageSheet } from '@/features/category/manage-sheet';
 import { InviteSheet } from '@/features/family/invite-sheet';
 import { ScanSheet } from '@/features/family/scan-sheet';
 import { TransferSheet } from '@/features/family/transfer-sheet';
@@ -63,6 +64,7 @@ export default function FamilyScreen() {
   const [transferOpen, setTransferOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [savingsOpen, setSavingsOpen] = useState(false);
+  const [categoryOpen, setCategoryOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -455,6 +457,13 @@ export default function FamilyScreen() {
                   sub="重要提醒"
                   onPress={() => setNotifyOpen(true)}
                 />
+                <QuickTile
+                  icon="square.grid.2x2.fill"
+                  tint="#2AB3C0"
+                  title="分类管理"
+                  sub="增改分类"
+                  onPress={() => setCategoryOpen(true)}
+                />
               </View>
             </View>
 
@@ -525,6 +534,7 @@ export default function FamilyScreen() {
       <TransferSheet visible={transferOpen} onClose={() => setTransferOpen(false)} candidates={candidates} />
       <BudgetSheet visible={budgetOpen} onClose={() => setBudgetOpen(false)} />
       <SavingsSheet visible={savingsOpen} onClose={() => setSavingsOpen(false)} />
+      <CategoryManageSheet visible={categoryOpen} onClose={() => setCategoryOpen(false)} />
       <NotificationCenterSheet visible={notifyOpen} onClose={() => setNotifyOpen(false)} />
       <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
@@ -777,10 +787,10 @@ const styles = StyleSheet.create({
   progressTrack: { width: '100%', height: 4, borderRadius: Radius.full, overflow: 'hidden' },
   progressFill: { height: 4, borderRadius: Radius.full },
 
-  // 快捷功能（正方形瓦片）
-  quickRow: { flexDirection: 'row', gap: Space[2] },
+  // 快捷功能（正方形瓦片，4 列网格；超过 4 个自动换行，末行左对齐）
+  quickRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: Space[2] },
   quickTile: {
-    flex: 1,
+    width: '23.5%',
     aspectRatio: 1,
     alignItems: 'center',
     justifyContent: 'center',
