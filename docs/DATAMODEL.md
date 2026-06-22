@@ -43,6 +43,8 @@ erDiagram
     USER ||--o{ TRANSACTION : "记账人"
     FAMILY ||--o{ CATEGORY : "拥有"
     CATEGORY ||--o{ TRANSACTION : "归类"
+    FAMILY ||--o{ FAMILY_HIDDEN_CATEGORY : "隐藏系统分类"
+    CATEGORY ||--o{ FAMILY_HIDDEN_CATEGORY : "被某家庭隐藏"
     FAMILY ||--o{ SAVINGS_GOAL : "拥有"
     SAVINGS_GOAL ||--o{ SAVINGS_ENTRY : "存取记录"
     SAVINGS_ENTRY ||--|| TRANSACTION : "对应流水"
@@ -130,6 +132,18 @@ erDiagram
 | `status`    | enum   |          | `active` / `archived`（停用）/ `hidden`（隐藏） |
 
 > 删除走软删除（`archived`），历史流水仍显示原分类名（PRD 流程 11）。预设「储蓄·目标存入 / 取出」「其他」作为系统分类内置。
+
+### 3.5.1 FAMILY_HIDDEN_CATEGORY（家庭隐藏的系统分类 · PRD 流程 11 / MVP §2.4）
+
+系统预设分类是全局单行（`CATEGORY.family_id = null`），无法用 `CATEGORY.status='hidden'` 做「按家庭隐藏」——置全局行 `hidden` 会对所有家庭生效。故用本覆盖表：一行 = 「该家庭在记账/预算选择器中隐藏了该系统分类」，全局分类行保持 `active`，**历史流水仍能解析其名称/图标（显示零回归）**。
+
+| 字段          | 类型        | 约束                        | 说明                                       |
+| ------------- | ----------- | --------------------------- | ------------------------------------------ |
+| `family_id`   | UUID        | PK, FK→FAMILY(on delete cascade)   | 哪个家庭                            |
+| `category_id` | UUID        | PK, FK→CATEGORY(on delete cascade) | 被隐藏的系统分类（触发器校验须为系统分类） |
+| `created_at`  | timestamptz | default now()               |                                            |
+
+> 仅系统分类可入此表（`before insert` 触发器校验 `family_id is null and is_system`）；自定义分类的删除仍走 `CATEGORY.status='archived'`。「其他支出 / 其他收入」作兜底，前端不提供隐藏入口；「储蓄·\*」从分类管理列表过滤。RLS：家庭成员可读/增/删本家庭覆盖行，户主门禁在前端（与停用自定义分类一致）。
 
 ---
 

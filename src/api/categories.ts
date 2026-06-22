@@ -51,15 +51,6 @@ export function useHiddenCategoryIds() {
   });
 }
 
-/** 可见分类 = 活跃分类 − 本家庭隐藏的系统分类。用于记账/预算选择器。 */
-export function useVisibleCategories(type?: 'expense' | 'income') {
-  const catsQ = useCategories(type);
-  const hiddenQ = useHiddenCategoryIds();
-  const hidden = hiddenQ.data ?? new Set<string>();
-  const data = (catsQ.data ?? []).filter((c) => !hidden.has(c.id));
-  return { data, isLoading: catsQ.isLoading || hiddenQ.isLoading, error: catsQ.error ?? hiddenQ.error };
-}
-
 // ── 自定义分类管理（流程 11）─────────────────────────────────────────────────
 // RLS：家庭成员可对 family_id 非空的分类增改；系统分类（family_id=null）全局只读。
 
