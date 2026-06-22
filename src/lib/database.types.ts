@@ -49,6 +49,7 @@ export type Database = {
         Row: {
           id: string;
           name: string;
+          cover_url: string | null;
           owner_user_id: string;
           timezone: string;
           member_count: number;
@@ -59,6 +60,7 @@ export type Database = {
         Insert: {
           id?: string;
           name: string;
+          cover_url?: string | null;
           owner_user_id: string;
           timezone: string;
           member_count?: number;
@@ -69,6 +71,7 @@ export type Database = {
         Update: {
           id?: string;
           name?: string;
+          cover_url?: string | null;
           owner_user_id?: string;
           timezone?: string;
           member_count?: number;
@@ -515,6 +518,10 @@ export type Database = {
       join_family_by_code: {
         Args: { p_code: string };
         Returns: Database['public']['Tables']['families']['Row'];
+      };
+      preview_family_by_code: {
+        Args: { p_code: string };
+        Returns: Json;
       };
       savings_deposit: {
         Args: { p_goal_id: string; p_amount: number; p_note: string; p_expected_version: number };

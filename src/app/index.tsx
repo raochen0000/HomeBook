@@ -7,7 +7,7 @@ import { padding } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Link, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,6 +33,7 @@ import {
   InsightBanner,
   type RowData,
 } from '@/features/home/components';
+import { FirstRecordCelebration } from '@/features/record/first-record-celebration';
 import { RecordSheet } from '@/features/record/record-sheet';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-header';
@@ -96,6 +97,9 @@ export default function HomeScreen() {
   });
   // 保存成功的顶部轻提示。
   const [savedToast, setSavedToast] = useState(false);
+  // 首次记账庆祝：保存时标记 pending，待记账面板关闭动画结束（onDismiss）后再弹，避免叠在面板上。
+  const [celebrate, setCelebrate] = useState(false);
+  const pendingCelebrateRef = useRef(false);
 
   // 金额显隐（眼睛）：启动时读回上次状态，切换时写入。
   const [amountsHidden, setAmountsHidden] = useState(false);
@@ -294,12 +298,25 @@ export default function HomeScreen() {
         editing={sheet.editing}
         familyId={sheet.familyId}
         recorderId={profileQ.data?.id ?? ''}
-        onSaved={() => setSavedToast(true)}
+        onSaved={({ firstRecord }) => {
+          // 第一笔：标记待庆祝（面板关闭后再弹）；否则走常规「已记一笔」toast。
+          if (firstRecord) pendingCelebrateRef.current = true;
+          else setSavedToast(true);
+        }}
+        onDismiss={() => {
+          if (pendingCelebrateRef.current) {
+            pendingCelebrateRef.current = false;
+            setCelebrate(true);
+          }
+        }}
         onClose={() => setSheet({ open: false, editing: null, familyId: '' })}
       />
 
       {/* 保存成功顶部轻提示 */}
       <Toast visible={savedToast} text="已记一笔" onHide={() => setSavedToast(false)} />
+
+      {/* 首次记账庆祝（PRD §4.3 S1）：面板关闭后弹出 */}
+      <FirstRecordCelebration visible={celebrate} onClose={() => setCelebrate(false)} />
     </View>
   );
 }

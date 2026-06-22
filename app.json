@@ -36,6 +36,20 @@
         }
       ],
       [
+        "expo-media-library",
+        {
+          "photosPermission": "允许「家账」访问相册，以选择头像 / 家庭封面或保存邀请二维码",
+          "savePhotosPermission": "允许「家账」将邀请二维码保存到相册",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "允许「家账」访问相册，以选择头像 / 家庭封面或保存邀请二维码"
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#208AEF",

@@ -1,12 +1,16 @@
 /**
- * 转让户主（流程 5）：户主从家庭成员中选一人移交户主身份（二次确认）。
+ * 转让户主（流程 5）：户主从家庭成员中选一人移交户主身份。
+ * 选中后走「输入对方昵称 + 滑动确认」二次确认；转让成功后追问是否顺便退出家庭。
  */
 import { SymbolView } from 'expo-symbols';
-import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useTransferOwnership, type FamilyMembership } from '@/api';
+import { useLeaveFamily, useTransferOwnership, type FamilyMembership } from '@/api';
 import { Radius, Space, usePalette } from '@/constants/design';
+
+import { DangerConfirmSheet } from './danger-confirm-sheet';
 
 export function TransferSheet({
   visible,
@@ -20,20 +24,23 @@ export function TransferSheet({
 }) {
   const palette = usePalette();
   const transferM = useTransferOwnership();
+  const leaveM = useLeaveFamily();
+  const [selected, setSelected] = useState<FamilyMembership | null>(null);
 
-  const pick = (m: FamilyMembership) => {
-    Alert.alert('转让户主', `确定把户主转让给「${m.nickname}」吗？转让后你将成为普通成员。`, [
-      { text: '取消', style: 'cancel' },
+  // 转让成功后追问是否顺便退出（多数转让动机即为离开，PRD §7.3 AA2）。
+  const askLeaveThenClose = () => {
+    Alert.alert('转让成功', '你已成为普通成员。要顺便退出这个家庭吗？你的历史记账会保留在家里。', [
+      { text: '留在家庭', style: 'cancel', onPress: onClose },
       {
-        text: '转让',
+        text: '退出家庭',
         style: 'destructive',
         onPress: async () => {
           try {
-            await transferM.mutateAsync(m.userId);
-            onClose();
+            await leaveM.mutateAsync();
           } catch (e) {
-            Alert.alert('转让失败', (e as Error).message ?? String(e));
+            Alert.alert('退出失败', (e as Error).message ?? String(e));
           }
+          onClose();
         },
       },
     ]);
@@ -50,18 +57,18 @@ export function TransferSheet({
             </Pressable>
           </View>
 
-          {transferM.isPending ? (
-            <View style={styles.center}>
-              <ActivityIndicator />
-            </View>
-          ) : candidates.length === 0 ? (
+          {candidates.length === 0 ? (
             <View style={styles.center}>
               <Text style={{ color: palette.textSecondary }}>家里还没有其他成员可转让</Text>
             </View>
           ) : (
             <View style={styles.list}>
               {candidates.map((m) => (
-                <Pressable key={m.id} onPress={() => pick(m)} style={[styles.row, { backgroundColor: palette.card }]}>
+                <Pressable
+                  key={m.id}
+                  onPress={() => setSelected(m)}
+                  style={[styles.row, { backgroundColor: palette.card }]}
+                >
                   <SymbolView name="person.crop.circle.fill" tintColor={palette.textTertiary} size={32} />
                   <Text style={[styles.name, { color: palette.textPrimary }]}>{m.nickname}</Text>
                   <View style={styles.flex} />
@@ -72,6 +79,20 @@ export function TransferSheet({
           )}
         </SafeAreaView>
       </View>
+
+      <DangerConfirmSheet
+        visible={!!selected}
+        title={selected ? `转让户主给「${selected.nickname}」` : ''}
+        message="转让后你将变成普通成员，对方获得家庭管理权。此操作不可撤销。"
+        matchLabel={selected ? `输入对方昵称「${selected.nickname}」以确认` : ''}
+        matchValue={selected?.nickname ?? ''}
+        slideLabel="滑动以确认转让"
+        onConfirm={async () => {
+          if (selected) await transferM.mutateAsync(selected.userId);
+        }}
+        onSuccess={askLeaveThenClose}
+        onClose={() => setSelected(null)}
+      />
     </Modal>
   );
 }

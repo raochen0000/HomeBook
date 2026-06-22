@@ -32,6 +32,7 @@ import {
   useHiddenCategoryIds,
   useMemberships,
   useSoftDeleteTransaction,
+  useTransactions,
   useUpdateTransaction,
   type Category,
   type FamilyMembership,
@@ -51,8 +52,10 @@ export type RecordSheetProps = {
   recorderId: string;
   /** null = 新建；非 null = 编辑该流水。 */
   editing: Transaction | null;
-  /** 保存成功回调（父级据此弹顶部 toast）。 */
-  onSaved?: () => void;
+  /** 保存成功回调；firstRecord=true 表示这是家庭第一笔（父层据此在面板关闭后弹庆祝，否则弹 toast）。 */
+  onSaved?: (info: { firstRecord: boolean }) => void;
+  /** 面板关闭动画结束（iOS）；父层用它在面板消失后再弹首次记账庆祝。 */
+  onDismiss?: () => void;
 };
 
 /** 数字键盘按行排布（便于画分割线，形成网格分割感）。 */
@@ -76,9 +79,15 @@ function rawToCents(raw: string): number {
 }
 
 /** 外壳：原生 pageSheet。内部表单只在打开时挂载，靠 useState 初值按 editing 还原（避免 setState-in-effect）。 */
-export function RecordSheet({ visible, onClose, familyId, recorderId, editing, onSaved }: RecordSheetProps) {
+export function RecordSheet({ visible, onClose, onDismiss, familyId, recorderId, editing, onSaved }: RecordSheetProps) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+      onDismiss={onDismiss}
+    >
       {visible ? (
         <RecordForm familyId={familyId} recorderId={recorderId} editing={editing} onClose={onClose} onSaved={onSaved} />
       ) : null}
@@ -96,6 +105,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   const createM = useCreateTransaction();
   const updateM = useUpdateTransaction();
   const deleteM = useSoftDeleteTransaction();
+  const transactionsQ = useTransactions();
   const saving = createM.isPending || updateM.isPending;
 
   // 初值按 editing 还原（表单随每次打开重新挂载，初值即生效）。
@@ -159,6 +169,8 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
 
   const handleSave = async () => {
     if (!canSave || !effectiveCategoryId) return;
+    // 家庭第一笔？仅新建、且流水列表已加载为空时判定（写入前判，避免失效刷新干扰）。
+    const isFirstRecord = !editing && transactionsQ.isSuccess && (transactionsQ.data?.length ?? 0) === 0;
     try {
       if (editing) {
         await updateM.mutateAsync({
@@ -181,7 +193,8 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
           occurred_at: occurredAt.toISOString(),
         });
       }
-      onSaved?.();
+      // 庆祝交由父层在面板关闭后展示（onDismiss），这里只上报「是否家庭第一笔」并关闭面板。
+      onSaved?.({ firstRecord: isFirstRecord });
       onClose();
     } catch (e) {
       Alert.alert('保存失败', (e as Error).message ?? String(e));

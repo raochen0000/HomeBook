@@ -11,11 +11,11 @@
 import { Image } from 'expo-image';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useMyProfile } from '@/api';
+import { useMyProfile, useUpdateMyAvatar } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Toast } from '@/components/toast';
 import { Radius, Space, TabBarInset, usePalette } from '@/constants/design';
@@ -62,10 +62,19 @@ export default function MineScreen() {
   const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top);
   const { session } = useSession();
   const { data: profile } = useMyProfile();
+  const updateAvatar = useUpdateMyAvatar();
   const [toast, setToast] = useState(false);
 
   // 占位入口：尚无对应功能，统一轻提示。
   const onPlaceholder = () => setToast(true);
+
+  // 点击头像换图：选图 → 压缩 → 上传 → 写回 avatar_url（取消则静默）。
+  const onChangeAvatar = () => {
+    if (!profile?.id || updateAvatar.isPending) return;
+    updateAvatar.mutate(profile.id, {
+      onError: (e) => Alert.alert('头像更新失败', (e as Error).message ?? String(e)),
+    });
+  };
 
   const onSignOut = () => {
     Alert.alert('退出登录', '确定要退出当前账号吗？', [
@@ -92,10 +101,12 @@ export default function MineScreen() {
         contentContainerStyle={[styles.content, { paddingTop: headerHeight + Space[2] }]}
         scrollIndicatorInsets={{ top: headerHeight, bottom: TabBarInset }}
       >
-        {/* 账号信息（点击占位） */}
-        <Pressable style={styles.profile} onPress={onPlaceholder}>
-          <Avatar url={profile?.avatar_url ?? null} />
-          <View style={styles.profileText}>
+        {/* 账号信息（头像可点换图；文字区点击占位） */}
+        <View style={styles.profile}>
+          <Pressable onPress={onChangeAvatar} disabled={updateAvatar.isPending}>
+            <Avatar url={profile?.avatar_url ?? null} uploading={updateAvatar.isPending} palette={palette} />
+          </Pressable>
+          <Pressable style={styles.profileText} onPress={onPlaceholder}>
             <ThemedText style={[styles.name, { color: palette.textPrimary }]} numberOfLines={1}>
               {profile?.nickname ?? '小满'}
             </ThemedText>
@@ -105,8 +116,8 @@ export default function MineScreen() {
               </ThemedText>
               <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
             </View>
-          </View>
-        </Pressable>
+          </Pressable>
+        </View>
 
         {/* 设置分组 */}
         {GROUPS.map((rows, gi) => (
@@ -144,14 +155,33 @@ export default function MineScreen() {
   );
 }
 
-function Avatar({ url }: { url: string | null }) {
-  const palette = usePalette();
-  if (url) {
-    return <Image source={url} style={styles.avatar} contentFit="cover" transition={120} />;
-  }
+function Avatar({
+  url,
+  uploading,
+  palette,
+}: {
+  url: string | null;
+  uploading: boolean;
+  palette: ReturnType<typeof usePalette>;
+}) {
   return (
-    <View style={[styles.avatar, styles.avatarFallback]}>
-      <SymbolView name="person.fill" tintColor={palette.textTertiary} size={44} />
+    <View style={styles.avatarWrap}>
+      {url ? (
+        <Image source={url} style={styles.avatar} contentFit="cover" transition={120} />
+      ) : (
+        <View style={[styles.avatar, styles.avatarFallback]}>
+          <SymbolView name="person.fill" tintColor={palette.textTertiary} size={44} />
+        </View>
+      )}
+      {uploading ? (
+        <View style={[styles.avatar, styles.avatarOverlay]}>
+          <ActivityIndicator color="#fff" />
+        </View>
+      ) : null}
+      {/* 相机角标：提示头像可点更换 */}
+      <View style={[styles.avatarBadge, { backgroundColor: palette.accent, borderColor: palette.base }]}>
+        <SymbolView name="camera.fill" tintColor={palette.onAccent} size={13} />
+      </View>
     </View>
   );
 }
@@ -191,8 +221,28 @@ const styles = StyleSheet.create({
   header: { width: '100%' },
 
   profile: { flexDirection: 'row', alignItems: 'center', gap: Space[4], paddingVertical: Space[2] },
+  avatarWrap: { width: 88, height: 88 },
   avatar: { width: 88, height: 88, borderRadius: Radius.full },
   avatarFallback: { backgroundColor: CHIP_FILL, alignItems: 'center', justifyContent: 'center' },
+  avatarOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 28,
+    height: 28,
+    borderRadius: Radius.full,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   profileText: { flex: 1, gap: Space[2] },
   // 须显式给 lineHeight：ThemedText 默认 type 带 lineHeight:24，会裁掉更大字号的顶部。
   name: { fontSize: 26, lineHeight: 34, fontWeight: '700' },

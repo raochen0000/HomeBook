@@ -12,6 +12,7 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  type FamilyMembership,
   useCreateFamily,
   useDissolveFamily,
   useLeaveFamily,
@@ -20,12 +21,14 @@ import {
   useMyProfile,
   useRemoveMember,
   useTransactions,
+  useUpdateFamilyCover,
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Toast } from '@/components/toast';
 import { Radius, Space, TabBarInset, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import { CategoryManageSheet } from '@/features/category/manage-sheet';
+import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
 import { InviteSheet } from '@/features/family/invite-sheet';
 import { ScanSheet } from '@/features/family/scan-sheet';
 import { TransferSheet } from '@/features/family/transfer-sheet';
@@ -58,6 +61,7 @@ export default function FamilyScreen() {
   const leaveM = useLeaveFamily();
   const dissolveM = useDissolveFamily();
   const removeM = useRemoveMember();
+  const updateCoverM = useUpdateFamilyCover();
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
@@ -66,6 +70,8 @@ export default function FamilyScreen() {
   const [savingsOpen, setSavingsOpen] = useState(false);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<FamilyMembership | null>(null);
+  const [dissolveOpen, setDissolveOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const myId = profileQ.data?.id;
@@ -73,6 +79,14 @@ export default function FamilyScreen() {
   const members = membershipsQ.data ?? [];
   const isOwner = !!family && family.owner_user_id === myId;
   const candidates = members.filter((m) => m.userId !== myId);
+
+  // 户主点击家庭头像换图：选图 → 压缩 → 上传 → 写回 cover_url（取消则静默）。
+  const onChangeCover = () => {
+    if (!family || !isOwner || updateCoverM.isPending) return;
+    updateCoverM.mutate(family.id, {
+      onError: (e) => Alert.alert('家庭头像更新失败', (e as Error).message ?? String(e)),
+    });
+  };
 
   // ── 仪表盘统计：本月收支/环比、本月总笔数、连续记账天数、按成员的本月/今日笔数 ──
   const stats = useMemo(() => {
@@ -176,39 +190,9 @@ export default function FamilyScreen() {
     ]);
   };
 
-  const onRemove = (m: (typeof members)[number]) => {
-    Alert.alert(`移除「${m.nickname}」`, '移除后 TA 将无法访问本家庭账本，TA 已记录的流水会保留在家里。确定移除吗？', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '移除',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await removeM.mutateAsync(m.userId);
-          } catch (e) {
-            Alert.alert('移除失败', (e as Error).message ?? String(e));
-          }
-        },
-      },
-    ]);
-  };
-
-  const onDissolve = () => {
-    Alert.alert('解散家庭', '解散后全部成员将退出，账本不再可用。此操作不可恢复，确定解散吗？', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '解散',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await dissolveM.mutateAsync();
-          } catch (e) {
-            Alert.alert('解散失败', (e as Error).message ?? String(e));
-          }
-        },
-      },
-    ]);
-  };
+  // 破坏性操作改走「输入昵称/家庭名 + 滑动确认」对话框（流程 5/6），见底部 DangerConfirmSheet。
+  const onRemove = (m: FamilyMembership) => setRemoveTarget(m);
+  const onDissolve = () => setDissolveOpen(true);
 
   const onInvite = () => {
     if (!isOwner) {
@@ -268,9 +252,14 @@ export default function FamilyScreen() {
             <View style={[styles.hero, { backgroundColor: palette.bannerTint }]}>
               <View style={styles.heroHead}>
                 <View style={styles.heroTop}>
-                  <View style={[styles.heroBadge, { backgroundColor: palette.accent }]}>
-                    <ThemedText style={[styles.heroBadgeText, { color: palette.onAccent }]}>家</ThemedText>
-                  </View>
+                  <Pressable onPress={onChangeCover} disabled={!isOwner || updateCoverM.isPending}>
+                    <FamilyAvatar
+                      url={family.cover_url}
+                      uploading={updateCoverM.isPending}
+                      canEdit={isOwner}
+                      palette={palette}
+                    />
+                  </Pressable>
                   <View style={styles.flex}>
                     <ThemedText style={[styles.heroName, { color: palette.textPrimary }]}>{family.name}</ThemedText>
                     <View style={styles.heroMetaRow}>
@@ -498,11 +487,71 @@ export default function FamilyScreen() {
       <InviteSheet visible={inviteOpen} onClose={() => setInviteOpen(false)} />
       <ScanSheet visible={scanOpen} onClose={() => setScanOpen(false)} />
       <TransferSheet visible={transferOpen} onClose={() => setTransferOpen(false)} candidates={candidates} />
+      <DangerConfirmSheet
+        visible={!!removeTarget}
+        title={removeTarget ? `移除「${removeTarget.nickname}」` : ''}
+        message="移除后 TA 将无法访问本家庭账本；TA 已记录的流水会保留在家里。"
+        matchLabel={removeTarget ? `输入对方昵称「${removeTarget.nickname}」以确认` : ''}
+        matchValue={removeTarget?.nickname ?? ''}
+        slideLabel="滑动以确认移除"
+        onConfirm={async () => {
+          if (removeTarget) await removeM.mutateAsync(removeTarget.userId);
+        }}
+        onSuccess={() => setToast(`已移除「${removeTarget?.nickname ?? '成员'}」`)}
+        onClose={() => setRemoveTarget(null)}
+      />
+      <DangerConfirmSheet
+        visible={dissolveOpen}
+        title="解散家庭"
+        message="解散后全部成员将被移出，所有记账数据将被永久删除，不可恢复。"
+        matchLabel={family ? `输入家庭名「${family.name}」以确认` : '输入家庭名以确认'}
+        matchValue={family?.name ?? ''}
+        slideLabel="滑动以确认解散"
+        onConfirm={async () => {
+          await dissolveM.mutateAsync();
+        }}
+        onClose={() => setDissolveOpen(false)}
+      />
       <BudgetSheet visible={budgetOpen} onClose={() => setBudgetOpen(false)} />
       <SavingsSheet visible={savingsOpen} onClose={() => setSavingsOpen(false)} />
       <CategoryManageSheet visible={categoryOpen} onClose={() => setCategoryOpen(false)} />
       <NotificationCenterSheet visible={notifyOpen} onClose={() => setNotifyOpen(false)} />
       <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
+    </View>
+  );
+}
+
+// ── 家庭头像：有封面显示封面图，无则「家」字底；户主可点更换（带相机角标）──
+function FamilyAvatar({
+  url,
+  uploading,
+  canEdit,
+  palette,
+}: {
+  url: string | null;
+  uploading: boolean;
+  canEdit: boolean;
+  palette: ReturnType<typeof usePalette>;
+}) {
+  return (
+    <View style={styles.heroBadgeWrap}>
+      {url ? (
+        <Image source={url} style={styles.heroBadge} contentFit="cover" transition={120} />
+      ) : (
+        <View style={[styles.heroBadge, { backgroundColor: palette.accent }]}>
+          <ThemedText style={[styles.heroBadgeText, { color: palette.onAccent }]}>家</ThemedText>
+        </View>
+      )}
+      {uploading ? (
+        <View style={[styles.heroBadge, styles.heroBadgeOverlay]}>
+          <ActivityIndicator color="#fff" size="small" />
+        </View>
+      ) : null}
+      {canEdit ? (
+        <View style={[styles.heroBadgeCamera, { backgroundColor: palette.accent, borderColor: palette.bannerTint }]}>
+          <SymbolView name="camera.fill" tintColor={palette.onAccent} size={10} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -674,8 +723,21 @@ const styles = StyleSheet.create({
   hero: { borderRadius: Radius.lg, padding: Space[4], gap: Space[4], overflow: 'hidden' },
   heroHead: { gap: Space[2] },
   heroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Space[3] },
+  heroBadgeWrap: { width: 52, height: 52 },
   heroBadge: { width: 52, height: 52, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
   heroBadgeText: { fontSize: 26, lineHeight: 32, fontWeight: '700' },
+  heroBadgeOverlay: { position: 'absolute', top: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.35)' },
+  heroBadgeCamera: {
+    position: 'absolute',
+    right: -4,
+    bottom: -4,
+    width: 20,
+    height: 20,
+    borderRadius: Radius.full,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   heroName: { fontSize: 22, lineHeight: 28, fontWeight: '700' },
   heroMetaRow: { flexDirection: 'row', alignItems: 'center', gap: Space[1], marginTop: 2 },
   heroMeta: { fontSize: 13, lineHeight: 18 },

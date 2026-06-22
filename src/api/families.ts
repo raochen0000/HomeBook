@@ -1,6 +1,7 @@
 /** 家庭 / profile 数据访问 + 家庭相关 RPC（创建、邀请、加入）。 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { pickAndUploadAvatar, pickAndUploadFamilyCover } from '@/adapters/storage';
 import type { Tables } from '@/lib/database.types';
 import { supabase } from '@/lib/supabase';
 
@@ -104,6 +105,42 @@ export async function joinFamilyByCode(code: string): Promise<Family> {
   return data;
 }
 
+// ── 加入家庭预览（流程 4：满码 → 预览卡 + 加入影响，确认后才 join）──────────────
+
+/** 加入对调用者当前家庭的影响（preview_family_by_code 返回，对应 PRD §6.3 四分支）。 */
+export type JoinImpact =
+  | 'none' // 无家庭 / 单人无记账 → 直接加入
+  | 'delete_origin' // 单人家庭且有记账 → ⚠ 原家庭+数据将删除，需二次确认
+  | 'auto_leave' // 多人家庭普通成员 → ⚠ 自动退出当前家庭
+  | 'blocked_owner'; // 多人家庭户主 → ⛔ 禁用加入，先转让/解散
+
+/** preview_family_by_code 的返回契约（jsonb，手动解析）。 */
+export type FamilyPreview = {
+  status: 'ok' | 'invalid' | 'expired' | 'full' | 'already_member';
+  impact?: JoinImpact;
+  family?: {
+    id: string;
+    name: string;
+    cover_url: string | null;
+    member_count: number;
+    max_members: number;
+    owner: { nickname: string; avatar_url: string | null };
+    member_avatars: (string | null)[];
+  };
+};
+
+/** 满码后拉取家庭预览 + 加入影响（只读，不改任何状态）。 */
+export async function previewFamilyByCode(code: string): Promise<FamilyPreview> {
+  const { data, error } = await supabase.rpc('preview_family_by_code', { p_code: code });
+  if (error) throw error;
+  return data as unknown as FamilyPreview;
+}
+
+/** 预览为只读、不写缓存，故用裸 useMutation（不做失效）。 */
+export function usePreviewFamily() {
+  return useMutation({ mutationFn: (code: string) => previewFamilyByCode(code) });
+}
+
 /** 创建/加入家庭后，profile 与 family 都需刷新。 */
 function useFamilyMutation<TArgs>(fn: (args: TArgs) => Promise<unknown>) {
   const qc = useQueryClient();
@@ -179,4 +216,59 @@ export function useLeaveFamily() {
 
 export function useDissolveFamily() {
   return useVoidLifecycleMutation(dissolveFamily);
+}
+
+// ── 头像 / 家庭封面上传（在线操作，不进离线队列；图片上传走 StorageAdapter）──────
+
+/** 把头像公开 URL 写回当前用户 profile（RLS：仅本人可改）。 */
+export async function updateMyAvatarUrl(url: string): Promise<void> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!sessionData.session) throw new Error('未登录');
+  const { error } = await supabase.from('profiles').update({ avatar_url: url }).eq('id', sessionData.session.user.id);
+  if (error) throw error;
+}
+
+/** 把封面公开 URL 写回家庭（RLS：仅户主可改）。 */
+export async function updateFamilyCoverUrl(familyId: string, url: string): Promise<void> {
+  const { error } = await supabase.from('families').update({ cover_url: url }).eq('id', familyId);
+  if (error) throw error;
+}
+
+/**
+ * 选图 → 压缩 → 上传 → 写回 profile.avatar_url 的一站式 mutation。
+ * 用户取消选图时 data 为 null（UI 静默处理，不当作成功也不报错）。
+ */
+export function useUpdateMyAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      const url = await pickAndUploadAvatar(userId);
+      if (url === null) return null;
+      await updateMyAvatarUrl(url);
+      return url;
+    },
+    onSuccess: (url) => {
+      if (url === null) return;
+      qc.invalidateQueries({ queryKey: queryKeys.profile });
+      qc.invalidateQueries({ queryKey: queryKeys.familyMembers });
+      qc.invalidateQueries({ queryKey: queryKeys.memberships });
+    },
+  });
+}
+
+/** 选图 → 压缩 → 上传 → 写回 family.cover_url 的一站式 mutation（仅户主）。取消时 data 为 null。 */
+export function useUpdateFamilyCover() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (familyId: string) => {
+      const url = await pickAndUploadFamilyCover(familyId);
+      if (url === null) return null;
+      await updateFamilyCoverUrl(familyId, url);
+      return url;
+    },
+    onSuccess: (url) => {
+      if (url === null) return;
+      qc.invalidateQueries({ queryKey: queryKeys.family });
+    },
+  });
 }
