@@ -1,8 +1,8 @@
 # 家账 · 技术选型与开发方案（TECH）
 
-> 文档版本：v0.2.1（导航说明同步 DESIGN v0.4.0：四 Tab + 记一笔浮钮 + 顶栏搜索，废弃药丸 / Search 圆 / BottomAccessory 三栏条旧描述；里程碑同步 PRD §11 报表扩充：M3 增概览环比 / 结余率，M4 报表完整版图表清单细化、横向条形优先原生件）
-> 最后更新：2026-06-19
-> 关联文档：PRD.md（v0.1.2，对应 §23）、DESIGN.md（v0.4.0）、IA.md（v0.2.0）、MVP.md（v0.1.3）、DATAMODEL.md（v0.1）、AGENTS.md（AI 编码业务铁律，根目录）
+> 文档版本：v0.2.2（家庭协作：邀请码改为 6 位大写字母数字（排除易混 `0/O/1/I`），新增只读 `preview_family_by_code` 凭码换家庭预览（限频防枚举）；OSS 增「家庭封面」；对应 PRD 流程 3/4、§3.5）
+> 最后更新：2026-06-21
+> 关联文档：PRD.md（§23；流程 3/4、§3.5）、DESIGN.md（§5.6）、IA.md、MVP.md、DATAMODEL.md（§3.2、§5.1）、AGENTS.md（AI 编码业务铁律，根目录）
 > 负责人：产品组 / 研发
 > 用途：作为「家账」客户端与后端技术实现的单一事实来源（Single Source of Truth），记录技术选型、后端架构、开发环境、调试流程、里程碑排期与上架盈利路径。后续可基于本文档持续补充。
 
@@ -196,7 +196,7 @@ git --version
 | 服务端逻辑  | **Postgres RPC**（事务/不变式）+ **Edge Functions（Deno/TS）** | 重计算可选**阿里云函数计算 FC**                     |
 | 定时任务    | **pg_cron** 触发 Edge Function                                 | 或**阿里云定时触发器**                              |
 | 实时        | **Supabase Realtime**（websocket）                             | 自建须确保境内可达                                  |
-| 对象存储    | Supabase Storage（S3 兼容，后端可指向 OSS）                    | **阿里云 OSS**（头像、目标封面）                    |
+| 对象存储    | Supabase Storage（S3 兼容，后端可指向 OSS）                    | **阿里云 OSS**（头像、家庭封面、目标封面）          |
 | 短信验证码  | —                                                              | **阿里云短信服务**（签名 + 模板报备，企业实名）     |
 | 推送        | NOTIFICATION 表 + Realtime 站内红点                            | **阿里云移动推送 EMAS**（厂商通道 + APNs，见 §7.5） |
 | 加速        | —                                                              | **阿里云 CDN**                                      |
@@ -209,7 +209,7 @@ git --version
 - **手机号 OTP**：客户端请求验证码 → 后端（Edge Function / RPC）调**阿里云短信服务**下发 → 客户端回填校验 → Supabase Auth 签发 session（JWT），存入 `expo-secure-store`。
 - **Apple 登录**：Supabase Auth Apple provider（iOS 必备的第三方登录合规项）。
 - **微信登录（后期可选）**：Supabase Auth 无内置，需自实现 OAuth provider。
-- **风控**：验证码下发做频率限制与防刷（按手机号/IP/设备）；邀请码 24h 有效且户主权限变更即失效（服务端校验）。
+- **风控**：验证码下发做频率限制与防刷（按手机号/IP/设备）；邀请码为 **6 位大写字母数字（排除易混 `0/O/1/I`）**、24h 有效且户主权限变更即失效（服务端校验）；**`preview_family_by_code` 凭码即返家庭信息，须按 IP / 设备 / 失败次数限频，防邀请码枚举爆破**。
 - **客户端只持 anon key**：service role key 绝不进客户端/仓库；权限由 RLS 兜底（见 AGENTS.md §4）。
 
 ### 7.4 服务端必须强制的约束
@@ -265,19 +265,20 @@ git --version
 
 **迁移文件清单：**
 
-| 文件                               | 内容                                                                                     |
-| ---------------------------------- | ---------------------------------------------------------------------------------------- |
-| `…0001_extensions.sql`             | `private` schema、`set_updated_at()` 通用函数                                            |
-| `…0002_core_tables.sql`            | `profiles` / `families` / `memberships`（含交叉外键、一人一家 / 户主唯一部分索引）       |
-| `…0003_ledger_savings_tables.sql`  | `categories` / `savings_goals` / `transactions` / `savings_entries`                      |
-| `…0004_budget_tables.sql`          | `budgets` / `budget_categories`                                                          |
-| `…0005_aux_tables.sql`             | `invitations` / `succession_requests` / `notifications` / `monthly_summaries`            |
-| `…0006_constraints_triggers.sql`   | `handle_new_user`、`updated_at` 触发器、`family_id` 不可变、成员 ≤8 / 目标 ≤5 计数触发器 |
-| `…0007_rls_helpers.sql`            | `private.*` RLS 辅助函数                                                                 |
-| `…0008_rls_policies.sql`           | 各表 RLS 策略 + 表权限 GRANT                                                             |
-| `…0009_rpc_functions.sql`          | `create_family` / `join_family_by_code` / `savings_deposit` / `savings_withdraw`         |
-| `…0010_seed_system_categories.sql` | 系统预设分类种子（含储蓄存入/取出，资金闭环依赖）                                        |
-| `…0011_create_invitation_rpc.sql`  | `create_invitation`（户主生成邀请码：仅户主 / 满 8 拦截 / 24h / 复用或刷新，PRD §5）     |
+| 文件                               | 内容                                                                                                                                                                                   |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `…0001_extensions.sql`             | `private` schema、`set_updated_at()` 通用函数                                                                                                                                          |
+| `…0002_core_tables.sql`            | `profiles` / `families` / `memberships`（含交叉外键、一人一家 / 户主唯一部分索引）                                                                                                     |
+| `…0003_ledger_savings_tables.sql`  | `categories` / `savings_goals` / `transactions` / `savings_entries`                                                                                                                    |
+| `…0004_budget_tables.sql`          | `budgets` / `budget_categories`                                                                                                                                                        |
+| `…0005_aux_tables.sql`             | `invitations` / `succession_requests` / `notifications` / `monthly_summaries`                                                                                                          |
+| `…0006_constraints_triggers.sql`   | `handle_new_user`、`updated_at` 触发器、`family_id` 不可变、成员 ≤8 / 目标 ≤5 计数触发器                                                                                               |
+| `…0007_rls_helpers.sql`            | `private.*` RLS 辅助函数                                                                                                                                                               |
+| `…0008_rls_policies.sql`           | 各表 RLS 策略 + 表权限 GRANT                                                                                                                                                           |
+| `…0009_rpc_functions.sql`          | `create_family` / `join_family_by_code` / `savings_deposit` / `savings_withdraw`                                                                                                       |
+| `…0010_seed_system_categories.sql` | 系统预设分类种子（含储蓄存入/取出，资金闭环依赖）                                                                                                                                      |
+| `…0011_create_invitation_rpc.sql`  | `create_invitation`（户主生成邀请码：仅户主 / 满 8 拦截 / 24h / 复用或刷新，PRD §5）                                                                                                   |
+| `…0012_preview_family_rpc.sql`     | `preview_family_by_code`（只读：校验码同 `join_family_by_code`；返回家庭名 / 封面 / 户主昵称+头像 / 成员头像列表 / 人数 / 对当前用户的加入影响；**不返回成员昵称**；限频，PRD 流程 4） |
 
 **迁移执行方式：** 当前后端为阿里云自托管 Supabase 兼容实例（非 Cloud），CLI 用直连 Postgres 连接串 `supabase db push`（不用 `supabase link`）；或在 Studio SQL Editor 按编号顺序粘贴执行。客户端仅持 anon key，无法执行 DDL。
 
@@ -335,13 +336,13 @@ supabase/                 # 后端工程（与客户端同仓或独立仓）
 
 > 与 MVP.md §4 的 M0–M4 批次一一对应。
 
-| 批次               | 内容                                                                            | 客户端关键交付                                                                                                                                                        | 后端关键交付                                                                                                               |
-| ------------------ | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **M0 地基**        | 脚手架 + 设计令牌主题 + 本地 DB + API 层骨架                                    | TS 主题（Light/Night）、NativeTabs 四 Tab（首页 / 报表 / 家庭 / 我的）+ 记一笔悬浮钮 + 顶栏搜索图标、搜索占位页、`<Money/>`、空状态                                   | 阿里云 Supabase 基座搭起（A1/A2 定夺）、迁移骨架 + 核心表 + RLS、CI 跑 pgTAP                                               |
-| **M1 账号 + 记账** | 流程 1 登录（MVP = 邮箱 / Apple；**手机 OTP 移至发布前**，见 §7.9 / MVP §2.4）、流程 2 记一笔、流程 10 编辑 / 删除 | 记账 Sheet（大金额输入）、流水列表（按日分组 + 左滑）、离线同步队列                                                                                                   | Supabase Auth（MVP 邮箱 + Apple）、流水 RPC、WatermelonDB 同步函数（pull/push）；**阿里云短信 OTP 发布前接入**             |
-| **M2 家庭协作**    | 流程 3 邀请二维码、流程 4 扫码加入、流程 5 转让 / 退出 / 解散、流程 13 关键通知 | expo-camera 扫码、qrcode-svg 生成、滑动确认控件、被移除全屏兜底                                                                                                       | 家庭/成员流转 RPC（在线）、邀请码校验、NOTIFICATION + Realtime                                                             |
-| **M3 基础报表**    | 流程 9 基础版（本月收支结余 + 分类占比环形图）                                  | Victory Native XL 环形图 + 概览环比角标 + 结余率（值）+ 分类明细下钻                                                                                                  | 报表聚合视图 / RPC（排除储蓄类流水口径；输出本期 + 上期对比值供环比）                                                      |
-| **M4 增值（P1）**  | 分类管理 → 预算 → 储蓄目标 → 完整报表 / 月度总结 → 移除成员 → 通知体系          | 进度条 / 目标卡 / 庆祝动效、Banner；报表完整版：成员参与度（原生横向条）/ 发生额折线 / 累计同期双线 / 收支双柱 / 分类环比 / 大额 Top N 列表 / 结余率仪表 / 月度总结卡（**报表图表实现为 react-native-svg 自绘，非 Victory**；月度总结为客户端实时计算） | 储蓄存取 RPC、pg_cron（预算重置/继任判定）、报表聚合扩展（分类环比 / 同期累计 / Top N 聚合）；**系统推送（阿里云 EMAS）、月度总结服务端快照 移至发布前（见 MVP §2.4）** |
+| 批次               | 内容                                                                                                               | 客户端关键交付                                                                                                                                                                                                                                          | 后端关键交付                                                                                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0 地基**        | 脚手架 + 设计令牌主题 + 本地 DB + API 层骨架                                                                       | TS 主题（Light/Night）、NativeTabs 四 Tab（首页 / 报表 / 家庭 / 我的）+ 记一笔悬浮钮 + 顶栏搜索图标、搜索占位页、`<Money/>`、空状态                                                                                                                     | 阿里云 Supabase 基座搭起（A1/A2 定夺）、迁移骨架 + 核心表 + RLS、CI 跑 pgTAP                                                                                            |
+| **M1 账号 + 记账** | 流程 1 登录（MVP = 邮箱 / Apple；**手机 OTP 移至发布前**，见 §7.9 / MVP §2.4）、流程 2 记一笔、流程 10 编辑 / 删除 | 记账 Sheet（大金额输入）、流水列表（按日分组 + 左滑）、离线同步队列                                                                                                                                                                                     | Supabase Auth（MVP 邮箱 + Apple）、流水 RPC、WatermelonDB 同步函数（pull/push）；**阿里云短信 OTP 发布前接入**                                                          |
+| **M2 家庭协作**    | 流程 3 邀请二维码、流程 4 扫码加入、流程 5 转让 / 退出 / 解散、流程 13 关键通知                                    | expo-camera 扫码、qrcode-svg 生成、滑动确认控件、被移除全屏兜底                                                                                                                                                                                         | 家庭/成员流转 RPC（在线）、邀请码校验、NOTIFICATION + Realtime                                                                                                          |
+| **M3 基础报表**    | 流程 9 基础版（本月收支结余 + 分类占比环形图）                                                                     | Victory Native XL 环形图 + 概览环比角标 + 结余率（值）+ 分类明细下钻                                                                                                                                                                                    | 报表聚合视图 / RPC（排除储蓄类流水口径；输出本期 + 上期对比值供环比）                                                                                                   |
+| **M4 增值（P1）**  | 分类管理 → 预算 → 储蓄目标 → 完整报表 / 月度总结 → 移除成员 → 通知体系                                             | 进度条 / 目标卡 / 庆祝动效、Banner；报表完整版：成员参与度（原生横向条）/ 发生额折线 / 累计同期双线 / 收支双柱 / 分类环比 / 大额 Top N 列表 / 结余率仪表 / 月度总结卡（**报表图表实现为 react-native-svg 自绘，非 Victory**；月度总结为客户端实时计算） | 储蓄存取 RPC、pg_cron（预算重置/继任判定）、报表聚合扩展（分类环比 / 同期累计 / Top N 聚合）；**系统推送（阿里云 EMAS）、月度总结服务端快照 移至发布前（见 MVP §2.4）** |
 
 每批结束应可独立验收（与 MVP §4 一致）。
 

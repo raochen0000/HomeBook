@@ -1,8 +1,8 @@
 # 家账 · 数据模型文档（DATAMODEL）
 
-> 文档版本：v0.1
-> 最后更新：2026-05-31
-> 关联文档：PRD.md（v0.1.1）对应 §18 数据模型
+> 文档版本：v0.1.1（FAMILY 新增 `cover_url` 家庭封面；INVITATION.code 明确为 6 位大写字母数字、排除易混字符——支撑加入家庭手输码与预览卡，详见 PRD 流程 3/4、§3.5）
+> 最后更新：2026-06-21
+> 关联文档：PRD.md（§18 数据模型；流程 3/4、§3.5）
 > 负责人：产品组 / 后端
 
 ---
@@ -73,15 +73,16 @@ erDiagram
 
 ### 3.2 FAMILY（家庭）
 
-| 字段                        | 类型      | 约束     | 说明                                |
-| --------------------------- | --------- | -------- | ----------------------------------- |
-| `id`                        | UUID      | PK       |                                     |
-| `name`                      | string    | not null | 家庭名（解散二次确认凭据）          |
-| `owner_user_id`             | UUID      | FK→USER  | 户主，**每家唯一**                  |
-| `timezone`                  | string    | not null | 账期时区（创建时落定，见 PRD §2.5） |
-| `member_count`              | int       | ≤ 8      | 冗余计数，便于上限校验              |
-| `status`                    | enum      |          | `active` / `dissolved`              |
-| `created_at` / `updated_at` | timestamp |          |                                     |
+| 字段                        | 类型      | 约束     | 说明                                                                                                       |
+| --------------------------- | --------- | -------- | ---------------------------------------------------------------------------------------------------------- |
+| `id`                        | UUID      | PK       |                                                                                                            |
+| `name`                      | string    | not null | 家庭名（解散二次确认凭据）                                                                                 |
+| `cover_url`                 | string    | null     | 家庭封面图（阿里云 OSS）；无封面时前端用暖色默认底 / 插画占位（加入预览卡、家庭页头用，PRD §3.5 / 流程 4） |
+| `owner_user_id`             | UUID      | FK→USER  | 户主，**每家唯一**                                                                                         |
+| `timezone`                  | string    | not null | 账期时区（创建时落定，见 PRD §2.5）                                                                        |
+| `member_count`              | int       | ≤ 8      | 冗余计数，便于上限校验                                                                                     |
+| `status`                    | enum      |          | `active` / `dissolved`                                                                                     |
+| `created_at` / `updated_at` | timestamp |          |                                                                                                            |
 
 ### 3.3 MEMBERSHIP（成员关系）
 
@@ -190,13 +191,15 @@ erDiagram
 
 ### 5.1 INVITATION（邀请码）
 
-| 字段         | 类型      | 约束   | 说明                            |
-| ------------ | --------- | ------ | ------------------------------- |
-| `id`         | UUID      | PK     |                                 |
-| `family_id`  | UUID      | FK     |                                 |
-| `code`       | string    | unique | 邀请码内容                      |
-| `expires_at` | timestamp |        | 24 小时有效期                   |
-| `status`     | enum      |        | `valid` / `revoked` / `expired` |
+| 字段         | 类型      | 约束   | 说明                                                                        |
+| ------------ | --------- | ------ | --------------------------------------------------------------------------- |
+| `id`         | UUID      | PK     |                                                                             |
+| `family_id`  | UUID      | FK     |                                                                             |
+| `code`       | string    | unique | 邀请码：**6 位，大写 A–Z + 数字 0–9，排除易混 `0/O/1/I`**；手输与二维码同源 |
+| `expires_at` | timestamp |        | 24 小时有效期                                                               |
+| `status`     | enum      |        | `valid` / `revoked` / `expired`                                             |
+
+> 凭 `code` 换取家庭预览（`preview_family_by_code`，只读、在线、限频）与执行加入（`join_family_by_code`）；户主权限变更 / 刷新即令旧码 `revoked`（PRD §5、TECH §7.3）。
 
 ### 5.2 SUCCESSION_REQUEST（户主继任申请）
 
