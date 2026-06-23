@@ -1,7 +1,8 @@
--- 家账 HomeBook · 全量建库脚本（10 个迁移按序合并）
+-- 家账 HomeBook · 全量建库脚本（20 个迁移按序合并）
 -- 用法：在自托管实例的 Studio → SQL Editor 整段粘贴执行一次。
 -- 全程包在一个事务里，任一步出错整体回滚，便于安全重试。
 -- 注意：表无 IF NOT EXISTS，仅供首次建库；重复执行会因对象已存在而报错（属预期）。
+-- 本文件由 scripts/build-supabase-bundle.sh 自动生成，请勿手改；改迁移后重跑脚本。
 
 begin;
 
@@ -932,5 +933,808 @@ insert into public.categories (family_id, name, icon, type, is_system, status) v
   (null, '储蓄·目标存入', 'arrow.down.circle.fill', 'expense', true, 'active'),
   (null, '储蓄·目标取出', 'arrow.up.circle.fill',   'income',  true, 'active')
 on conflict do nothing;
+
+-- ============================================================
+-- >>> migrations/20260618120011_create_invitation_rpc.sql
+-- ============================================================
+-- 0011 · create_invitation RPC（户主生成邀请码）
+-- ----------------------------------------------------------------------------
+-- 对应 PRD §5「流程 3：户主邀请家人加入」：
+--   * 仅户主可生成（前置条件 5.2）
+--   * 家庭满 8 人则拦截（异常 5.5「家庭人数已满」）
+--   * 24h 有效期；不限次数，户主可随时刷新
+--   * 打开邀请页复用当前有效码；显式刷新（p_force_new=true）则作废旧码再生成新码（流程图 L「作废旧码 重新生成」）
+-- 与 join_family_by_code（0009）配套，闭合邀请→加入链路。
+
+create or replace function public.create_invitation(p_force_new boolean default false)
+returns public.invitations
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid      uuid := (select auth.uid());
+  v_family   uuid;
+  v_code     text;
+  v_inv      public.invitations;
+  v_attempts int := 0;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  -- 仅户主（active owner）可生成
+  select family_id into v_family from public.memberships
+    where user_id = v_uid and role = 'owner' and status = 'active';
+  if v_family is null then
+    raise exception '仅户主可生成邀请码' using errcode = '42501';
+  end if;
+
+  -- 家庭已满则无需邀请（PRD 异常 5.5）
+  if (select member_count from public.families where id = v_family) >= 8 then
+    raise exception '家庭成员已达上限（8 人），需先移除成员';
+  end if;
+
+  -- 非强制刷新：复用当前未过期的有效码（打开邀请页场景）
+  if not p_force_new then
+    select * into v_inv from public.invitations
+      where family_id = v_family and status = 'valid' and expires_at > now()
+      order by expires_at desc limit 1;
+    if found then
+      return v_inv;
+    end if;
+  end if;
+
+  -- 刷新或无有效码：作废家庭现有 valid 码，再生成新码
+  update public.invitations set status = 'revoked'
+    where family_id = v_family and status = 'valid';
+
+  -- 生成 8 位大写十六进制码（取自随机 UUID，仅用核心函数，无 pgcrypto 依赖）；冲突重试
+  loop
+    v_attempts := v_attempts + 1;
+    v_code := upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 8));
+    begin
+      insert into public.invitations (family_id, code, expires_at, status)
+        values (v_family, v_code, now() + interval '24 hours', 'valid')
+        returning * into v_inv;
+      return v_inv;
+    exception when unique_violation then
+      if v_attempts >= 5 then raise; end if;
+    end;
+  end loop;
+end;
+$$;
+
+revoke execute on function public.create_invitation(boolean) from public;
+grant execute on function public.create_invitation(boolean) to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260619120012_family_lifecycle_rpcs.sql
+-- ============================================================
+-- 0012 · 家庭生命周期 RPC（PRD 流程 5：转让 / 退出 / 解散）+ 关键通知（流程 13）
+-- ----------------------------------------------------------------------------
+-- 均 SECURITY DEFINER：绕过 RLS 在服务端完成多表事务，函数内自行鉴权与归属校验。
+-- member_count 手动维护（与 0009 一致，无计数触发器）。
+-- 这些流转「必须在线」（不进离线队列，TECH §6.5）。
+
+-- ── transfer_ownership：户主把户主身份转让给本家庭某成员 ──────────────────────
+create or replace function public.transfer_ownership(p_new_owner uuid)
+returns public.families
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid    uuid := (select auth.uid());
+  v_family uuid;
+  v_fam    public.families;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+  if p_new_owner = v_uid then
+    raise exception '不能转让给自己';
+  end if;
+
+  -- 调用者必须是 active 户主
+  select family_id into v_family from public.memberships
+    where user_id = v_uid and role = 'owner' and status = 'active';
+  if v_family is null then
+    raise exception '仅户主可转让' using errcode = '42501';
+  end if;
+
+  -- 目标必须是同家庭 active 成员
+  if not exists (select 1 from public.memberships
+                 where family_id = v_family and user_id = p_new_owner and status = 'active') then
+    raise exception '目标不是本家庭成员';
+  end if;
+
+  -- 先降原户主、再升新户主（避免「户主唯一」部分索引瞬时冲突）
+  update public.memberships set role = 'member'
+    where family_id = v_family and user_id = v_uid and status = 'active';
+  update public.memberships set role = 'owner'
+    where family_id = v_family and user_id = p_new_owner and status = 'active';
+
+  update public.families set owner_user_id = p_new_owner
+    where id = v_family
+    returning * into v_fam;
+
+  -- 通知新户主（流程 13）
+  insert into public.notifications (user_id, type, channel, payload)
+    values (p_new_owner, 'transfer', 'in_app',
+            jsonb_build_object('family_id', v_family, 'family_name', v_fam.name));
+
+  return v_fam;
+end;
+$$;
+
+-- ── leave_family：普通成员退出（户主须先转让或解散）────────────────────────────
+create or replace function public.leave_family()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_mem public.memberships;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  select * into v_mem from public.memberships
+    where user_id = v_uid and status = 'active';
+  if not found then
+    raise exception '你当前不在任何家庭';
+  end if;
+  if v_mem.role = 'owner' then
+    raise exception '户主需先转让户主或解散家庭';
+  end if;
+
+  update public.memberships set status = 'left', left_at = now()
+    where id = v_mem.id;
+  update public.families set member_count = greatest(member_count - 1, 0)
+    where id = v_mem.family_id;
+  update public.profiles set current_family_id = null where id = v_uid;
+end;
+$$;
+
+-- ── dissolve_family：户主解散家庭（软解散 + 解绑成员 + 通知）────────────────────
+-- DATAMODEL §7 要求最终物理清理家庭数据，可异步执行；此处先做软解散（标记 dissolved
+-- + 解绑全部成员），解绑后 RLS（is_family_member）对所有人返回 false，数据即不可读。
+create or replace function public.dissolve_family()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid    uuid := (select auth.uid());
+  v_family uuid;
+  v_name   text;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  select m.family_id, f.name into v_family, v_name
+    from public.memberships m
+    join public.families f on f.id = m.family_id
+    where m.user_id = v_uid and m.role = 'owner' and m.status = 'active';
+  if v_family is null then
+    raise exception '仅户主可解散家庭' using errcode = '42501';
+  end if;
+
+  -- 通知其他成员（流程 13：家庭已解散，按 removed 兜底 + payload 区分原因）
+  insert into public.notifications (user_id, type, channel, payload)
+    select m.user_id, 'removed', 'in_app',
+           jsonb_build_object('reason', 'dissolved', 'family_name', v_name)
+      from public.memberships m
+     where m.family_id = v_family and m.status = 'active' and m.user_id <> v_uid;
+
+  -- 解绑全部成员（含户主），并清空各自的 current_family_id
+  update public.memberships set status = 'left', left_at = now()
+    where family_id = v_family and status = 'active';
+  update public.profiles set current_family_id = null
+    where current_family_id = v_family;
+
+  -- 作废未用邀请码，标记家庭解散
+  update public.invitations set status = 'revoked'
+    where family_id = v_family and status = 'valid';
+  update public.families set status = 'dissolved', member_count = 0
+    where id = v_family;
+end;
+$$;
+
+-- 收紧 EXECUTE 授权：撤销 PUBLIC，仅授予 authenticated
+revoke execute on function public.transfer_ownership(uuid) from public;
+revoke execute on function public.leave_family()           from public;
+revoke execute on function public.dissolve_family()        from public;
+
+grant execute on function public.transfer_ownership(uuid) to authenticated;
+grant execute on function public.leave_family()            to authenticated;
+grant execute on function public.dissolve_family()         to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260619120013_remove_member_rpc.sql
+-- ============================================================
+-- 0013 · 户主移除成员 RPC（PRD 流程 6）+ 关键通知（流程 13）
+-- ----------------------------------------------------------------------------
+-- SECURITY DEFINER：服务端完成多表事务，函数内自鉴权与归属校验。沿用 0012 生命周期 RPC 风格。
+-- 移除 = 软删（status=removed）+ 解绑被移除者 current_family_id + 写 removed 通知。
+-- 被移除者历史流水保留在家庭（DATAMODEL §3.3）；其新单人家庭由前台首次记账时自动创建
+-- （与 leave_family 一致，不在此处建，避免重复逻辑）。
+
+create or replace function public.remove_member(p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid    uuid := (select auth.uid());
+  v_family uuid;
+  v_name   text;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+  if p_user_id = v_uid then
+    raise exception '不能移除自己，请走退出或解散';
+  end if;
+
+  -- 调用者必须是 active 户主
+  select m.family_id, f.name into v_family, v_name
+    from public.memberships m
+    join public.families f on f.id = m.family_id
+    where m.user_id = v_uid and m.role = 'owner' and m.status = 'active';
+  if v_family is null then
+    raise exception '仅户主可移除成员' using errcode = '42501';
+  end if;
+
+  -- 目标必须是同家庭 active 成员
+  if not exists (select 1 from public.memberships
+                 where family_id = v_family and user_id = p_user_id and status = 'active') then
+    raise exception '目标不是本家庭成员';
+  end if;
+
+  -- 软删除该成员、维护计数、解绑其当前家庭
+  update public.memberships set status = 'removed', left_at = now()
+    where family_id = v_family and user_id = p_user_id and status = 'active';
+  update public.families set member_count = greatest(member_count - 1, 0)
+    where id = v_family;
+  update public.profiles set current_family_id = null where id = p_user_id;
+
+  -- 通知被移除者（流程 13：被移出家庭）
+  insert into public.notifications (user_id, type, channel, payload)
+    values (p_user_id, 'removed', 'in_app',
+            jsonb_build_object('reason', 'removed', 'family_name', v_name));
+end;
+$$;
+
+-- 收紧 EXECUTE 授权：撤销 PUBLIC，仅授予 authenticated
+revoke execute on function public.remove_member(uuid) from public;
+grant execute on function public.remove_member(uuid) to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260619120014_delete_savings_goal_rpc.sql
+-- ============================================================
+-- 0014 · 删除储蓄目标 RPC（PRD 流程 7：仅户主可删，已存余额回吐为收入流水）
+-- ----------------------------------------------------------------------------
+-- 资金守恒（PRD §9.6）：删除时若 saved_amount > 0，按「取出」口径生成一笔收入流水
+-- （分类「储蓄·目标取出」，source=savings_withdraw）+ savings_entry，再标记目标 deleted。
+-- 复用 0009 savings_withdraw 的记账口径，整体在一个事务内完成。
+
+create or replace function public.delete_savings_goal(p_goal_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid    uuid := (select auth.uid());
+  v_goal   public.savings_goals;
+  v_cat_id uuid;
+  v_tx_id  uuid;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  select * into v_goal from public.savings_goals
+    where id = p_goal_id and status = 'active' for update;
+  if not found then
+    raise exception '储蓄目标不存在或已删除';
+  end if;
+
+  -- 仅户主可删除（PRD §9.3）
+  if not exists (select 1 from public.memberships
+                 where family_id = v_goal.family_id and user_id = v_uid
+                   and role = 'owner' and status = 'active') then
+    raise exception '仅户主可删除储蓄目标' using errcode = '42501';
+  end if;
+
+  -- 已存余额回吐为收入流水（资金守恒）
+  if v_goal.saved_amount > 0 then
+    select id into v_cat_id from public.categories
+      where is_system and family_id is null and name = '储蓄·目标取出' limit 1;
+
+    insert into public.transactions
+      (family_id, type, amount, category_id, note, recorder_user_id, source, savings_goal_id)
+      values (v_goal.family_id, 'income', v_goal.saved_amount, v_cat_id, '删除目标回吐余额',
+              v_uid, 'savings_withdraw', p_goal_id)
+      returning id into v_tx_id;
+
+    insert into public.savings_entries (goal_id, direction, amount, note, transaction_id)
+      values (p_goal_id, 'withdraw', v_goal.saved_amount, '删除目标回吐余额', v_tx_id);
+  end if;
+
+  update public.savings_goals
+    set status = 'deleted', saved_amount = 0, version = version + 1
+    where id = p_goal_id;
+end;
+$$;
+
+revoke execute on function public.delete_savings_goal(uuid) from public;
+grant execute on function public.delete_savings_goal(uuid) to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260621120015_join_reactivate_membership.sql
+-- ============================================================
+-- 0015 · 修复：退出/被移除后用同一邀请码重新加入会撞唯一约束
+-- ----------------------------------------------------------------------------
+-- memberships 上有全表唯一约束 unique (family_id, user_id)（约束名
+-- memberships_family_id_user_id_key），不区分 status。leave_family / remove_member
+-- 均为软删除（保留行，status 置 'left' / 'removed'），因此再次加入同一家庭时，
+-- 0009 版 join_family_by_code 直接 INSERT 会与历史行冲突，报
+-- 「duplicate key value violates unique constraint "memberships_family_id_user_id_key"」。
+--
+-- 修复：改用 INSERT ... ON CONFLICT (family_id, user_id) DO UPDATE，命中历史行时
+-- 复活为 active（重置 role/joined_at，清空 left_at），而非新增行。
+-- 仅当当前无 active 行才会走到这里（前置校验保证），故复活后仍满足
+-- memberships_one_active_per_user 部分唯一索引。成员上限由前置计数 + 0006
+-- BEFORE INSERT 触发器（on-conflict 的 insert 尝试阶段仍会触发）双重兜底。
+
+create or replace function public.join_family_by_code(p_code text)
+returns public.families
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid    uuid := (select auth.uid());
+  v_inv    public.invitations;
+  v_family public.families;
+  v_count  int;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+  if exists (select 1 from public.memberships
+             where user_id = v_uid and status = 'active') then
+    raise exception '当前用户已属于某个家庭';
+  end if;
+
+  select * into v_inv from public.invitations
+    where code = p_code and status = 'valid' for update;
+  if not found then
+    raise exception '邀请码无效';
+  end if;
+  if v_inv.expires_at < now() then
+    update public.invitations set status = 'expired' where id = v_inv.id;
+    raise exception '邀请码已过期';
+  end if;
+
+  -- 成员上限（同时由 0006 触发器兜底）
+  select count(*) into v_count from public.memberships
+    where family_id = v_inv.family_id and status = 'active';
+  if v_count >= 8 then
+    raise exception '家庭成员已达上限（8 人）';
+  end if;
+
+  -- 复活历史成员行（曾退出/被移除），否则新增；避免与 unique(family_id,user_id) 冲突
+  insert into public.memberships (family_id, user_id, role, status, joined_at, left_at)
+    values (v_inv.family_id, v_uid, 'member', 'active', now(), null)
+  on conflict (family_id, user_id) do update
+    set role      = 'member',
+        status    = 'active',
+        joined_at = now(),
+        left_at   = null;
+
+  update public.families set member_count = member_count + 1
+    where id = v_inv.family_id
+    returning * into v_family;
+
+  update public.profiles set current_family_id = v_inv.family_id where id = v_uid;
+
+  return v_family;
+end;
+$$;
+
+-- 重新收紧 EXECUTE 授权（create or replace 不改授权，此处幂等重申）
+revoke execute on function public.join_family_by_code(text) from public;
+grant  execute on function public.join_family_by_code(text) to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260622120016_family_hidden_categories.sql
+-- ============================================================
+-- 0016 · FAMILY_HIDDEN_CATEGORIES（家庭隐藏的系统预设分类 · PRD 流程 11 / MVP §2.4）
+-- ----------------------------------------------------------------------------
+-- 背景：系统预设分类是全局单行（categories.family_id is null, is_system=true），
+-- 不能直接把它 status='hidden'——那会对「所有家庭」生效。此表做按家庭覆盖：
+-- 一行 = 「该 family 在记账/预算选择器中隐藏了该系统分类」。
+-- 全局分类行保持 active，历史流水仍能解析其名称/图标（显示零回归）。
+-- 自定义分类的「删除」仍走软删除 categories.status='archived'，不进此表。
+
+create table public.family_hidden_categories (
+  family_id   uuid not null references public.families(id)   on delete cascade,
+  category_id uuid not null references public.categories(id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  primary key (family_id, category_id)
+);
+
+comment on table public.family_hidden_categories is
+  '家庭对系统预设分类的隐藏覆盖：仅系统分类（categories.family_id is null）可入此表；自定义分类用 categories.status=archived 软删除。';
+
+-- 完整性：只允许隐藏「系统预设分类」，挡住误把自定义分类写进来。
+create or replace function private.assert_hideable_category()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not exists (
+    select 1 from public.categories
+    where id = new.category_id and family_id is null and is_system = true
+  ) then
+    raise exception '只能隐藏系统预设分类（category_id=% 非系统分类）', new.category_id
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger family_hidden_categories_system_only
+  before insert on public.family_hidden_categories
+  for each row execute function private.assert_hideable_category();
+
+-- ── RLS：家庭成员可读/隐藏/取消隐藏本家庭的覆盖行（与停用自定义分类一致，户主门禁在前端）──
+alter table public.family_hidden_categories enable row level security;
+
+create policy "fhc_select_member" on public.family_hidden_categories
+  for select to authenticated
+  using (private.is_family_member(family_id));
+
+create policy "fhc_insert_member" on public.family_hidden_categories
+  for insert to authenticated
+  with check (private.is_family_member(family_id));
+
+create policy "fhc_delete_member" on public.family_hidden_categories
+  for delete to authenticated
+  using (private.is_family_member(family_id));
+
+-- ============================================================
+-- >>> migrations/20260622120017_preview_family_by_code_rpc.sql
+-- ============================================================
+-- 0017 · preview_family_by_code RPC（流程 4「加入家庭」预览卡 + 加入影响）
+-- ----------------------------------------------------------------------------
+-- 对应 PRD §6「流程 4：加入家庭」：满 6 位码 → 先拉家庭预览卡 + 加入影响提示，
+-- 用户确认后才调 join_family_by_code（0015）真正加入。本函数为**只读**（stable），
+-- 不改邀请码 status、不写任何表，纯校验 + 取预览，避免「预览即副作用」。
+--
+-- 隐私折中档（PRD §6.4）：户主显昵称+头像；其他成员仅返回头像（堆叠），不含昵称。
+-- 跨家庭读取目标家庭信息（调用者尚非其成员）→ security definer 绕 RLS，仅暴露受控字段。
+--
+-- 前置：families 历史上无 cover_url 列（0002 core_tables 未含；types 里的 cover_url 属
+-- savings_goals）。预览卡需展示家庭封面，故此处幂等补列，供本 RPC 与家庭设置页共用。
+
+alter table public.families add column if not exists cover_url text;
+
+-- ── 返回契约（jsonb）─────────────────────────────────────────────────────────
+-- { "status": "ok" | "invalid" | "expired" | "full" | "already_member",
+--   "impact": "none" | "delete_origin" | "auto_leave" | "blocked_owner",   -- 仅 status=ok
+--   "family": {                                                            -- status=ok / already_member
+--     "id", "name", "cover_url", "member_count", "max_members",
+--     "owner": { "nickname", "avatar_url" },
+--     "member_avatars": ["url", ...]                                       -- 最多 8，按入家先后
+--   }
+-- }
+--   impact 语义（PRD §6.3 四分支）：
+--     none          调用者无家庭 / 单人无记账     → 直接加入
+--     delete_origin 单人家庭且有记账             → ⚠ 加入后原家庭+数据删除，需二次确认
+--     auto_leave    多人家庭普通成员             → ⚠ 加入后自动退出当前家庭
+--     blocked_owner 多人家庭户主                 → ⛔ 禁用加入，先转让/解散
+create or replace function public.preview_family_by_code(p_code text)
+returns jsonb
+language plpgsql
+security definer
+stable
+set search_path = ''
+as $$
+declare
+  v_uid          uuid := (select auth.uid());
+  v_inv          public.invitations;
+  v_family       public.families;
+  v_owner        public.profiles;
+  v_member_count int;
+  v_avatars      jsonb;
+  v_cur_family   uuid;
+  v_cur_role     text;
+  v_cur_count    int;
+  v_has_tx       boolean;
+  v_impact       text;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  -- 1) 邀请码校验（只读：过期/作废仅报告，不落库）
+  select * into v_inv from public.invitations where code = upper(trim(p_code));
+  if not found or v_inv.status = 'revoked' then
+    return jsonb_build_object('status', 'invalid');
+  end if;
+  if v_inv.status = 'expired' or v_inv.expires_at < now() then
+    return jsonb_build_object('status', 'expired');
+  end if;
+
+  -- 2) 目标家庭 + 户主
+  select * into v_family from public.families where id = v_inv.family_id;
+  if not found or v_family.status <> 'active' then
+    return jsonb_build_object('status', 'invalid');
+  end if;
+  select * into v_owner from public.profiles where id = v_family.owner_user_id;
+
+  -- 3) 已是该家庭 active 成员？
+  if exists (
+    select 1 from public.memberships
+    where family_id = v_family.id and user_id = v_uid and status = 'active'
+  ) then
+    return jsonb_build_object(
+      'status', 'already_member',
+      'family', jsonb_build_object('id', v_family.id, 'name', v_family.name)
+    );
+  end if;
+
+  -- 4) 成员数 + 头像堆叠（满 8 则拦截）
+  select count(*) into v_member_count from public.memberships
+    where family_id = v_family.id and status = 'active';
+  if v_member_count >= 8 then
+    return jsonb_build_object('status', 'full');
+  end if;
+
+  select coalesce(jsonb_agg(a.avatar_url), '[]'::jsonb) into v_avatars
+  from (
+    select p.avatar_url
+    from public.memberships m
+    join public.profiles p on p.id = m.user_id
+    where m.family_id = v_family.id and m.status = 'active'
+    order by m.joined_at
+    limit 8
+  ) a;
+
+  -- 5) 调用者加入影响（PRD §6.3 四分支）
+  select current_family_id into v_cur_family from public.profiles where id = v_uid;
+  if v_cur_family is null then
+    v_impact := 'none';
+  else
+    select role into v_cur_role from public.memberships
+      where user_id = v_uid and status = 'active';
+    select count(*) into v_cur_count from public.memberships
+      where family_id = v_cur_family and status = 'active';
+
+    if v_cur_role = 'owner' and v_cur_count > 1 then
+      v_impact := 'blocked_owner';
+    elsif v_cur_count > 1 then
+      v_impact := 'auto_leave';
+    else
+      -- 单人家庭：有任一未删除流水即视为「有记账」
+      select exists (
+        select 1 from public.transactions
+        where family_id = v_cur_family and is_deleted = false
+      ) into v_has_tx;
+      v_impact := case when v_has_tx then 'delete_origin' else 'none' end;
+    end if;
+  end if;
+
+  return jsonb_build_object(
+    'status', 'ok',
+    'impact', v_impact,
+    'family', jsonb_build_object(
+      'id',            v_family.id,
+      'name',          v_family.name,
+      'cover_url',     v_family.cover_url,
+      'member_count',  v_member_count,
+      'max_members',   8,
+      'owner', jsonb_build_object(
+        'nickname',   v_owner.nickname,
+        'avatar_url', v_owner.avatar_url
+      ),
+      'member_avatars', v_avatars
+    )
+  );
+end;
+$$;
+
+revoke execute on function public.preview_family_by_code(text) from public;
+grant  execute on function public.preview_family_by_code(text) to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260622120018_invitation_code_6char.sql
+-- ============================================================
+-- 0018 · 邀请码改为 6 位（排除易混 0/O/1/I），对齐 PRD §5.4
+-- ----------------------------------------------------------------------------
+-- 原 0011/0015 的 create_invitation 生成 8 位十六进制码；PRD 要求 6 位、大写
+-- A–Z + 0–9 且排除易混的 0/O/1/I（便于口述 / 手抄 / 3+3 分段展示）。
+-- 本迁移只改「生成码」的字符集与长度，其余逻辑（仅户主、满 8 拦截、24h 有效、
+-- 复用未过期有效码、强制刷新作废重生）完全保持不变。
+--
+-- 字母表 = A–Z 去掉 O/I（24）+ 2–9（8）= 32 字符。6 位 → 32^6 ≈ 1.07e9，冲突重试。
+-- 注：邀请码非安全敏感（24h 失效 + 防枚举限频另议），random() 足够。
+
+create or replace function public.create_invitation(p_force_new boolean default false)
+returns public.invitations
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid      uuid := (select auth.uid());
+  v_family   uuid;
+  v_alpha    text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';  -- 32 字符，排除 0 O 1 I
+  v_code     text;
+  v_inv      public.invitations;
+  v_attempts int := 0;
+  i          int;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  -- 仅户主（active owner）可生成
+  select family_id into v_family from public.memberships
+    where user_id = v_uid and role = 'owner' and status = 'active';
+  if v_family is null then
+    raise exception '仅户主可生成邀请码' using errcode = '42501';
+  end if;
+
+  -- 家庭已满则无需邀请
+  if (select member_count from public.families where id = v_family) >= 8 then
+    raise exception '家庭成员已达上限（8 人），需先移除成员';
+  end if;
+
+  -- 非强制刷新：复用当前未过期的有效码（打开邀请页场景）
+  if not p_force_new then
+    select * into v_inv from public.invitations
+      where family_id = v_family and status = 'valid' and expires_at > now()
+      order by expires_at desc limit 1;
+    if found then
+      return v_inv;
+    end if;
+  end if;
+
+  -- 刷新或无有效码：作废家庭现有 valid 码，再生成新码
+  update public.invitations set status = 'revoked'
+    where family_id = v_family and status = 'valid';
+
+  -- 生成 6 位安全字母表码；唯一冲突重试
+  loop
+    v_attempts := v_attempts + 1;
+    v_code := '';
+    for i in 1..6 loop
+      v_code := v_code || substr(v_alpha, 1 + floor(random() * length(v_alpha))::int, 1);
+    end loop;
+    begin
+      insert into public.invitations (family_id, code, expires_at, status)
+        values (v_family, v_code, now() + interval '24 hours', 'valid')
+        returning * into v_inv;
+      return v_inv;
+    exception when unique_violation then
+      if v_attempts >= 8 then raise; end if;
+    end;
+  end loop;
+end;
+$$;
+
+revoke execute on function public.create_invitation(boolean) from public;
+grant execute on function public.create_invitation(boolean) to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260622120019_fix_dissolved_family_member_count.sql
+-- ============================================================
+-- 0019 · 修复：解散家庭时 member_count=0 违反 families_member_count_check
+-- ----------------------------------------------------------------------------
+-- dissolve_family（0012）末句把家庭置 `status='dissolved', member_count=0`（已无成员），
+-- 但 0002 的列级 check 要求 `member_count between 1 and 8`，导致解散整体回滚，报：
+--   new row for relation "families" violates check constraint "families_member_count_check"
+--
+-- 修复：放宽约束——仅「active」家庭受 1–8 约束；已解散家庭允许 0。
+-- 解散 RPC 在同一条 UPDATE 同时写 status='dissolved' 与 member_count=0，约束按行最终态校验，故通过。
+-- leave_family / remove_member 仅在 ≥2 人时递减（单人户主须走解散/转让），不会触达 0，行为不变。
+
+alter table public.families drop constraint if exists families_member_count_check;
+
+alter table public.families
+  add constraint families_member_count_check
+  check (status = 'dissolved' or member_count between 1 and 8);
+
+-- ============================================================
+-- >>> migrations/20260622120020_storage_policies.sql
+-- ============================================================
+-- 0020 · Storage 对象权限策略（头像 / 家庭封面）
+-- ----------------------------------------------------------------------------
+-- 背景：两个 public 桶已在 Studio 手动创建：
+--   homebook-user-avatars   用户头像，路径 {用户id}/avatar.ext
+--   homebook-family-covers  家庭封面，路径 {家庭id}/cover.ext
+-- public 桶的「读」走公开 CDN 端点（/object/public/...），绕过 RLS，无需 select 策略；
+-- 但「写 / 删」仍受 storage.objects 的 RLS 管控，故此处只配 insert/update/delete。
+--
+-- 隔离思路（与 0008 一致）：
+--   ① auth.uid() 一律包 (select auth.uid())。
+--   ② 一律 TO authenticated（anon 不授权写）。
+--   ③ 路径第一层文件夹 = 归属 id —— (storage.foldername(name))[1]。
+--   ④ 头像：第一层 = 本人 uid；封面：第一层家庭须由当前用户任户主，复用 private.is_family_owner。
+--
+-- 注：storage.objects 默认已启用 RLS，此处不重复 alter（需表 owner 权限）。
+-- 注：所有策略先 drop if exists 再 create，便于 Studio 重复粘贴执行（幂等）。
+
+-- ── 用户头像：只能写自己 uid 文件夹下的对象 ───────────────────────────────────
+drop policy if exists "avatars_insert_own" on storage.objects;
+create policy "avatars_insert_own" on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'homebook-user-avatars'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+drop policy if exists "avatars_update_own" on storage.objects;
+create policy "avatars_update_own" on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'homebook-user-avatars'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  )
+  with check (
+    bucket_id = 'homebook-user-avatars'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+drop policy if exists "avatars_delete_own" on storage.objects;
+create policy "avatars_delete_own" on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'homebook-user-avatars'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+-- ── 家庭封面：仅该家庭户主可写（第一层文件夹 = family_id）──────────────────────
+drop policy if exists "covers_insert_owner" on storage.objects;
+create policy "covers_insert_owner" on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'homebook-family-covers'
+    and private.is_family_owner(((storage.foldername(name))[1])::uuid)
+  );
+
+drop policy if exists "covers_update_owner" on storage.objects;
+create policy "covers_update_owner" on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'homebook-family-covers'
+    and private.is_family_owner(((storage.foldername(name))[1])::uuid)
+  )
+  with check (
+    bucket_id = 'homebook-family-covers'
+    and private.is_family_owner(((storage.foldername(name))[1])::uuid)
+  );
+
+drop policy if exists "covers_delete_owner" on storage.objects;
+create policy "covers_delete_owner" on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'homebook-family-covers'
+    and private.is_family_owner(((storage.foldername(name))[1])::uuid)
+  );
 
 commit;

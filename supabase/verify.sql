@@ -53,3 +53,11 @@ order by 1;
 -- 7) handle_new_user 触发器是否挂在 auth.users 上（期望 1 行）
 select tgname from pg_trigger
 where tgrelid = 'auth.users'::regclass and not tgisinternal;
+
+-- 8) Storage 对象写权限策略是否就位（迁移 0020，期望 6 行：avatars_/covers_ 各 insert/update/delete）
+--    缺失会导致 App 内上传头像/封面报 "new row violates row-level security policy"
+--    （Studio 控制台手动上传走 service_role 绕过 RLS，不受影响，故易漏检）。
+select policyname, cmd from pg_policies
+where schemaname = 'storage' and tablename = 'objects'
+  and (policyname like 'avatars\_%' or policyname like 'covers\_%')
+order by 1;
