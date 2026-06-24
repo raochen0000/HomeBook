@@ -234,6 +234,21 @@ export async function updateFamilyCoverUrl(familyId: string, url: string): Promi
   if (error) throw error;
 }
 
+/** 修改家庭名（RLS：families_update_owner 仅户主可改）。调用方需先 trim。 */
+export async function updateFamilyName(familyId: string, name: string): Promise<void> {
+  const { error } = await supabase.from('families').update({ name }).eq('id', familyId);
+  if (error) throw error;
+}
+
+/** 改家庭名（仅户主）。成功后刷新 family 缓存。 */
+export function useUpdateFamilyName() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ familyId, name }: { familyId: string; name: string }) => updateFamilyName(familyId, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.family }),
+  });
+}
+
 /**
  * 选图 → 压缩 → 上传 → 写回 profile.avatar_url 的一站式 mutation。
  * 用户取消选图时 data 为 null（UI 静默处理，不当作成功也不报错）。

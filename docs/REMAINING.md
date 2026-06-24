@@ -41,7 +41,7 @@
 
 ## 阶段二 · 体验完整度（P0/P1 被跳过的子功能）
 
-- [ ] **#5 流程 1 §3.5 家庭设置页**：[family.tsx:461](../src/app/family.tsx#L461) 现为「敬请期待」toast → 户主可改家庭名 / 封面（仅户主，成员只读）。依赖 `families.cover_url` 列 + OSS。
+- [x] **#5 流程 1 §3.5 家庭设置页** ✅ 2026-06-24：家庭管理「家庭设置」行 → [FamilySettingsSheet](../src/features/family/settings-sheet.tsx)（户主可改家庭名 + 封面，成员只读）。家庭名走新 `useUpdateFamilyName`（直更 `families`，靠 `families_update_owner` RLS）；封面复用即时上传 `useUpdateFamilyCover`。tsc/eslint 通过，待真机/模拟器验证。
 - [ ] **#6 流程 1 §3.5 新用户「完善家庭」可选步骤**：注册创建单人家庭后，可选设家庭名+封面，可跳过（默认名+默认占位）。
 - [x] **#7 流程 3 邀请页完善**（代码完成 2026-06-22，[invite-sheet.tsx](../src/features/family/invite-sheet.tsx)）
   - [x] 邀请码改 **6 位排除易混**（[0018 migration](../supabase/migrations/20260622120018_invitation_code_6char.sql)，已在 Studio 执行）

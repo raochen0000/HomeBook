@@ -31,6 +31,7 @@ import { CategoryManageSheet } from '@/features/category/manage-sheet';
 import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
 import { InviteSheet } from '@/features/family/invite-sheet';
 import { ScanSheet } from '@/features/family/scan-sheet';
+import { FamilySettingsSheet } from '@/features/family/settings-sheet';
 import { TransferSheet } from '@/features/family/transfer-sheet';
 import { NotificationCenterSheet } from '@/features/notifications/center-sheet';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
@@ -69,6 +70,7 @@ export default function FamilyScreen() {
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [savingsOpen, setSavingsOpen] = useState(false);
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<FamilyMembership | null>(null);
   const [dissolveOpen, setDissolveOpen] = useState(false);
@@ -446,8 +448,8 @@ export default function FamilyScreen() {
                     <ManageRow
                       icon="gearshape"
                       title="家庭设置"
-                      sub="家庭名称、账期等设置"
-                      onPress={() => setToast('家庭设置 · 敬请期待')}
+                      sub="家庭名称、封面"
+                      onPress={() => setSettingsOpen(true)}
                     />
                     <View style={[styles.divider, { backgroundColor: palette.separator }]} />
                     <ManageRow
@@ -515,6 +517,7 @@ export default function FamilyScreen() {
       <BudgetSheet visible={budgetOpen} onClose={() => setBudgetOpen(false)} />
       <SavingsSheet visible={savingsOpen} onClose={() => setSavingsOpen(false)} />
       <CategoryManageSheet visible={categoryOpen} onClose={() => setCategoryOpen(false)} />
+      <FamilySettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <NotificationCenterSheet visible={notifyOpen} onClose={() => setNotifyOpen(false)} />
       <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
