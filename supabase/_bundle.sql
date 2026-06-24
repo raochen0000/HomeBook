@@ -1,4 +1,4 @@
--- 家账 HomeBook · 全量建库脚本（20 个迁移按序合并）
+-- 家账 HomeBook · 全量建库脚本（22 个迁移按序合并）
 -- 用法：在自托管实例的 Studio → SQL Editor 整段粘贴执行一次。
 -- 全程包在一个事务里，任一步出错整体回滚，便于安全重试。
 -- 注意：表无 IF NOT EXISTS，仅供首次建库；重复执行会因对象已存在而报错（属预期）。
@@ -1735,6 +1735,195 @@ create policy "covers_delete_owner" on storage.objects
   using (
     bucket_id = 'homebook-family-covers'
     and private.is_family_owner(((storage.foldername(name))[1])::uuid)
+  );
+
+-- ============================================================
+-- >>> migrations/20260624120021_storage_policies_flat_paths.sql
+-- ============================================================
+-- 0021 · Storage 写权限策略改为「桶根目录 + 文件名归属」（替换 0020 的文件夹方案）
+-- ----------------------------------------------------------------------------
+-- 背景：本自托管实例的 storage.prefixes 表开了 RLS，却归 supabase_storage_admin 独占、
+--   postgres（含 Studio SQL Editor）无权加策略。路径一旦含子文件夹（{id}/avatar.jpg），
+--   插入 storage.objects 时其 BEFORE INSERT 触发器会先向 prefixes 写目录前缀行，该步被
+--   RLS 拒 → 整笔上传回滚，报 "new row violates row-level security policy"；且这步发生在
+--   objects 策略被检查之前，无法用 objects 策略绕过。
+-- 对策：上传改落桶根目录（{id}.jpg，见 src/adapters/storage.ts）。根对象 foldername 为空，
+--   不触发 prefixes 写入，从根上规避该限制。相应地，本迁移把 objects 的归属判定从
+--   「第一层文件夹」(storage.foldername(name))[1] 改为「文件名去扩展名」split_part(name,'.',1)，
+--   即归属 id（uuid 不含点，故按首个 '.' 切分即得纯 id）。
+-- 注：本迁移只动 storage.objects（postgres 可管），不碰 storage.prefixes，可在 Studio 直接执行。
+-- 注：策略名沿用 0020，drop if exists 后 create，幂等替换旧定义（含 upsert 覆盖需要的 update）。
+
+-- ── 用户头像：只能写文件名 = 本人 uid 的根对象 ────────────────────────────────
+drop policy if exists "avatars_insert_own" on storage.objects;
+create policy "avatars_insert_own" on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'homebook-user-avatars'
+    and split_part(name, '.', 1) = (select auth.uid())::text
+  );
+
+drop policy if exists "avatars_update_own" on storage.objects;
+create policy "avatars_update_own" on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'homebook-user-avatars'
+    and split_part(name, '.', 1) = (select auth.uid())::text
+  )
+  with check (
+    bucket_id = 'homebook-user-avatars'
+    and split_part(name, '.', 1) = (select auth.uid())::text
+  );
+
+drop policy if exists "avatars_delete_own" on storage.objects;
+create policy "avatars_delete_own" on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'homebook-user-avatars'
+    and split_part(name, '.', 1) = (select auth.uid())::text
+  );
+
+-- ── 家庭封面：仅该家庭户主可写（文件名 = family_id）───────────────────────────
+drop policy if exists "covers_insert_owner" on storage.objects;
+create policy "covers_insert_owner" on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'homebook-family-covers'
+    and private.is_family_owner((split_part(name, '.', 1))::uuid)
+  );
+
+drop policy if exists "covers_update_owner" on storage.objects;
+create policy "covers_update_owner" on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'homebook-family-covers'
+    and private.is_family_owner((split_part(name, '.', 1))::uuid)
+  )
+  with check (
+    bucket_id = 'homebook-family-covers'
+    and private.is_family_owner((split_part(name, '.', 1))::uuid)
+  );
+
+drop policy if exists "covers_delete_owner" on storage.objects;
+create policy "covers_delete_owner" on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'homebook-family-covers'
+    and private.is_family_owner((split_part(name, '.', 1))::uuid)
+  );
+
+-- ============================================================
+-- >>> migrations/20260624120022_storage_policies_owner_based.sql
+-- ============================================================
+-- 0022 · Storage 读写策略：SELECT 放行 + 写按 owner 列把关
+-- ----------------------------------------------------------------------------
+-- 背景（实测结论）：
+--   1) storage 上传走 upsert：`insert ... on conflict do update ... returning *`。
+--      ON CONFLICT 要读冲突行、RETURNING 要把行读回 —— 这两步都要求 objects 上有
+--      一条 SELECT 策略。只建 insert/update 的"只写"策略，upsert 会因读不到而被 RLS
+--      拒，报 "new row violates row-level security policy"。这是本项目反复踩的真正坑：
+--      之前唯一能成的「全开」策略，胜在它顺手建了 SELECT，而非因为它 TO public。
+--   2) storage 执行时角色就是 authenticated、JWT 声明也在，但本实例的 auth.uid() 在
+--      storage 上下文里取不到 sub（GUC 名不一致），故不依赖 auth.uid()；改用 storage
+--      服务端盖在 objects.owner / owner_id 列上的真实 uid（客户端伪造不了）来判归属。
+--
+-- 设计：
+--   · 读：两个 public 桶本就走公开 CDN，这里的 SELECT 策略只为放行 upsert 的读，TO public。
+--   · 写：TO public（角色判定无意义，已知是 authenticated），用 owner 列做归属。
+--       头像 —— 文件名(去扩展名) = owner；封面 —— owner 须为该家庭 active 户主。
+--   · 不开放客户端 DELETE（App 不需要；删除走控制台 service_role）。
+--   · 归属 id 取 coalesce(owner::text, owner_id)；文件名取 split_part(name,'.',1)。
+--   · 零信任需求请改走 Edge Function + service_role 服务端代传，再把写策略收紧为拒绝。
+
+-- 户主判定：显式传入用户，不依赖 auth.uid()（与 0007 的 is_family_owner 同逻辑、入参不同）
+create or replace function private.is_user_family_owner(_user uuid, _family uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.memberships m
+    where m.family_id = _family
+      and m.user_id = _user
+      and m.role = 'owner'
+      and m.status = 'active'
+  );
+$$;
+grant execute on function private.is_user_family_owner(uuid, uuid) to public;
+
+-- ── 清理：0020/0021 的旧策略 + 排查期手动建的临时策略（幂等，drop if exists） ──
+do $$
+declare r record;
+begin
+  for r in
+    select policyname from pg_policies
+    where schemaname = 'storage' and tablename = 'objects'
+      and ( policyname in (
+              'avatars_select','avatars_insert_own','avatars_update_own','avatars_delete_own',
+              'covers_select','covers_insert_owner','covers_update_owner','covers_delete_owner',
+              'avatars_insert_anon_TEST'
+            )
+            or policyname like 'full-access-policy%' )   -- UI 建的全开临时策略（带哈希后缀）
+  loop
+    execute format('drop policy %I on storage.objects', r.policyname);
+  end loop;
+end $$;
+
+-- ── 用户头像 ─────────────────────────────────────────────────────────────────
+-- SELECT：放行 upsert 的读（桶本就公开），TO public
+create policy "avatars_select" on storage.objects
+  for select to public
+  using (bucket_id = 'homebook-user-avatars');
+
+-- INSERT/UPDATE：文件名必须等于上传者本人（owner）
+create policy "avatars_insert_own" on storage.objects
+  for insert to public
+  with check (
+    bucket_id = 'homebook-user-avatars'
+    and split_part(name, '.', 1) = coalesce(owner::text, owner_id)
+  );
+
+create policy "avatars_update_own" on storage.objects
+  for update to public
+  using (
+    bucket_id = 'homebook-user-avatars'
+    and split_part(name, '.', 1) = coalesce(owner::text, owner_id)
+  )
+  with check (
+    bucket_id = 'homebook-user-avatars'
+    and split_part(name, '.', 1) = coalesce(owner::text, owner_id)
+  );
+
+-- ── 家庭封面 ─────────────────────────────────────────────────────────────────
+create policy "covers_select" on storage.objects
+  for select to public
+  using (bucket_id = 'homebook-family-covers');
+
+-- 写：上传者须为该家庭的 active 户主
+create policy "covers_insert_owner" on storage.objects
+  for insert to public
+  with check (
+    bucket_id = 'homebook-family-covers'
+    and private.is_user_family_owner(
+          coalesce(owner::text, owner_id)::uuid,
+          (split_part(name, '.', 1))::uuid)
+  );
+
+create policy "covers_update_owner" on storage.objects
+  for update to public
+  using (
+    bucket_id = 'homebook-family-covers'
+    and private.is_user_family_owner(
+          coalesce(owner::text, owner_id)::uuid,
+          (split_part(name, '.', 1))::uuid)
+  )
+  with check (
+    bucket_id = 'homebook-family-covers'
+    and private.is_user_family_owner(
+          coalesce(owner::text, owner_id)::uuid,
+          (split_part(name, '.', 1))::uuid)
   );
 
 commit;

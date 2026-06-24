@@ -3,9 +3,19 @@
  * 业务层只调本文件的 pickAndUpload*，不直接碰 supabase.storage —— 将来从 Supabase Storage
  * 切到阿里云 OSS 时，只需替换本文件实现。
  *
- * 约定（与迁移 0019 的 RLS 一致）：
- *   - 两个 public 桶；读走公开 CDN，写/删受 RLS 管控。
- *   - 头像路径 {userId}/avatar.jpg、封面路径 {familyId}/cover.jpg —— 第一层文件夹即归属 id。
+ * 约定（与迁移 0022 的 RLS 一致）：
+ *   - 两个 public 桶；读走公开 CDN，写受 RLS 管控（不开放客户端删除）。
+ *   - 头像路径 {userId}.jpg、封面路径 {familyId}.jpg —— 文件名（去扩展名）即归属 id。
+ *     刻意放在桶根目录、不建子文件夹：本自托管实例的 storage.prefixes 表开了 RLS，却归
+ *     supabase_storage_admin 独占、postgres 无权加策略；一旦路径含子文件夹，上传会因触发器
+ *     向 prefixes 插行被 RLS 拒而失败（报 new row violates row-level security policy）。
+ *     根目录对象不触发 prefixes 写入，从根上规避该限制。
+ *   - upsert 需要 SELECT 策略：storage 上传是 `insert ... on conflict do update returning *`，
+ *     ON CONFLICT 读冲突行、RETURNING 读回行都要 objects 上有 SELECT 策略；只建写策略
+ *     会被 RLS 拒。故 0022 给两桶各加一条 SELECT（桶本就公开，TO public）。
+ *   - 写按 owner 列把关：本实例 auth.uid() 在 storage 上下文取不到，故不依赖它，改用
+ *     storage 服务端盖在 objects.owner / owner_id 的真实 uid（客户端伪造不了）——头像
+ *     「文件名 = owner」、封面「owner 须为该家庭户主」。详见迁移 0022 注释。
  *   - 自托管开源 Supabase 无服务端图片变换，故上传前在客户端压缩为方形 JPEG。
  */
 import { decode } from 'base64-arraybuffer';
@@ -90,7 +100,7 @@ export async function pickAndUploadAvatar(userId: string): Promise<string | null
     throw e;
   }
   const base64 = await compressToBase64(uri);
-  return uploadPublic(AVATAR_BUCKET, `${userId}/avatar.jpg`, base64);
+  return uploadPublic(AVATAR_BUCKET, `${userId}.jpg`, base64);
 }
 
 /** 选图并上传为「家庭头像/封面」，返回公开 URL；取消返回 null。仅户主有写权限（RLS 兜底）。 */
@@ -103,5 +113,5 @@ export async function pickAndUploadFamilyCover(familyId: string): Promise<string
     throw e;
   }
   const base64 = await compressToBase64(uri);
-  return uploadPublic(FAMILY_COVER_BUCKET, `${familyId}/cover.jpg`, base64);
+  return uploadPublic(FAMILY_COVER_BUCKET, `${familyId}.jpg`, base64);
 }
