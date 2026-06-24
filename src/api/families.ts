@@ -47,6 +47,8 @@ export type FamilyMembership = {
   role: 'owner' | 'member';
   nickname: string;
   avatarUrl: string | null;
+  /** 加入家庭时间（ISO 字符串）。 */
+  joinedAt: string;
 };
 
 export async function fetchMemberships(): Promise<FamilyMembership[]> {
@@ -65,6 +67,7 @@ export async function fetchMemberships(): Promise<FamilyMembership[]> {
       role: m.role === 'owner' ? 'owner' : 'member',
       nickname: profById.get(m.user_id)?.nickname ?? '成员',
       avatarUrl: profById.get(m.user_id)?.avatar_url ?? null,
+      joinedAt: m.joined_at,
     }));
 }
 

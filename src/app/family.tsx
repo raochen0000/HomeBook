@@ -12,14 +12,12 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
-  type FamilyMembership,
   useCreateFamily,
   useDissolveFamily,
   useLeaveFamily,
   useMemberships,
   useMyFamily,
   useMyProfile,
-  useRemoveMember,
   useTransactions,
   useUpdateFamilyCover,
 } from '@/api';
@@ -30,9 +28,9 @@ import { BudgetSheet } from '@/features/budget/budget-sheet';
 import { CategoryManageSheet } from '@/features/category/manage-sheet';
 import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
 import { InviteSheet } from '@/features/family/invite-sheet';
+import { MemberManageSheet } from '@/features/family/member-manage-sheet';
 import { ScanSheet } from '@/features/family/scan-sheet';
 import { FamilySettingsSheet } from '@/features/family/settings-sheet';
-import { TransferSheet } from '@/features/family/transfer-sheet';
 import { NotificationCenterSheet } from '@/features/notifications/center-sheet';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
 import { HeaderSearchButton } from '@/features/search/search-provider';
@@ -61,18 +59,16 @@ export default function FamilyScreen() {
   const createFamilyM = useCreateFamily();
   const leaveM = useLeaveFamily();
   const dissolveM = useDissolveFamily();
-  const removeM = useRemoveMember();
   const updateCoverM = useUpdateFamilyCover();
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
-  const [transferOpen, setTransferOpen] = useState(false);
+  const [memberManageOpen, setMemberManageOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [savingsOpen, setSavingsOpen] = useState(false);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
-  const [removeTarget, setRemoveTarget] = useState<FamilyMembership | null>(null);
   const [dissolveOpen, setDissolveOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -80,7 +76,6 @@ export default function FamilyScreen() {
   const family = familyQ.data;
   const members = membershipsQ.data ?? [];
   const isOwner = !!family && family.owner_user_id === myId;
-  const candidates = members.filter((m) => m.userId !== myId);
 
   // 户主点击家庭头像换图：选图 → 压缩 → 上传 → 写回 cover_url（取消则静默）。
   const onChangeCover = () => {
@@ -192,8 +187,8 @@ export default function FamilyScreen() {
     ]);
   };
 
-  // 破坏性操作改走「输入昵称/家庭名 + 滑动确认」对话框（流程 5/6），见底部 DangerConfirmSheet。
-  const onRemove = (m: FamilyMembership) => setRemoveTarget(m);
+  // 解散走「输入家庭名 + 滑动确认」对话框（流程 5），见底部 DangerConfirmSheet。
+  // 成员移除 / 户主转让已收口到「成员管理」页（MemberManageSheet）。
   const onDissolve = () => setDissolveOpen(true);
 
   const onInvite = () => {
@@ -205,7 +200,7 @@ export default function FamilyScreen() {
   };
 
   const loading = profileQ.isLoading || familyQ.isLoading;
-  const busy = createFamilyM.isPending || leaveM.isPending || dissolveM.isPending || removeM.isPending;
+  const busy = createFamilyM.isPending || leaveM.isPending || dissolveM.isPending;
 
   const createdLabel = family?.created_at
     ? (() => {
@@ -339,7 +334,6 @@ export default function FamilyScreen() {
               </ThemedText>
               <View style={[styles.card, { backgroundColor: palette.card }]}>
                 {members.map((m, i) => {
-                  const removable = isOwner && m.userId !== myId && m.role !== 'owner';
                   const monthN = stats.byMemberMonth.get(m.userId) ?? 0;
                   const todayN = stats.byMemberToday.get(m.userId) ?? 0;
                   const ratio = Math.min(1, monthN / stats.maxMemberMonth);
@@ -347,11 +341,7 @@ export default function FamilyScreen() {
                   return (
                     <View key={m.id}>
                       {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
-                      <Pressable
-                        style={styles.memberRow}
-                        disabled={!removable}
-                        onPress={removable ? () => onRemove(m) : undefined}
-                      >
+                      <View style={styles.memberRow}>
                         {m.avatarUrl ? (
                           <Image source={m.avatarUrl} style={styles.memberAvatar} contentFit="cover" transition={120} />
                         ) : (
@@ -395,7 +385,7 @@ export default function FamilyScreen() {
                             />
                           </View>
                         </View>
-                      </Pressable>
+                      </View>
                     </View>
                   );
                 })}
@@ -433,16 +423,8 @@ export default function FamilyScreen() {
                     <ManageRow
                       icon="person.2"
                       title="成员管理"
-                      sub="查看与管理家庭成员"
-                      onPress={() => setToast('成员管理 · 敬请期待')}
-                    />
-                    <View style={[styles.divider, { backgroundColor: palette.separator }]} />
-                    <ManageRow
-                      icon="arrow.left.arrow.right"
-                      title="转让户主"
-                      sub="将户主权限转让给其他成员"
-                      onPress={() => setTransferOpen(true)}
-                      disabled={candidates.length === 0}
+                      sub="查看成员、转让户主、移除成员"
+                      onPress={() => setMemberManageOpen(true)}
                     />
                     <View style={[styles.divider, { backgroundColor: palette.separator }]} />
                     <ManageRow
@@ -488,20 +470,7 @@ export default function FamilyScreen() {
 
       <InviteSheet visible={inviteOpen} onClose={() => setInviteOpen(false)} />
       <ScanSheet visible={scanOpen} onClose={() => setScanOpen(false)} />
-      <TransferSheet visible={transferOpen} onClose={() => setTransferOpen(false)} candidates={candidates} />
-      <DangerConfirmSheet
-        visible={!!removeTarget}
-        title={removeTarget ? `移除「${removeTarget.nickname}」` : ''}
-        message="移除后 TA 将无法访问本家庭账本；TA 已记录的流水会保留在家里。"
-        matchLabel={removeTarget ? `输入对方昵称「${removeTarget.nickname}」以确认` : ''}
-        matchValue={removeTarget?.nickname ?? ''}
-        slideLabel="滑动以确认移除"
-        onConfirm={async () => {
-          if (removeTarget) await removeM.mutateAsync(removeTarget.userId);
-        }}
-        onSuccess={() => setToast(`已移除「${removeTarget?.nickname ?? '成员'}」`)}
-        onClose={() => setRemoveTarget(null)}
-      />
+      <MemberManageSheet visible={memberManageOpen} onClose={() => setMemberManageOpen(false)} />
       <DangerConfirmSheet
         visible={dissolveOpen}
         title="解散家庭"

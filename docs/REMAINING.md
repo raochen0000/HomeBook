@@ -41,7 +41,8 @@
 
 ## 阶段二 · 体验完整度（P0/P1 被跳过的子功能）
 
-- [x] **#5 流程 1 §3.5 家庭设置页** ✅ 2026-06-24：家庭管理「家庭设置」行 → [FamilySettingsSheet](../src/features/family/settings-sheet.tsx)（户主可改家庭名 + 封面，成员只读）。家庭名走新 `useUpdateFamilyName`（直更 `families`，靠 `families_update_owner` RLS）；封面复用即时上传 `useUpdateFamilyCover`。tsc/eslint 通过，待真机/模拟器验证。
+- [x] **#5 流程 1 §3.5 家庭设置页** ✅ 2026-06-24：家庭管理「家庭设置」行 → [FamilySettingsSheet](../src/features/family/settings-sheet.tsx)（户主可改家庭名 + 封面，成员只读）。家庭名走新 `useUpdateFamilyName`（直更 `families`，靠 `families_update_owner` RLS）；封面复用即时上传 `useUpdateFamilyCover`。已模拟器验证。
+- [x] **#5b 流程 5/6 成员管理页** ✅ 2026-06-24：家庭管理「成员管理」行 → [MemberManageSheet](../src/features/family/member-manage-sheet.tsx)（成员名册 + 计数/邀请 + 点成员弹「查看资料 / 转让户主给TA / 移除成员」菜单）。移除/转让复用 [DangerConfirmSheet](../src/features/family/danger-confirm-sheet.tsx)，转让保留「顺便退出」追问。收口：首页成员区改为纯统计（去行内移除）、删独立「转让户主」行、删除已被取代的 `transfer-sheet.tsx`；`FamilyMembership` 加 `joinedAt`。已模拟器验证。
 - [ ] **#6 流程 1 §3.5 新用户「完善家庭」可选步骤**：注册创建单人家庭后，可选设家庭名+封面，可跳过（默认名+默认占位）。
 - [x] **#7 流程 3 邀请页完善**（代码完成 2026-06-22，[invite-sheet.tsx](../src/features/family/invite-sheet.tsx)）
   - [x] 邀请码改 **6 位排除易混**（[0018 migration](../supabase/migrations/20260622120018_invitation_code_6char.sql)，已在 Studio 执行）
