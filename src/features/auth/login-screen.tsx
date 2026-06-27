@@ -1,5 +1,9 @@
 /**
- * 登录页（流程 1）。**手机号 OTP 为主 + 邮箱密码 / Apple 为次**，登录即注册、无独立注册页。
+ * 登录页（流程 1）。目标形态：手机号 OTP 为主 + 邮箱 / Apple 为次；登录即注册、无独立注册页。
+ *
+ * **当前阶段（2026-06-27 决策）：手机号 OTP 暂时下线**，只放邮箱 + Apple——OTP 代码已就绪，
+ * 但卡在「阿里云短信企业资质未办 + 自托管实例出网 504」两项纯运维前置，推迟到发布前再开。
+ * 由 `PHONE_OTP_ENABLED` 开关控制：置 true 即恢复手机号入口与默认态（详见 REMAINING #10）。
  *
  * 单屏内 phone / email 两态切换（「其它方式登录」互跳）；手机号单屏放「手机号 + 验证码」，
  * 「获取验证码」带 60s 倒计时。以全屏覆盖层渲染于 Tab 之上（无 session 时显示），
@@ -41,6 +45,12 @@ const LINK_BLUE = '#0A84FF';
 const OTP_LEN = 6;
 
 /**
+ * 手机号 OTP 总开关。当前阶段关闭——短信通道未就绪（企业资质 + 实例出网，REMAINING #10），
+ * 仅放邮箱 + Apple。置 true 即恢复手机号默认态与「手机号登录」入口，无需改其它代码。
+ */
+const PHONE_OTP_ENABLED = false;
+
+/**
  * 把手机号 OTP 收/验的错误映射成友好文案：
  * - 验证码错误 / 过期 → 明确提示重新获取；
  * - 504 / 超时 / 网络不可达（短信通道异常）→ 引导改用邮箱 / Apple；
@@ -75,7 +85,7 @@ type Mode = 'phone' | 'email';
 
 export function LoginScreen() {
   const palette = usePalette();
-  const [mode, setMode] = useState<Mode>('phone');
+  const [mode, setMode] = useState<Mode>(PHONE_OTP_ENABLED ? 'phone' : 'email');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(true);
@@ -126,7 +136,8 @@ export function LoginScreen() {
                 <View style={[styles.dividerLine, { backgroundColor: palette.separator }]} />
               </View>
 
-              {mode === 'phone' ? (
+              {/* 手机号入口受 PHONE_OTP_ENABLED 控制；关闭时只在邮箱态、不显示「手机号登录」 */}
+              {PHONE_OTP_ENABLED && mode === 'phone' ? (
                 <SecondaryButton
                   palette={palette}
                   icon="envelope"
@@ -134,7 +145,8 @@ export function LoginScreen() {
                   disabled={busy}
                   onPress={() => setMode('email')}
                 />
-              ) : (
+              ) : null}
+              {PHONE_OTP_ENABLED && mode === 'email' ? (
                 <SecondaryButton
                   palette={palette}
                   icon="iphone"
@@ -142,7 +154,7 @@ export function LoginScreen() {
                   disabled={busy}
                   onPress={() => setMode('phone')}
                 />
-              )}
+              ) : null}
 
               {appleAvailable ? (
                 <SecondaryButton
