@@ -40,6 +40,37 @@ const LINK_BLUE = '#0A84FF';
 /** OTP 位数（与 Studio Phone provider 配置一致）。 */
 const OTP_LEN = 6;
 
+/**
+ * 把手机号 OTP 收/验的错误映射成友好文案：
+ * - 验证码错误 / 过期 → 明确提示重新获取；
+ * - 504 / 超时 / 网络不可达（短信通道异常）→ 引导改用邮箱 / Apple；
+ * - 其余 → 原始 message 兜底（含已被 normalizeCnPhone 拦下的号码格式错误）。
+ */
+function otpErrorText(err: unknown): string {
+  const e = err as { status?: number; message?: string; name?: string; code?: string };
+  const status = e?.status;
+  const msg = (e?.message ?? '').toLowerCase();
+
+  if (e?.code === 'otp_expired' || msg.includes('invalid') || msg.includes('expired')) {
+    return '验证码错误或已过期，请重新获取';
+  }
+  const timedOut =
+    status === 504 ||
+    status === 408 ||
+    msg.includes('timed out') ||
+    msg.includes('timeout') ||
+    msg.includes('deadline');
+  const networkDown =
+    status === 0 ||
+    e?.name === 'AuthRetryableFetchError' ||
+    msg.includes('network request failed') ||
+    msg.includes('failed to fetch');
+  if (timedOut || networkDown) {
+    return '短信服务暂时不可用，请稍后重试，或改用邮箱 / Apple 登录';
+  }
+  return e?.message ?? String(err);
+}
+
 type Mode = 'phone' | 'email';
 
 export function LoginScreen() {
@@ -185,7 +216,7 @@ function PhoneForm({ palette, busy, setBusy, onToast }: FormProps) {
       setCooldown(60);
       onToast('验证码已发送');
     } catch (err) {
-      onToast((err as Error).message ?? String(err));
+      onToast(otpErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -198,7 +229,7 @@ function PhoneForm({ palette, busy, setBusy, onToast }: FormProps) {
       await verifyPhoneOtp(phone, code);
       // 成功后 session 变化会卸载本页。
     } catch (err) {
-      onToast((err as Error).message ?? String(err));
+      onToast(otpErrorText(err));
     } finally {
       setBusy(false);
     }

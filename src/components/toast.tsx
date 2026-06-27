@@ -14,11 +14,11 @@ export type ToastProps = {
   text: string;
   /** 提示消失后回调，父级据此把 visible 置回 false。 */
   onHide: () => void;
-  /** 停留时长（ms），默认 1600。 */
+  /** 停留时长（ms），默认 3000。 */
   duration?: number;
 };
 
-export function Toast({ visible, text, onHide, duration = 1600 }: ToastProps) {
+export function Toast({ visible, text, onHide, duration = 3000 }: ToastProps) {
   const insets = useSafeAreaInsets();
   // Animated.Value 只在挂载时建一次（惰性 useState，避免在 render 期读 ref.current）。
   const [translateY] = useState(() => new Animated.Value(-24));
