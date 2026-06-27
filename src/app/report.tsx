@@ -1,7 +1,8 @@
 /**
  * 报表（Tab 2，流程 9 完整版）：周/月/年维度切换 + 收支结余概览 + 结余率仪表 + 消费趋势折线
  * + 累计同期对比双线 + 支出分类占比环形图 + 分类环比 + 成员贡献条形图 + 大额支出 Top 5
- * + 收入结构环形图 + 月度总结入口 + 分类明细下钻。
+ * + 收入结构环形图 + 分类明细下钻。
+ * 月度总结入口已上移首页 hero「本月脉搏卡」（全屏可翻月，PRD §11），报表内不再设入口。
  * 口径（PRD §11）：收支结余 / 结余率统计全部流水（含储蓄类，对账）；分类占比 / 趋势 / 累计同期
  * / 分类环比 / 成员贡献 / 大额 Top N 仅算「支出 + source=normal」；收入结构仅算 source=normal 收入
  * （均排除储蓄类）。
@@ -27,11 +28,10 @@ import {
   type TopItem,
 } from '@/features/report/advanced';
 import { Donut } from '@/features/report/donut';
-import { MonthlySummarySheet } from '@/features/report/monthly-summary';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import { currentPeriod, formatAmount, signForNet } from '@/lib/format';
+import { formatAmount, signForNet } from '@/lib/format';
 import {
   balanceRate,
   cumulativeSeries,
@@ -67,7 +67,6 @@ export default function ReportScreen() {
   const [dimension, setDimension] = useState<Dimension>('month');
   const [anchor, setAnchor] = useState(() => new Date());
   const [detail, setDetail] = useState<{ id: string; name: string } | null>(null);
-  const [summaryOpen, setSummaryOpen] = useState(false);
 
   const range = useMemo(() => periodRange(dimension, anchor), [dimension, anchor]);
   const prevRange = useMemo(() => periodRange(dimension, shiftAnchor(dimension, anchor, -1)), [dimension, anchor]);
@@ -381,17 +380,6 @@ export default function ReportScreen() {
 
             {/* 收入结构 */}
             <IncomeStructureCard slices={incomeSlices} palette={palette} />
-
-            {/* 月度总结入口 */}
-            <Pressable
-              style={[styles.summaryEntry, { backgroundColor: palette.card }]}
-              onPress={() => setSummaryOpen(true)}
-            >
-              <SymbolView name="doc.text.fill" tintColor={palette.accent} size={20} />
-              <ThemedText style={[styles.summaryEntryText, { color: palette.textPrimary }]}>查看月度总结</ThemedText>
-              <View style={styles.flex} />
-              <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
-            </Pressable>
           </Animated.ScrollView>
         )}
 
@@ -414,9 +402,6 @@ export default function ReportScreen() {
         transactions={txnsQ.data ?? []}
         onClose={() => setDetail(null)}
       />
-
-      {/* 月度总结卡（按当前锚点所在月） */}
-      <MonthlySummarySheet visible={summaryOpen} period={currentPeriod(anchor)} onClose={() => setSummaryOpen(false)} />
     </View>
   );
 }
@@ -590,14 +575,6 @@ const styles = StyleSheet.create({
   memberBarTrack: { height: 10, borderRadius: Radius.full, overflow: 'hidden' },
   memberBarFill: { height: '100%', borderRadius: Radius.full },
   memberAmount: { fontSize: 13, fontVariant: ['tabular-nums'], width: 76, textAlign: 'right' },
-  summaryEntry: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space[3],
-    padding: Space[4],
-    borderRadius: Radius.lg,
-  },
-  summaryEntryText: { fontSize: 16, fontWeight: '500' },
   sheetBar: {
     flexDirection: 'row',
     alignItems: 'center',

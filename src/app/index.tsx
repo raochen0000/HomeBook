@@ -25,31 +25,17 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { Toast } from '@/components/toast';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
-import {
-  BalanceCard,
-  BudgetBanner,
-  DayGroup,
-  EndOfListHint,
-  InsightBanner,
-  type RowData,
-} from '@/features/home/components';
+import { BudgetSheet } from '@/features/budget/budget-sheet';
+import { DayGroup, EndOfListHint, InsightBanner, PulseCard, type RowData } from '@/features/home/components';
 import { FirstRecordCelebration } from '@/features/record/first-record-celebration';
 import { RecordSheet } from '@/features/record/record-sheet';
+import { MonthlySummaryScreen } from '@/features/report/monthly-summary';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { useSession } from '@/lib/auth';
-import { budgetLevel, expenseUsedInPeriod } from '@/lib/budget';
+import { daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import {
-  currentPeriod,
-  dayKey,
-  formatAmount,
-  greetingForHour,
-  humanDay,
-  percentDelta,
-  previousPeriod,
-  signForType,
-} from '@/lib/format';
+import { currentPeriod, dayKey, greetingForHour, humanDay, previousPeriod, signForType } from '@/lib/format';
 
 type Group = { key: string; label: string; totalCents: number; rows: RowData[] };
 
@@ -76,18 +62,30 @@ export default function HomeScreen() {
 
   const multiMember = (familyQ.data?.member_count ?? 1) > 1;
 
-  // 预算预警条幅（流程 8：用至 80% / 超支，按总预算口径）。
-  const budgetAlert = useMemo(() => {
-    const budget = budgetQ.data?.budget;
-    if (!budget || !budget.alert_enabled || budget.total_amount <= 0) return null;
-    const { total } = expenseUsedInPeriod(transactionsQ.data ?? [], currentPeriod());
-    const pct = Math.round((total / budget.total_amount) * 100);
-    const level = budgetLevel(pct);
-    if (level === 'normal') return null;
-    return level === 'danger'
-      ? { danger: true, text: `本月已超支 ${formatAmount(total - budget.total_amount, '')}` }
-      : { danger: false, text: `本月预算已用 ${pct}%，注意节奏` };
-  }, [budgetQ.data, transactionsQ.data]);
+  // 本月脉搏卡数据（流程 8）：预算总额 + 已用（排除储蓄类）+ 是否户主。
+  const budget = budgetQ.data?.budget ?? null;
+  const hasBudget = !!budget && budget.total_amount > 0;
+  const usedTotal = useMemo(
+    () => expenseUsedInPeriod(transactionsQ.data ?? [], currentPeriod()).total,
+    [transactionsQ.data],
+  );
+  const isOwner = familyQ.data?.owner_user_id === profileQ.data?.id;
+
+  // 月初「上月总结来啦」轻提醒（前 7 天，且上月有记账）。
+  const prevPeriodStr = previousPeriod(currentPeriod());
+  const prevMonthHasData = useMemo(
+    () => (transactionsQ.data ?? []).some((t) => currentPeriod(new Date(t.occurred_at)) === prevPeriodStr),
+    [transactionsQ.data, prevPeriodStr],
+  );
+  const showLastMonthReminder = new Date().getDate() <= 7 && prevMonthHasData;
+
+  // 月度总结全屏视图（card 点击落本月至今；月初提醒落上月）。
+  const [summary, setSummary] = useState<{ open: boolean; period: string }>({
+    open: false,
+    period: currentPeriod(),
+  });
+  // 预算设置（降级态户主 CTA）。
+  const [budgetOpen, setBudgetOpen] = useState(false);
 
   // 记账面板状态：editing=null 为新建，否则编辑该流水。
   const [sheet, setSheet] = useState<{ open: boolean; editing: Transaction | null; familyId: string }>({
@@ -116,7 +114,7 @@ export default function HomeScreen() {
     });
   }, []);
 
-  const { groups, balance, expense, income, monthCount, expenseTrend, incomeTrend } = useMemo(() => {
+  const { groups, balance, expense, income, monthCount } = useMemo(() => {
     const txns = transactionsQ.data ?? [];
     const cats = categoriesQ.data ?? [];
     const members = membersQ.data ?? [];
@@ -124,13 +122,10 @@ export default function HomeScreen() {
     const nameById = new Map(members.map((m) => [m.id, m.nickname]));
     const myId = profileQ.data?.id;
     const period = currentPeriod();
-    const prevP = previousPeriod(period);
 
     let inc = 0;
     let exp = 0;
     let cnt = 0;
-    let prevInc = 0;
-    let prevExp = 0;
 
     const subtitle = (t: Transaction): string | null => {
       const who = t.recorder_user_id === myId ? '我' : (nameById.get(t.recorder_user_id) ?? '成员');
@@ -145,9 +140,6 @@ export default function HomeScreen() {
         cnt += 1;
         if (t.type === 'income') inc += t.amount;
         else exp += t.amount;
-      } else if (tp === prevP) {
-        if (t.type === 'income') prevInc += t.amount;
-        else prevExp += t.amount;
       }
 
       const cat = catById.get(t.category_id);
@@ -179,8 +171,6 @@ export default function HomeScreen() {
       expense: exp,
       income: inc,
       monthCount: cnt,
-      expenseTrend: percentDelta(exp, prevExp),
-      incomeTrend: percentDelta(inc, prevInc),
     };
   }, [transactionsQ.data, categoriesQ.data, membersQ.data, profileQ.data, multiMember, catColors, palette]);
 
@@ -244,17 +234,27 @@ export default function HomeScreen() {
                   padding({ horizontal: Space[4], top: headerHeight - insets.top + Space[2], bottom: Space[6] }),
                 ]}
               >
-                {session && budgetAlert ? <BudgetBanner text={budgetAlert.text} danger={budgetAlert.danger} /> : null}
-                <BalanceCard
+                <PulseCard
+                  hasBudget={hasBudget}
+                  totalCents={budget?.total_amount ?? 0}
+                  usedCents={usedTotal}
                   balanceCents={balance}
                   expenseCents={expense}
                   incomeCents={income}
+                  daysLeft={daysToMonthEnd()}
+                  isOwner={isOwner}
                   hidden={amountsHidden}
                   onToggleHidden={toggleAmounts}
-                  expenseTrend={expenseTrend}
-                  incomeTrend={incomeTrend}
+                  onPress={() => setSummary({ open: true, period: currentPeriod() })}
+                  onSetBudget={() => setBudgetOpen(true)}
                 />
-                {monthCount > 0 ? (
+                {showLastMonthReminder ? (
+                  <InsightBanner
+                    title="上月总结来啦 🎉"
+                    subtitle="看看上个月家里的开销与变化"
+                    onPress={() => setSummary({ open: true, period: prevPeriodStr })}
+                  />
+                ) : monthCount > 0 ? (
                   <InsightBanner
                     title={`${month} 月家里一起记下了 ${monthCount} 笔`}
                     subtitle="每一笔都是一家人生活的痕迹"
@@ -317,6 +317,16 @@ export default function HomeScreen() {
 
       {/* 首次记账庆祝（PRD §4.3 S1）：面板关闭后弹出 */}
       <FirstRecordCelebration visible={celebrate} onClose={() => setCelebrate(false)} />
+
+      {/* 月度总结全屏视图（流程 9）：脉搏卡点击落本月至今；月初提醒落上月 */}
+      <MonthlySummaryScreen
+        visible={summary.open}
+        initialPeriod={summary.period}
+        onClose={() => setSummary((s) => ({ ...s, open: false }))}
+      />
+
+      {/* 预算设置（降级态户主 CTA → 流程 8） */}
+      <BudgetSheet visible={budgetOpen} onClose={() => setBudgetOpen(false)} />
     </View>
   );
 }

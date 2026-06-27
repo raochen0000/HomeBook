@@ -17,9 +17,11 @@ import {
   shapes,
 } from '@expo/ui/swift-ui/modifiers';
 import type { ComponentProps } from 'react';
+import { Dimensions } from 'react-native';
 
 import { Radius, Space, usePalette } from '@/constants/design';
-import { amountParts, formatAmount, formatPercent, signForNet } from '@/lib/format';
+import { budgetLevel } from '@/lib/budget';
+import { amountParts, formatAmount, signForNet } from '@/lib/format';
 
 // ── 两段式金额：整数主字号 + 小数降一档（DESIGN §8）────────────────────────────
 export function AmountText({
@@ -159,10 +161,7 @@ export function DayGroup({
   );
 }
 
-// ── 本月概览卡（中性实色卡 + 眼睛显隐 + 较上月趋势，DESIGN v0.5.0）─────────────
-/** 环比趋势：null 表示上月无可比基数，UI 显示「—」。 */
-export type Trend = { pct: number; up: boolean } | null;
-
+// ── 本月脉搏卡（预算口径为主，超支预警内联；无预算降级为现金流摘要，DESIGN §5.9）──
 /**
  * 金额：隐藏态用圆点遮罩，可见态走两段式金额。
  * 圆点「•」与数字字形的行高/基线不一致（圆点会触发更高的行盒），
@@ -206,138 +205,193 @@ function MaskOrAmount({
   return <HStack modifiers={[frame({ height: boxHeight })]}>{inner}</HStack>;
 }
 
-/** 较上月趋势：中性灰文案 + 方向箭头（不靠颜色表意，DESIGN §13）。 */
-function TrendRow({ trend }: { trend: Trend }) {
-  const palette = usePalette();
-  if (!trend) {
-    return <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textSecondary)]}>较上月 —</Text>;
-  }
+/** 进度条颜色档：<80% accent，80%~100% warning，>100% danger（与预算页一致）。 */
+function budgetBarColor(level: 'normal' | 'warning' | 'danger', palette: ReturnType<typeof usePalette>) {
+  return level === 'danger' ? palette.danger : level === 'warning' ? palette.warning : palette.accent;
+}
+
+/**
+ * 进度条（@expo/ui SwiftUI 无现成可控变色进度件，用定宽轨道 + 比例填充自绘）。
+ * 轨道宽 = 屏宽 − 页边距(2×Space4) − 卡内边距(2×Space4)。
+ */
+function ProgressBar({ frac, color, track }: { frac: number; color: string; track: string }) {
+  const trackW = Dimensions.get('window').width - Space[4] * 2 - Space[4] * 2;
+  const fillW = Math.round(Math.max(0, Math.min(1, frac)) * trackW);
   return (
-    <HStack spacing={2} alignment="center">
-      <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textSecondary)]}>
-        {`较上月 ${formatPercent(trend.pct)}`}
-      </Text>
-      <Image systemName={trend.up ? 'arrow.up' : 'arrow.down'} size={9} color={palette.textSecondary} />
+    <HStack spacing={0} modifiers={[frame({ width: trackW, height: 8 }), background(track), cornerRadius(Radius.full)]}>
+      <HStack modifiers={[frame({ width: fillW, height: 8 }), background(color), cornerRadius(Radius.full)]}>
+        <Spacer />
+      </HStack>
+      <Spacer />
     </HStack>
   );
 }
 
 /**
- * 概览卡固定高度：内容（标题行 + 结余 + 支出/收入两列）在固定字号下高度恒定，
- * 锁死整卡高度后，眼睛在 eye/eye.slash、金额在数字/圆点之间切换都不会让卡片跳动。
+ * 本月脉搏卡：整卡可点 → 全屏月度总结（PRD §11）。锁本月、无时间切换。
+ * - 已设预算：预算口径主体（剩余可支配 / 进度条 / 已用·距月底）+ 现金流结余行；
+ *   80%/超支由进度条变色 + 主数字翻转内联表达（不再用独立顶部红条，DESIGN §5.8）。
+ * - 未设预算：降级为现金流摘要（结余 + 支出/收入）+「设置预算」引导（户主可点）。
  */
-const BALANCE_CARD_HEIGHT = 188;
-
-export function BalanceCard({
+export function PulseCard({
+  hasBudget,
+  totalCents,
+  usedCents,
   balanceCents,
   expenseCents,
   incomeCents,
+  daysLeft,
+  isOwner,
   hidden,
   onToggleHidden,
-  expenseTrend,
-  incomeTrend,
+  onPress,
+  onSetBudget,
 }: {
+  hasBudget: boolean;
+  totalCents: number;
+  usedCents: number;
   balanceCents: number;
   expenseCents: number;
   incomeCents: number;
+  daysLeft: number;
+  isOwner: boolean;
   hidden: boolean;
   onToggleHidden: () => void;
-  expenseTrend: Trend;
-  incomeTrend: Trend;
+  onPress: () => void;
+  onSetBudget: () => void;
 }) {
   const palette = usePalette();
-  return (
-    <VStack
-      alignment="leading"
-      spacing={Space[2]}
-      modifiers={[
-        padding({ all: Space[4] }),
-        frame({ height: BALANCE_CARD_HEIGHT }),
-        background(palette.card),
-        cornerRadius(Radius.lg),
-        shadow({ radius: 10, x: 0, y: 2, color: palette.shadow }),
-      ]}
-    >
-      {/* 头：本月结余 + 眼睛显隐 · 右侧周期胶囊（暂为静态展示） */}
-      <HStack alignment="center" spacing={Space[2]}>
-        <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>本月结余</Text>
-        <Image
-          systemName={hidden ? 'eye.slash' : 'eye'}
-          size={15}
-          color={palette.textSecondary}
-          modifiers={[padding({ horizontal: Space[1], vertical: Space[1] }), onTapGesture(() => onToggleHidden())]}
+
+  // 卡头：标题 + 眼睛（左）/「总结 ›」入口提示（右）。
+  const header = (label: string) => (
+    <HStack alignment="center" spacing={Space[2]}>
+      <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>{label}</Text>
+      <Image
+        systemName={hidden ? 'eye.slash' : 'eye'}
+        size={15}
+        color={palette.textSecondary}
+        modifiers={[padding({ horizontal: Space[1], vertical: Space[1] }), onTapGesture(() => onToggleHidden())]}
+      />
+      <Spacer />
+      <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>总结</Text>
+      <Image systemName="chevron.right" size={11} color={palette.textTertiary} />
+    </HStack>
+  );
+
+  const cardModifiers = [
+    padding({ all: Space[4] }),
+    background(palette.card),
+    cornerRadius(Radius.lg),
+    shadow({ radius: 10, x: 0, y: 2, color: palette.shadow }),
+    contentShape(shapes.rectangle()),
+    onTapGesture(() => onPress()),
+  ];
+
+  // ── 未设预算：现金流摘要降级态 ──
+  if (!hasBudget) {
+    return (
+      <VStack alignment="leading" spacing={Space[2]} modifiers={cardModifiers}>
+        {header('本月结余')}
+        <MaskOrAmount
+          cents={balanceCents}
+          sign={signForNet(balanceCents)}
+          color={palette.textPrimary}
+          integerSize={34}
+          decimalSize={17}
+          weight="bold"
+          hidden={hidden}
         />
-        <Spacer />
+        <HStack spacing={Space[8]} modifiers={[padding({ top: Space[2] })]}>
+          <VStack alignment="leading" spacing={2}>
+            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>支出</Text>
+            <MaskOrAmount
+              cents={expenseCents}
+              color={palette.expense}
+              integerSize={22}
+              decimalSize={13}
+              weight="bold"
+              hidden={hidden}
+            />
+          </VStack>
+          <VStack alignment="leading" spacing={2}>
+            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>收入</Text>
+            <MaskOrAmount
+              cents={incomeCents}
+              color={palette.income}
+              integerSize={22}
+              decimalSize={13}
+              weight="bold"
+              hidden={hidden}
+            />
+          </VStack>
+        </HStack>
+        {/* 设置预算引导：户主可点跳设置；普通成员只读 */}
         <HStack
-          spacing={Space[1]}
           alignment="center"
+          spacing={Space[1]}
           modifiers={[
-            padding({ horizontal: Space[3], vertical: Space[1] }),
-            background(palette.cardPill),
-            cornerRadius(Radius.full),
+            padding({ top: Space[2] }),
+            ...(isOwner ? [contentShape(shapes.rectangle()), onTapGesture(() => onSetBudget())] : []),
           ]}
         >
-          <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textPrimary)]}>本月</Text>
-          <Image systemName="chevron.down" size={10} color={palette.textSecondary} />
+          <Image systemName={isOwner ? 'plus.circle' : 'lock'} size={13} color={palette.textTertiary} />
+          <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>
+            {isOwner ? '设置本月预算，掌握可支配额度' : '待户主设置预算'}
+          </Text>
+          <Spacer />
+          {isOwner ? <Image systemName="chevron.right" size={11} color={palette.textTertiary} /> : null}
         </HStack>
-      </HStack>
+      </VStack>
+    );
+  }
 
+  // ── 已设预算：预算口径主体 ──
+  const pct = totalCents > 0 ? Math.round((usedCents / totalCents) * 100) : 0;
+  const level = budgetLevel(pct);
+  const remaining = totalCents - usedCents;
+  const over = level === 'danger';
+  const barColor = budgetBarColor(level, palette);
+
+  return (
+    <VStack alignment="leading" spacing={Space[2]} modifiers={cardModifiers}>
+      {header(over ? '本月已超支' : '本月可支配')}
       <MaskOrAmount
-        cents={balanceCents}
-        sign={signForNet(balanceCents)}
-        color={palette.textPrimary}
+        cents={over ? -remaining : remaining}
+        sign=""
+        color={over ? palette.danger : palette.textPrimary}
         integerSize={34}
         decimalSize={17}
         weight="bold"
         hidden={hidden}
       />
-
-      <HStack spacing={Space[8]} modifiers={[padding({ top: Space[2] })]}>
-        <VStack alignment="leading" spacing={2}>
-          <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>支出</Text>
-          <MaskOrAmount
-            cents={expenseCents}
-            color={palette.expense}
-            integerSize={22}
-            decimalSize={13}
-            weight="bold"
-            hidden={hidden}
-          />
-          <TrendRow trend={expenseTrend} />
-        </VStack>
-        <VStack alignment="leading" spacing={2}>
-          <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>收入</Text>
-          <MaskOrAmount
-            cents={incomeCents}
-            color={palette.income}
-            integerSize={22}
-            decimalSize={13}
-            weight="bold"
-            hidden={hidden}
-          />
-          <TrendRow trend={incomeTrend} />
-        </VStack>
+      <VStack alignment="leading" spacing={Space[1]} modifiers={[padding({ top: Space[1] })]}>
+        <ProgressBar frac={pct / 100} color={barColor} track={palette.base} />
+        <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textSecondary)]}>
+          {hidden
+            ? `已用 ¥•••• / ¥•••• · 距月底 ${daysLeft} 天`
+            : `已用 ${formatAmount(usedCents, '')} / ${formatAmount(totalCents, '')} · 距月底 ${daysLeft} 天`}
+        </Text>
+      </VStack>
+      {/* 分隔线 + 现金流结余行（对账口径，无环比） */}
+      <HStack modifiers={[padding({ top: Space[2] })]}>
+        <HStack modifiers={[frame({ height: 0.5, maxWidth: 9999 }), background(palette.separator)]}>
+          <Spacer />
+        </HStack>
+      </HStack>
+      <HStack alignment="center" modifiers={[padding({ top: Space[1] })]}>
+        <Text modifiers={[font({ size: 14 }), foregroundColor(palette.textSecondary)]}>本月结余</Text>
+        <Spacer />
+        <MaskOrAmount
+          cents={balanceCents}
+          sign={signForNet(balanceCents)}
+          color={palette.textPrimary}
+          integerSize={17}
+          decimalSize={13}
+          weight="semibold"
+          hidden={hidden}
+        />
       </HStack>
     </VStack>
-  );
-}
-
-// ── 预算预警条幅（流程 8）：原生渲染以便随 @expo/ui 列表一起滚动。──
-export function BudgetBanner({ text, danger }: { text: string; danger: boolean }) {
-  const palette = usePalette();
-  const bg = danger ? palette.danger : palette.bannerTint;
-  const iconColor = danger ? '#FFFFFF' : palette.warning;
-  const textColor = danger ? '#FFFFFF' : palette.textPrimary;
-  return (
-    <HStack
-      spacing={Space[2]}
-      alignment="center"
-      modifiers={[padding({ horizontal: Space[3], vertical: Space[3] }), background(bg), cornerRadius(Radius.md)]}
-    >
-      <Image systemName={danger ? 'exclamationmark.triangle.fill' : 'bell.fill'} size={15} color={iconColor} />
-      <Text modifiers={[font({ size: 13, weight: 'medium' }), foregroundColor(textColor)]}>{text}</Text>
-      <Spacer />
-    </HStack>
   );
 }
 
