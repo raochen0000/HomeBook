@@ -1,6 +1,7 @@
 /**
  * 登录态与登录方式（流程 1）。**手机号 OTP 为主 + 邮箱密码 / Apple 为次**，登录即注册、无独立注册页。
- * 手机号 OTP：GoTrue 原生流程（实例已内置 Aliyun SMS provider，服务端直发/校验/签发 session），
+ * 手机号 OTP：GoTrue 原生流程——GoTrue 自己生成/校验 OTP、签发 session；短信下发改由
+ * **Send SMS Hook → 阿里云 FC → dypnsapi 短信认证**（个人开发者免企业资质，见 services/sms-hook-fc/）。
  * 客户端仅调 signInWithOtp / verifyOtp；仅 +86 大陆号。账号合并＝已登录时 bindPhone 绑定（见 TECH §7.3）。
  *
  * 用户主表 = `auth.users`（Supabase Auth）+ `public.profiles`（业务字段，由 handle_new_user 触发器自动建行）。

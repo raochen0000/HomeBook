@@ -1,0 +1,19 @@
+{
+  "name": "homebook-sms-hook-fc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "家账 HomeBook · Supabase Send SMS Hook 落地（阿里云 FC → dypnsapi 短信认证）",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "zip": "rm -f function.zip && zip -qr function.zip index.js package.json node_modules && echo 'wrote function.zip'"
+  },
+  "dependencies": {
+    "@alicloud/dypnsapi20170525": "2.0.0",
+    "@alicloud/openapi-client": "0.4.15",
+    "@alicloud/tea-util": "1.4.11"
+  }
+}

@@ -59,11 +59,13 @@
 
 ## 阶段三 · 发布前补齐（MVP.md §2.4，已明确推迟，非缺陷）
 
-- [ ] **#10 手机号短信 OTP 登录** — ⏸️ **代码已就绪，发布前再开**（2026-06-27 决策）。
-  - 已完成：客户端封装（`src/lib/auth.ts` 的 `sendPhoneOtp`/`verifyPhoneOtp`/`bindPhone` + `normalizeCnPhone`）、登录页手机号 UI（验证码 + 60s 倒计时 + 友好错误提示）。后端走 GoTrue 原生 Aliyun SMS provider（无需自定义 hook）。
-  - **当前下线**：登录页 `PHONE_OTP_ENABLED = false`（`src/features/auth/login-screen.tsx`），只放邮箱 + Apple。
-  - **卡点（纯运维，非代码）**：① 阿里云短信需**企业资质**报备签名/模板（个人开发者发 +86 不可行）；② 自托管实例 **auth 容器出网到阿里云短信超时（504 / context deadline exceeded）**。换 Twilio 等也绕不开中国监管资质，反而更差。
-  - **上线前恢复步骤**：办妥企业资质 + 修好实例出网 → Studio 测试号验证真实短信能下发 → 把 `PHONE_OTP_ENABLED` 置 `true` → 真机回归。详见记忆 `supabase-phone-otp-native-aliyun`。
+- [x] **#10 手机号短信 OTP 登录** — ✅ **已部署、端到端验证通过**（2026-06-30）。
+  - **方案（绕开企业资质）**：弃用 GoTrue 原生 Aliyun SMS provider（走「短信服务」需企业报备签名/模板）。
+    改用阿里云**「短信认证服务(PNVS)」`dypnsapi.SendSmsVerifyCode`**——个人开发者免企业资质（仅个人实名 + 系统赠送签名/模板，约 10 元/年）。
+    经 Supabase **Send SMS Hook → 阿里云 FC** 接入：**GoTrue 仍自己生成/校验 OTP、签发 session，FC 只当短信下发管道**（不用 CheckSmsVerifyCode、不自签 session）。
+  - 已完成：客户端封装（`src/lib/auth.ts`，**无需改动**）+ 登录页 UI（`PHONE_OTP_ENABLED = true`）；**FC 已上线**（`services/sms-hook-fc/`，函数名 `homebooksms`/cn-hangzhou/Web 函数/无需认证）；GoTrue Send SMS hook 已启用并指向 **FC 内网地址**；真机真实短信 + 登录成功。
+  - **关键经验**：GoTrue hook URI 必须用 **FC 内网/VPC 地址**（公网会 `hook_timeout`，auth 容器无公网出口）；模板 100001 含 `${code}`+`${min}`；测试号会短路不调 hook。详见 `services/sms-hook-fc/README.md` 与记忆 `supabase-phone-otp-native-aliyun`。
+  - **上线前收尾**：① **轮换 `HOOK_SECRET`**（联调时贴过明文，FC 与 GoTrue 两边同换）；② 真机回归（登录/注册/绑号/注销）；③ 可选：FC 预留实例消冷启动 + 开 SLS 日志。
 - [ ] **#11 系统推送**（阿里云 EMAS / APNs）（现：App 内通知中心）。
 - [ ] **#12 月度总结服务端快照 + 保存图片**（现：客户端实时计算）。
 

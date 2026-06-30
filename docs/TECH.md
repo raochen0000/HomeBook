@@ -197,7 +197,7 @@ git --version
 | 定时任务    | **pg_cron** 触发 Edge Function                                 | 或**阿里云定时触发器**                              |
 | 实时        | **Supabase Realtime**（websocket）                             | 自建须确保境内可达                                  |
 | 对象存储    | Supabase Storage（S3 兼容，后端可指向 OSS）                    | **阿里云 OSS**（头像、家庭封面、目标封面）          |
-| 短信验证码  | —                                                              | **阿里云短信服务**（签名 + 模板报备，企业实名）     |
+| 短信验证码  | —                                                              | **阿里云短信认证(PNVS)**（个人免资质，经 FC Send SMS Hook 下发，见 §7.3） |
 | 推送        | NOTIFICATION 表 + Realtime 站内红点                            | **阿里云移动推送 EMAS**（厂商通道 + APNs，见 §7.5） |
 | 加速        | —                                                              | **阿里云 CDN**                                      |
 | 备份 / 恢复 | RDS 自动备份 + **PITR**（记账数据必须）                        | —                                                   |
@@ -206,7 +206,7 @@ git --version
 ### 7.3 鉴权与短信验证码流程
 
 - **用户主表 = `auth.users`（Supabase Auth 托管）+ `public.profiles`（业务字段）**：DATAMODEL 中的 `USER` 实体落地时拆分——手机号/OTP/session 由 Supabase Auth 的 `auth.users` 持有，**不在业务表冗余 `phone`**；`public.profiles.id` 一对一引用 `auth.users(id)`（`ON DELETE CASCADE`），存 `nickname / avatar_url / current_family_id / last_login_at / status`。新用户注册时由 `handle_new_user()` 触发器自动建 profiles 行。
-- **手机号 OTP**：客户端请求验证码 → 后端（Edge Function / RPC）调**阿里云短信服务**下发 → 客户端回填校验 → Supabase Auth 签发 session（JWT），存入 `expo-secure-store`。
+- **手机号 OTP**：客户端 `signInWithOtp` → **GoTrue 自生成 OTP** → 经 **Send SMS Hook → 阿里云 FC → 阿里云短信认证(PNVS)`dypnsapi.SendSmsVerifyCode`** 下发（FC 只当下发管道；个人开发者免企业资质，弃用需企业报备的「短信服务」）→ 客户端 `verifyOtp` 回填 → **GoTrue 自校验并签发 session**（JWT），存入 `expo-secure-store`。FC 代码与部署见 `services/sms-hook-fc/`。
 - **Apple 登录**：Supabase Auth Apple provider（iOS 必备的第三方登录合规项）。
 - **微信登录（后期可选）**：Supabase Auth 无内置，需自实现 OAuth provider。
 - **风控**：验证码下发做频率限制与防刷（按手机号/IP/设备）；邀请码为 **6 位大写字母数字（排除易混 `0/O/1/I`）**、24h 有效且户主权限变更即失效（服务端校验）；**`preview_family_by_code` 凭码即返家庭信息，须按 IP / 设备 / 失败次数限频，防邀请码枚举爆破**。

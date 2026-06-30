@@ -59,6 +59,8 @@ module.exports = defineConfig([
       'expo-env.d.ts',
       'babel.config.js',
       'metro.config.js',
+      // 阿里云 FC 短信 Hook 是独立的 Node(CommonJS)服务，不归 Expo/RN lint 管
+      'services/**',
     ],
   },
 ]);

@@ -1,0 +1,4 @@
+# 打包产物（部署用，本地 npm run zip 生成，勿入库）
+function.zip
+# 依赖（根 .gitignore 已忽略，这里再显式声明一次）
+node_modules/
