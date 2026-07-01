@@ -235,6 +235,7 @@ export type Database = {
           is_deleted: boolean;
           created_at: string;
           updated_at: string;
+          last_editor_user_id: string | null;
         };
         Insert: {
           id?: string;
@@ -251,6 +252,7 @@ export type Database = {
           is_deleted?: boolean;
           created_at?: string;
           updated_at?: string;
+          last_editor_user_id?: string | null;
         };
         Update: {
           id?: string;
@@ -267,6 +269,7 @@ export type Database = {
           is_deleted?: boolean;
           created_at?: string;
           updated_at?: string;
+          last_editor_user_id?: string | null;
         };
         Relationships: [];
       };

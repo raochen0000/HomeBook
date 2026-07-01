@@ -25,13 +25,21 @@ export type EditTransaction = {
   recorder_user_id: string;
 };
 
-/** 当前家庭未删除流水，按记账时间倒序（RLS 已隔离家庭）。 */
+/**
+ * 一次拉取的流水条数上限（减轻后端压力；暂不做真正分页）。
+ * 注意：脉搏卡的本月汇总仍由前端基于该结果集计算，所以上限必须足够覆盖「本月」全部流水；
+ * 200 对绝大多数家庭都绰绰有余，后续如需更大历史再升级为分页 + 服务端汇总。
+ */
+export const TXN_FETCH_LIMIT = 200;
+
+/** 当前家庭未删除流水，按记账时间倒序，最多 TXN_FETCH_LIMIT 条（RLS 已隔离家庭）。 */
 export async function fetchTransactions(): Promise<Transaction[]> {
   const { data, error } = await supabase
     .from('transactions')
     .select('*')
     .eq('is_deleted', false)
-    .order('occurred_at', { ascending: false });
+    .order('occurred_at', { ascending: false })
+    .limit(TXN_FETCH_LIMIT);
   if (error) throw error;
   return data;
 }

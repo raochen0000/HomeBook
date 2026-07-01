@@ -2,8 +2,9 @@
  * 首页 UI 组件（@expo/ui/swift-ui 原生 SwiftUI 渲染）。
  * 视觉对齐参考图 + DESIGN.md：浅灰底 + 白卡、分类圆底图标、两段式金额、收支语义色。
  */
-import { HStack, Image, Spacer, Text, VStack } from '@expo/ui/swift-ui';
+import { Button, HStack, Image, Section, Spacer, SwipeActions, Text, VStack, ZStack } from '@expo/ui/swift-ui';
 import {
+  aspectRatio,
   background,
   clipShape,
   contentShape,
@@ -11,16 +12,23 @@ import {
   font,
   foregroundColor,
   frame,
+  lineLimit,
+  listRowInsets,
+  listRowSeparator,
   onTapGesture,
   padding,
+  resizable,
   shadow,
   shapes,
+  tint,
+  truncationMode,
+  zIndex,
 } from '@expo/ui/swift-ui/modifiers';
 import type { ComponentProps } from 'react';
 import { Dimensions } from 'react-native';
 
 import { Radius, Space, usePalette } from '@/constants/design';
-import { budgetLevel } from '@/lib/budget';
+import { budgetLevel, budgetStage } from '@/lib/budget';
 import { amountParts, formatAmount, signForNet } from '@/lib/format';
 
 // ── 两段式金额：整数主字号 + 小数降一档（DESIGN §8）────────────────────────────
@@ -52,15 +60,94 @@ export function AmountText({
   );
 }
 
-// ── 分类圆底图标 ──────────────────────────────────────────────────────────────
+// ── 分类圆角方底图标（圆角比例对齐 iOS App 图标的 squircle ≈ 0.2237×边长）──────────
 export function CategoryAvatar({ symbol, color, size = 44 }: { symbol: string; color: string; size?: number }) {
   return (
     <Image
       systemName={symbol as ComponentProps<typeof Image>['systemName']}
       size={Math.round(size * 0.42)}
       color="#FFFFFF"
-      modifiers={[frame({ width: size, height: size }), background(color), clipShape('circle')]}
+      modifiers={[frame({ width: size, height: size }), background(color), cornerRadius(Math.round(size * 0.2237))]}
     />
+  );
+}
+
+// ── 成员头像（真实照片 + 首字母色块回退）────────────────────────────────────────
+/** 头像回退色块底色（与家庭页一致的 4 色循环）。 */
+export const AVATAR_TINTS = ['#5AA7F0', '#46C98A', '#F5A623', '#9B6DD6'] as const;
+
+/** 按用户 id 稳定取一个回退底色（无头像时用）。 */
+export function avatarTint(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return AVATAR_TINTS[h % AVATAR_TINTS.length];
+}
+
+export type AvatarInfo = {
+  /** 本地缓存的头像文件路径（file://…）；无则走首字母回退。 */
+  uri: string | null;
+  /** 昵称首字（回退色块用）。 */
+  initial: string;
+  /** 回退色块底色。 */
+  tint: string;
+};
+
+/** 单个成员头像：有图用真实照片（resizable + fill 居中裁圆），无图用首字母色块；外圈白环便于层叠区分。 */
+function MemberAvatar({ info, size = 20 }: { info: AvatarInfo; size?: number }) {
+  const palette = usePalette();
+  const outer = Math.round(size + 3);
+  const inner = info.uri ? (
+    <Image
+      uiImage={info.uri}
+      modifiers={[
+        resizable(),
+        aspectRatio({ contentMode: 'fill' }),
+        frame({ width: size, height: size }),
+        clipShape('circle'),
+      ]}
+    />
+  ) : (
+    <Text
+      modifiers={[
+        frame({ width: size, height: size }),
+        background(info.tint),
+        clipShape('circle'),
+        font({ size: Math.round(size * 0.5), weight: 'semibold' }),
+        foregroundColor('#FFFFFF'),
+      ]}
+    >
+      {info.initial}
+    </Text>
+  );
+  return (
+    <ZStack modifiers={[frame({ width: outer, height: outer }), background(palette.card), clipShape('circle')]}>
+      {inner}
+    </ZStack>
+  );
+}
+
+/** 记录人（+修改者）头像：靠左层叠，记录人压在上层。 */
+function AvatarStack({
+  recorder,
+  editor,
+  size = 20,
+}: {
+  recorder: AvatarInfo;
+  editor: AvatarInfo | null;
+  size?: number;
+}) {
+  const overlap = Math.round(size * 0.42);
+  return (
+    <HStack spacing={0} alignment="center">
+      <HStack modifiers={[zIndex(1)]}>
+        <MemberAvatar info={recorder} size={size} />
+      </HStack>
+      {editor ? (
+        <HStack modifiers={[padding({ leading: -overlap })]}>
+          <MemberAvatar info={editor} size={size} />
+        </HStack>
+      ) : null}
+    </HStack>
   );
 }
 
@@ -68,17 +155,31 @@ export function CategoryAvatar({ symbol, color, size = 44 }: { symbol: string; c
 export type RowData = {
   id: string;
   title: string;
-  subtitle: string | null;
   symbol: string;
   iconColor: string;
   amountCents: number;
   sign: '+' | '-';
   amountColor: string;
+  /** 备注（第二行最右，溢出省略）。 */
+  note: string | null;
+  /** 24h 时刻（记账时间；被他人修改后为最新修改时间）。 */
+  timeLabel: string;
+  /** 记录人头像。 */
+  recorder: AvatarInfo;
+  /** 修改者头像（仅当被「他人」修改时存在）。 */
+  editor: AvatarInfo | null;
 };
+
+/** 行内边距：bottom < top，缩小分隔线上方的空白，分隔线下方保持原节奏。 */
+const ROW_INSET_H = Space[1];
+const ROW_INSET_TOP = Space[2];
+const ROW_INSET_BOTTOM = Space[1];
+/** 分隔线左缩进 = 行内边距 + 分类图标宽 + 图标与文字间距。 */
+const DIVIDER_LEADING = ROW_INSET_H + 44 + Space[2];
 
 function Divider({ color }: { color: string }) {
   return (
-    <HStack modifiers={[padding({ leading: 70 })]}>
+    <HStack modifiers={[padding({ leading: DIVIDER_LEADING })]}>
       <HStack modifiers={[frame({ height: 0.5, maxWidth: 9999 }), background(color)]}>
         <Spacer />
       </HStack>
@@ -86,78 +187,145 @@ function Divider({ color }: { color: string }) {
   );
 }
 
-function TransactionRow({ row, onPress }: { row: RowData; onPress?: (id: string) => void }) {
+function TransactionRow({
+  row,
+  showDividerAfter,
+  onPress,
+}: {
+  row: RowData;
+  /** 非末行：分隔线贴在本行内容下方（同 List 行内），避免行间默认间距叠在分隔线上方。 */
+  showDividerAfter?: boolean;
+  onPress?: (id: string) => void;
+}) {
   const palette = usePalette();
   return (
-    <HStack
-      spacing={Space[3]}
-      alignment="center"
-      modifiers={[
-        padding({ vertical: Space[3], horizontal: Space[4] }),
-        // 整行（含 Spacer 空隙）都可点：SwiftUI 默认只命中 Text/Image，缺此则标题与金额间的留白点不动
-        ...(onPress ? [contentShape(shapes.rectangle()), onTapGesture(() => onPress(row.id))] : []),
-      ]}
+    <VStack
+      spacing={0}
+      // 整行（含留白）可点 → 详情弹窗；编辑/删除走左滑，不在此处。
+      modifiers={onPress ? [contentShape(shapes.rectangle()), onTapGesture(() => onPress(row.id))] : []}
     >
-      <CategoryAvatar symbol={row.symbol} color={row.iconColor} />
-      <VStack alignment="leading" spacing={2}>
-        <Text modifiers={[font({ size: 17, weight: 'medium' }), foregroundColor(palette.textPrimary)]}>
-          {row.title}
-        </Text>
-        {row.subtitle ? (
-          <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{row.subtitle}</Text>
-        ) : null}
-      </VStack>
-      <Spacer />
-      <AmountText
-        cents={row.amountCents}
-        sign={row.sign}
-        color={row.amountColor}
-        integerSize={17}
-        decimalSize={13}
-        weight="semibold"
-      />
-    </HStack>
+      <HStack
+        spacing={Space[2]}
+        alignment="center"
+        modifiers={[
+          padding({
+            top: ROW_INSET_TOP,
+            bottom: showDividerAfter ? 16 : ROW_INSET_BOTTOM,
+            horizontal: ROW_INSET_H,
+          }),
+        ]}
+      >
+        <CategoryAvatar symbol={row.symbol} color={row.iconColor} />
+        <VStack alignment="leading" spacing={Space[1]} modifiers={[frame({ maxWidth: 9999 })]}>
+          {/* 第一行：分类名 + 金额（正常字重） */}
+          <HStack alignment="firstTextBaseline">
+            <Text modifiers={[font({ size: 17, weight: 'medium' }), foregroundColor(palette.textPrimary)]}>
+              {row.title}
+            </Text>
+            <Spacer />
+            <AmountText
+              cents={row.amountCents}
+              sign={row.sign}
+              color={row.amountColor}
+              integerSize={17}
+              decimalSize={13}
+              weight="regular"
+            />
+          </HStack>
+          {/* 第二行：记录人/修改者头像 + 时间（左）｜备注（最右，溢出省略隐藏） */}
+          <HStack spacing={Space[2]} alignment="center" modifiers={[frame({ maxWidth: 9999 })]}>
+            <AvatarStack recorder={row.recorder} editor={row.editor} />
+            <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textSecondary)]}>{row.timeLabel}</Text>
+            {row.note ? (
+              <Text
+                modifiers={[
+                  font({ size: 12 }),
+                  foregroundColor(palette.textTertiary),
+                  lineLimit(1),
+                  truncationMode('tail'),
+                  frame({ maxWidth: 9999, alignment: 'trailing' }),
+                ]}
+              >
+                {row.note}
+              </Text>
+            ) : (
+              <Spacer />
+            )}
+          </HStack>
+        </VStack>
+      </HStack>
+      {showDividerAfter ? <Divider color={palette.separator} /> : null}
+    </VStack>
   );
 }
 
-// ── 按日分组：灰色日期头（含当日净额）+ 白卡内多行 ─────────────────────────────
+/** 当日净额颜色（红/绿语义，与本 App income=红/expense=绿一致）：正→红、负→绿、零→中性。 */
+function netColor(cents: number, palette: ReturnType<typeof usePalette>) {
+  if (cents > 0) return palette.income;
+  if (cents < 0) return palette.expense;
+  return palette.textPrimary;
+}
+
+// ── 按日分组：原生 List Section（insetGrouped 灰底白卡）+ 行内左滑「编辑/删除」 ──────
+// 用作 <List> 的直接子节点；当日合计按红/绿语义着色。
 export function DayGroup({
   label,
   totalCents,
   rows,
   onRowPress,
+  onEdit,
+  onDelete,
 }: {
   label: string;
   totalCents: number;
   rows: RowData[];
   onRowPress?: (id: string) => void;
+  onEdit?: (id: string) => void;
+  onDelete?: (id: string) => void;
 }) {
   const palette = usePalette();
+  const header = (
+    <HStack modifiers={[padding({ horizontal: Space[1] })]}>
+      <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{label}</Text>
+      <Spacer />
+      <Text modifiers={[font({ size: 13, weight: 'bold' }), foregroundColor(netColor(totalCents, palette))]}>
+        {formatAmount(totalCents, signForNet(totalCents))}
+      </Text>
+    </HStack>
+  );
   return (
-    <VStack alignment="leading" spacing={Space[2]}>
-      <HStack modifiers={[padding({ horizontal: Space[1] })]}>
-        <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{label}</Text>
-        <Spacer />
-        <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>
-          {formatAmount(totalCents, signForNet(totalCents))}
-        </Text>
-      </HStack>
-      <VStack
-        spacing={0}
-        modifiers={[
-          background(palette.card),
-          cornerRadius(Radius.lg),
-          shadow({ radius: 8, x: 0, y: 1, color: palette.shadow }),
-        ]}
-      >
-        {rows.map((row, i) => (
-          <VStack key={row.id} spacing={0}>
-            {i > 0 ? <Divider color={palette.separator} /> : null}
-            <TransactionRow row={row} onPress={onRowPress} />
-          </VStack>
-        ))}
-      </VStack>
-    </VStack>
+    // listRow* 放在 Section 上（SwiftUI 会下发到每行）：清零 insetGrouped 默认行内边距 + 隐藏系统分隔线，
+    // 避免叠加 TransactionRow 自带的纵向内边距导致行间出现大空白。
+    <Section
+      header={header}
+      modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }), listRowSeparator('hidden')]}
+    >
+      {rows.map((row, i) => (
+        <SwipeActions
+          key={row.id}
+          modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }), listRowSeparator('hidden')]}
+        >
+          <TransactionRow row={row} showDividerAfter={i < rows.length - 1} onPress={onRowPress} />
+          {/* allowsFullSwipe=false：滑到底也不自动触发首个动作（否则误触「编辑」）。
+              删除按钮不用 role="destructive"（那会让 SwiftUI 在点击时直接把行收起，取消后不复原）；
+              改用红色 tint，真正的二次确认与危险色交给 RN Alert。 */}
+          <SwipeActions.Actions edge="trailing" allowsFullSwipe={false}>
+            <Button
+              systemImage="square.and.pencil"
+              label="编辑"
+              onPress={() => onEdit?.(row.id)}
+              modifiers={[tint(palette.info)]}
+            />
+            <Button
+              systemImage="trash"
+              label="删除"
+              onPress={() => onDelete?.(row.id)}
+              modifiers={[tint(palette.danger)]}
+            />
+          </SwipeActions.Actions>
+        </SwipeActions>
+      ))}
+    </Section>
   );
 }
 
@@ -205,9 +373,18 @@ function MaskOrAmount({
   return <HStack modifiers={[frame({ height: boxHeight })]}>{inner}</HStack>;
 }
 
-/** 进度条颜色档：<80% accent，80%~100% warning，>100% danger（与预算页一致）。 */
-function budgetBarColor(level: 'normal' | 'warning' | 'danger', palette: ReturnType<typeof usePalette>) {
-  return level === 'danger' ? palette.danger : level === 'warning' ? palette.warning : palette.accent;
+/** 进度条 4 档颜色（绿→蓝→黄→红）：充裕 绿 / 正常 蓝 / 预警 黄 / 超支 红。 */
+function budgetBarColor(stage: 'safe' | 'normal' | 'warning' | 'danger', palette: ReturnType<typeof usePalette>) {
+  switch (stage) {
+    case 'danger':
+      return palette.danger; // 红：超支
+    case 'warning':
+      return palette.warning; // 黄：≥80%
+    case 'normal':
+      return palette.info; // 蓝：50%~80%
+    default:
+      return palette.expense; // 绿：<50%（已用占比低 = 充裕）
+  }
 }
 
 /**
@@ -350,7 +527,7 @@ export function PulseCard({
   const level = budgetLevel(pct);
   const remaining = totalCents - usedCents;
   const over = level === 'danger';
-  const barColor = budgetBarColor(level, palette);
+  const barColor = budgetBarColor(budgetStage(pct), palette);
 
   return (
     <VStack alignment="leading" spacing={Space[2]} modifiers={cardModifiers}>
@@ -407,8 +584,18 @@ export function EndOfListHint({ text = '暂无更多数据' }: { text?: string }
   );
 }
 
-// ── 家庭动态提示条（日历图标 + 两行文案）。可点时右侧带箭头并跳转，纯展示时不带箭头。──
-export function InsightBanner({ title, subtitle, onPress }: { title: string; subtitle: string; onPress?: () => void }) {
+// ── 家庭动态提示条（日历图标 + 两行文案）。可点时右侧带箭头并跳转；可关时右侧带「X」。──
+export function InsightBanner({
+  title,
+  subtitle,
+  onPress,
+  onDismiss,
+}: {
+  title: string;
+  subtitle: string;
+  onPress?: () => void;
+  onDismiss?: () => void;
+}) {
   const palette = usePalette();
   return (
     <HStack
@@ -428,6 +615,18 @@ export function InsightBanner({ title, subtitle, onPress }: { title: string; sub
       </VStack>
       <Spacer />
       {onPress ? <Image systemName="chevron.right" size={13} color={palette.textTertiary} /> : null}
+      {onDismiss ? (
+        <Image
+          systemName="xmark.circle.fill"
+          size={18}
+          color={palette.textTertiary}
+          modifiers={[
+            padding({ leading: Space[1], vertical: Space[1] }),
+            contentShape(shapes.rectangle()),
+            onTapGesture(() => onDismiss()),
+          ]}
+        />
+      ) : null}
     </HStack>
   );
 }

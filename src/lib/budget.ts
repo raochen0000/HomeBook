@@ -33,3 +33,11 @@ export function budgetLevel(pct: number): 'normal' | 'warning' | 'danger' {
   if (pct >= 80) return 'warning';
   return 'normal';
 }
+
+/** 进度条 4 档（绿→蓝→黄→红，按已用占比）：<50% 充裕，50%~80% 正常，80%~100% 预警，>100% 超支。 */
+export function budgetStage(pct: number): 'safe' | 'normal' | 'warning' | 'danger' {
+  if (pct > 100) return 'danger';
+  if (pct >= 80) return 'warning';
+  if (pct >= 50) return 'normal';
+  return 'safe';
+}

@@ -92,7 +92,7 @@ export function dayKey(iso: string): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
-/** 人性化日期头：今天 / 昨天 / M月D日。 */
+/** 人性化日期头：今天 / 昨天 / 更早则用具体日期（M月D日）。 */
 export function humanDay(iso: string): string {
   const d = new Date(iso);
   const today = new Date();
@@ -100,8 +100,13 @@ export function humanDay(iso: string): string {
   yesterday.setDate(today.getDate() - 1);
   const sameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  const md = `${d.getMonth() + 1}月${d.getDate()}日`;
-  if (sameDay(d, today)) return `今天 · ${md}`;
-  if (sameDay(d, yesterday)) return `昨天 · ${md}`;
-  return md;
+  if (sameDay(d, today)) return '今天';
+  if (sameDay(d, yesterday)) return '昨天';
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+/** 24 小时制时刻（HH:mm），用于流水行的记录/修改时间。 */
+export function clockTime(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
 }

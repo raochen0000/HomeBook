@@ -2,13 +2,13 @@
  * 首页（Tab 1）：本月概览卡 + 月度总结条 + 按日分组流水列表。
  * 内容主体用 @expo/ui/swift-ui 原生渲染；外层脚手架（标题栏 / FAB / 状态页）用 RN。
  */
-import { Host, ScrollView, VStack } from '@expo/ui/swift-ui';
-import { padding } from '@expo/ui/swift-ui/modifiers';
+import { Host, List, Section, VStack } from '@expo/ui/swift-ui';
+import { listRowBackground, listRowInsets, listRowSeparator, listStyle } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Link, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,6 +19,7 @@ import {
   useFamilyMembers,
   useMyFamily,
   useMyProfile,
+  useSoftDeleteTransaction,
   useTransactions,
   type Transaction,
 } from '@/api';
@@ -26,7 +27,18 @@ import { ThemedText } from '@/components/themed-text';
 import { Toast } from '@/components/toast';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
-import { DayGroup, EndOfListHint, InsightBanner, PulseCard, type RowData } from '@/features/home/components';
+import {
+  avatarTint,
+  DayGroup,
+  EndOfListHint,
+  InsightBanner,
+  PulseCard,
+  type AvatarInfo,
+  type RowData,
+} from '@/features/home/components';
+import { HomeSkeleton } from '@/features/home/home-skeleton';
+import { TransactionDetailSheet } from '@/features/home/transaction-detail-sheet';
+import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { FirstRecordCelebration } from '@/features/record/first-record-celebration';
 import { RecordSheet } from '@/features/record/record-sheet';
 import { MonthlySummaryScreen } from '@/features/report/monthly-summary';
@@ -35,12 +47,15 @@ import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-he
 import { useSession } from '@/lib/auth';
 import { daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import { currentPeriod, dayKey, greetingForHour, humanDay, previousPeriod, signForType } from '@/lib/format';
+import { clockTime, currentPeriod, dayKey, greetingForHour, humanDay, previousPeriod, signForType } from '@/lib/format';
 
 type Group = { key: string; label: string; totalCents: number; rows: RowData[] };
 
 /** 「本月结余/收入/支出」金额显隐状态（眼睛），跨重启保留。 */
 const HIDE_AMOUNTS_KEY = 'home.amountsHidden';
+
+/** 月末「家里一起记下了 N 笔」提示条的关闭记忆（存被关闭的周期 YYYY-MM，本月内不再出现）。 */
+const COUNT_BANNER_DISMISSED_KEY = 'home.countBannerDismissedPeriod';
 
 export default function HomeScreen() {
   const palette = usePalette();
@@ -59,8 +74,6 @@ export default function HomeScreen() {
   const transactionsQ = useTransactions();
   const budgetQ = useBudget(currentPeriod());
   const createFamilyM = useCreateFamily();
-
-  const multiMember = (familyQ.data?.member_count ?? 1) > 1;
 
   // 本月脉搏卡数据（流程 8）：预算总额 + 已用（排除储蓄类）+ 是否户主。
   const budget = budgetQ.data?.budget ?? null;
@@ -99,6 +112,10 @@ export default function HomeScreen() {
   const [celebrate, setCelebrate] = useState(false);
   const pendingCelebrateRef = useRef(false);
 
+  // 流水详情弹窗（点击列表项 → 只读详情；编辑/删除走左滑）。
+  const [detail, setDetail] = useState<{ open: boolean; txn: Transaction | null }>({ open: false, txn: null });
+  const softDeleteM = useSoftDeleteTransaction();
+
   // 金额显隐（眼睛）：启动时读回上次状态，切换时写入。
   const [amountsHidden, setAmountsHidden] = useState(false);
   useEffect(() => {
@@ -114,23 +131,40 @@ export default function HomeScreen() {
     });
   }, []);
 
+  // 月末计数提示条的「已关闭」记忆：关掉后本月内不再出现。
+  const [countBannerDismissed, setCountBannerDismissed] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem(COUNT_BANNER_DISMISSED_KEY).then((v) => {
+      if (v === currentPeriod()) setCountBannerDismissed(true);
+    });
+  }, []);
+  const dismissCountBanner = useCallback(() => {
+    AsyncStorage.setItem(COUNT_BANNER_DISMISSED_KEY, currentPeriod());
+    setCountBannerDismissed(true);
+  }, []);
+
+  // 成员头像 → 本地缓存路径（供原生流水行的真实头像同步读取）。
+  const avatarFiles = useAvatarFiles(membersQ.data ?? []);
+
   const { groups, balance, expense, income, monthCount } = useMemo(() => {
     const txns = transactionsQ.data ?? [];
     const cats = categoriesQ.data ?? [];
     const members = membersQ.data ?? [];
     const catById = new Map(cats.map((c) => [c.id, c]));
-    const nameById = new Map(members.map((m) => [m.id, m.nickname]));
+    const memberById = new Map(members.map((m) => [m.id, m]));
     const myId = profileQ.data?.id;
+    const myNick = profileQ.data?.nickname;
     const period = currentPeriod();
 
     let inc = 0;
     let exp = 0;
     let cnt = 0;
 
-    const subtitle = (t: Transaction): string | null => {
-      const who = t.recorder_user_id === myId ? '我' : (nameById.get(t.recorder_user_id) ?? '成员');
-      if (multiMember) return t.note ? `${t.note} · ${who}` : who;
-      return t.note ?? null;
+    // 用户 → 头像信息（真实照片本地路径，缺图回退首字母色块）。
+    const avatarOf = (userId: string): AvatarInfo => {
+      const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? '成员';
+      const initial = [...nick.trim()][0]?.toUpperCase() ?? '?';
+      return { uri: avatarFiles.get(userId) ?? null, initial, tint: avatarTint(userId) };
     };
 
     const map = new Map<string, Group>();
@@ -153,15 +187,21 @@ export default function HomeScreen() {
           return g;
         })();
       group.totalCents += t.type === 'income' ? t.amount : -t.amount;
+
+      // 被「他人」修改过：显示修改者头像，时间切到最新修改时间；否则用记账时间。
+      const editedByOther = !!t.last_editor_user_id && t.last_editor_user_id !== t.recorder_user_id;
       group.rows.push({
         id: t.id,
         title: cat?.name ?? '未分类',
-        subtitle: subtitle(t),
         symbol: categorySymbol(cat?.icon ?? null, ttype),
         iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype)],
         amountCents: t.amount,
         sign: signForType(ttype),
         amountColor: ttype === 'income' ? palette.income : palette.expense,
+        note: t.note,
+        timeLabel: clockTime(editedByOther ? t.updated_at : t.occurred_at),
+        recorder: avatarOf(t.recorder_user_id),
+        editor: editedByOther ? avatarOf(t.last_editor_user_id as string) : null,
       });
     }
 
@@ -172,7 +212,7 @@ export default function HomeScreen() {
       income: inc,
       monthCount: cnt,
     };
-  }, [transactionsQ.data, categoriesQ.data, membersQ.data, profileQ.data, multiMember, catColors, palette]);
+  }, [transactionsQ.data, categoriesQ.data, membersQ.data, profileQ.data, avatarFiles, catColors, palette]);
 
   // 记一笔：若当前用户还没有家庭，先自动建「单人家庭」（M1：登录 + 单人家庭自动创建）。
   const openCreate = async () => {
@@ -199,16 +239,31 @@ export default function HomeScreen() {
     if (txn) setSheet({ open: true, editing: txn, familyId: txn.family_id });
   };
 
+  // 点击列表项 → 只读详情弹窗。
+  const openDetail = (id: string) => {
+    const txn = (transactionsQ.data ?? []).find((t) => t.id === id);
+    if (txn) setDetail({ open: true, txn });
+  };
+
+  // 左滑「删除」→ 二次确认（危险按钮红色），确认后软删除。
+  const confirmDelete = (id: string) => {
+    Alert.alert('删除这笔记录？', '删除后将从账单中移除，无法在 App 内恢复。', [
+      { text: '取消', style: 'cancel' },
+      { text: '删除', style: 'destructive', onPress: () => softDeleteM.mutate(id) },
+    ]);
+  };
+
   const month = new Date().getMonth() + 1;
+  // 月末（25 日~月底）才展示「家里记下 N 笔」计数条，且本月未被关闭；月初提醒优先。
+  const showCountBanner =
+    !showLastMonthReminder && new Date().getDate() >= 25 && monthCount > 0 && !countBannerDismissed;
   const loading = profileQ.isLoading || transactionsQ.isLoading || categoriesQ.isLoading;
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <View style={styles.flex}>
         {loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator />
-          </View>
+          <HomeSkeleton topPadding={headerHeight - insets.top + Space[2]} />
         ) : !session ? (
           <View style={styles.center}>
             <ThemedText style={{ color: palette.textSecondary }}>请先登录</ThemedText>
@@ -223,49 +278,81 @@ export default function HomeScreen() {
           </View>
         ) : (
           <Host style={styles.flex}>
-            <ScrollView modifiers={scrollGeometry ? [scrollGeometry] : []}>
-              <VStack
-                spacing={Space[5]}
-                // 顶/底都需扣掉 SwiftUI ScrollView 的自动安全区避让，避免双重计入：
-                // - 顶部：headerHeight 已含 insets.top，减去一次，否则标题与主体间多出约一个安全区的空隙。
-                // - 底部：ScrollView 已自动为悬浮 Tab Bar 预留安全区，故这里只留一个小的视觉间距；
-                //   若再叠加 TabBarInset 会在列表末尾留出约一个 Tab Bar 高度的大片空白。
-                modifiers={[
-                  padding({ horizontal: Space[4], top: headerHeight - insets.top + Space[2], bottom: Space[6] }),
-                ]}
-              >
-                <PulseCard
-                  hasBudget={hasBudget}
-                  totalCents={budget?.total_amount ?? 0}
-                  usedCents={usedTotal}
-                  balanceCents={balance}
-                  expenseCents={expense}
-                  incomeCents={income}
-                  daysLeft={daysToMonthEnd()}
-                  isOwner={isOwner}
-                  hidden={amountsHidden}
-                  onToggleHidden={toggleAmounts}
-                  onPress={() => setSummary({ open: true, period: currentPeriod() })}
-                  onSetBudget={() => setBudgetOpen(true)}
-                />
+            {/* insetGrouped List：按日分组 = 白卡 Section，行内左滑「编辑/删除」（原生 swipeActions 仅在 List 内生效）。 */}
+            <List modifiers={[listStyle('insetGrouped'), ...(scrollGeometry ? [scrollGeometry] : [])]}>
+              {/* 头部区：脉搏卡 + 提示条。清除分组卡样式（融入页面底色），首行顶部留白让内容落在悬浮头之下。 */}
+              <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
+                <VStack
+                  modifiers={[
+                    listRowInsets({
+                      // 顶部留白让脉搏卡落在悬浮头之下；List(insetGrouped) 本身已有分组顶距，
+                      // 故只补「头高 − 安全区」再减去这段分组顶距，避免标题与卡片间空太大。
+                      top: headerHeight - insets.top - Space[5],
+                      bottom: Space[2],
+                      leading: Space[4],
+                      trailing: Space[4],
+                    }),
+                  ]}
+                >
+                  <PulseCard
+                    hasBudget={hasBudget}
+                    totalCents={budget?.total_amount ?? 0}
+                    usedCents={usedTotal}
+                    balanceCents={balance}
+                    expenseCents={expense}
+                    incomeCents={income}
+                    daysLeft={daysToMonthEnd()}
+                    isOwner={isOwner}
+                    hidden={amountsHidden}
+                    onToggleHidden={toggleAmounts}
+                    onPress={() => setSummary({ open: true, period: currentPeriod() })}
+                    onSetBudget={() => setBudgetOpen(true)}
+                  />
+                </VStack>
                 {showLastMonthReminder ? (
-                  <InsightBanner
-                    title="上月总结来啦 🎉"
-                    subtitle="看看上个月家里的开销与变化"
-                    onPress={() => setSummary({ open: true, period: prevPeriodStr })}
-                  />
-                ) : monthCount > 0 ? (
-                  <InsightBanner
-                    title={`${month} 月家里一起记下了 ${monthCount} 笔`}
-                    subtitle="每一笔都是一家人生活的痕迹"
-                  />
+                  <VStack
+                    modifiers={[listRowInsets({ top: 0, bottom: Space[2], leading: Space[4], trailing: Space[4] })]}
+                  >
+                    <InsightBanner
+                      title="上月总结来啦 🎉"
+                      subtitle="看看上个月家里的开销与变化"
+                      onPress={() => setSummary({ open: true, period: prevPeriodStr })}
+                    />
+                  </VStack>
+                ) : showCountBanner ? (
+                  <VStack
+                    modifiers={[listRowInsets({ top: 0, bottom: Space[2], leading: Space[4], trailing: Space[4] })]}
+                  >
+                    <InsightBanner
+                      title={`${month} 月家里一起记下了 ${monthCount} 笔`}
+                      subtitle="每一笔都是一家人生活的痕迹"
+                      onDismiss={dismissCountBanner}
+                    />
+                  </VStack>
                 ) : null}
-                {groups.map((g) => (
-                  <DayGroup key={g.key} label={g.label} totalCents={g.totalCents} rows={g.rows} onRowPress={openEdit} />
-                ))}
-                <EndOfListHint />
-              </VStack>
-            </ScrollView>
+              </Section>
+              {groups.map((g) => (
+                <DayGroup
+                  key={g.key}
+                  label={g.label}
+                  totalCents={g.totalCents}
+                  rows={g.rows}
+                  onRowPress={openDetail}
+                  onEdit={openEdit}
+                  onDelete={confirmDelete}
+                />
+              ))}
+              {/* 末尾「没有更多了」提示 + 底部留白 */}
+              <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
+                <VStack
+                  modifiers={[
+                    listRowInsets({ top: Space[2], bottom: Space[6], leading: Space[4], trailing: Space[4] }),
+                  ]}
+                >
+                  <EndOfListHint />
+                </VStack>
+              </Section>
+            </List>
           </Host>
         )}
 
@@ -278,7 +365,9 @@ export default function HomeScreen() {
             <View style={styles.headerText}>
               <ThemedText style={[styles.title, { color: palette.textPrimary }]}>首页</ThemedText>
               <ThemedText style={[styles.subtitle, { color: palette.textSecondary }]}>
-                {`${greetingForHour()}，掌握每一笔，生活更从容`}
+                {profileQ.data?.nickname
+                  ? `${greetingForHour()}，${profileQ.data.nickname}，掌握每一笔，生活更从容`
+                  : `${greetingForHour()}，掌握每一笔，生活更从容`}
               </ThemedText>
             </View>
             <HeaderSearchButton style={styles.searchBtn} />
@@ -327,6 +416,13 @@ export default function HomeScreen() {
 
       {/* 预算设置（降级态户主 CTA → 流程 8） */}
       <BudgetSheet visible={budgetOpen} onClose={() => setBudgetOpen(false)} />
+
+      {/* 流水详情弹窗（点击列表项 → 只读详情；点遮罩/X 关闭） */}
+      <TransactionDetailSheet
+        visible={detail.open}
+        transaction={detail.txn}
+        onClose={() => setDetail((d) => ({ ...d, open: false }))}
+      />
     </View>
   );
 }
