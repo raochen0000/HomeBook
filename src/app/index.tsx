@@ -376,7 +376,7 @@ export default function HomeScreen() {
       </View>
 
       {/* 记一笔 悬浮钮（IA §2：Tab Bar 右上方常驻） */}
-      {/* 中性强调底 + 反色加号：accent 近黑/近白（DESIGN §5.2 v0.5.0，不用品牌橙/系统蓝） */}
+      {/* 系统蓝强调底 + 白加号：accent 系统蓝（DESIGN §9.2 v0.6.0） */}
       <Pressable onPress={openCreate} style={[styles.fab, { backgroundColor: palette.accent, shadowColor: '#000' }]}>
         <SymbolView name="plus" tintColor={palette.onAccent} size={28} weight="semibold" />
       </Pressable>

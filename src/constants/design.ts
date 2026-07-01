@@ -1,6 +1,7 @@
 /**
- * 设计令牌（对齐 docs/DESIGN.md v0.4.0）。
- * 收支语义色按 DESIGN §4.2.2：收入=红、支出=绿（中国大陆 红涨绿跌 惯例）。
+ * 设计令牌（对齐 docs/DESIGN.md v0.6.0）。
+ * 基调：黑白灰做骨架 + 系统蓝做交互（accent），iOS 设置式「灰底白卡」分区。
+ * 收支语义色按 DESIGN §2.6：收入=红、支出=绿（中国大陆 红涨绿跌 惯例）。
  * 与既有 theme.ts（中性色 / Spacing）互补，这里补充语义色、分类识别色、圆角与间距全刻度。
  */
 import { useColorScheme } from 'react-native';
@@ -52,7 +53,7 @@ type Palette = {
   textSecondary: string;
   textTertiary: string;
   separator: string;
-  /** 强调（主 CTA / FAB） */
+  /** 强调 / 交互色（系统蓝）：主 CTA / FAB / 选中态 / 进度常态（DESIGN §2.5） */
   accent: string;
   onAccent: string;
   /** 信息条幅 / 徽标底（中性 systemFill，DESIGN v0.5.0 去暖色） */
@@ -63,15 +64,15 @@ type Palette = {
 };
 
 /**
- * 参考图为「浅灰底 + 白卡」（贴近 iOS grouped 观感）。
- * 这与 DESIGN §4.2.3 v0.4.0 的「白底 + 浅灰卡」相反——此处按用户提供的参考图取「灰底白卡」。
+ * iOS 设置式「浅灰底 + 白卡」分区（DESIGN §2.3，v0.6.0 已与本实现对齐）。
+ * accent = 系统蓝 #007AFF（DESIGN §2.5）；onAccent = 蓝底上的白。
  */
 const light: Palette = {
   income: '#E2563D',
   expense: '#2FA36B',
   warning: '#F5A623',
   danger: '#E2563D',
-  info: '#4A90D9',
+  info: '#007AFF',
   base: '#F2F2F7',
   card: '#FFFFFF',
   elevated: '#FFFFFF',
@@ -79,7 +80,7 @@ const light: Palette = {
   textSecondary: 'rgba(60,60,67,0.6)',
   textTertiary: 'rgba(60,60,67,0.3)',
   separator: 'rgba(60,60,67,0.18)',
-  accent: '#1C1C1E',
+  accent: '#007AFF',
   onAccent: '#FFFFFF',
   bannerTint: 'rgba(120,120,128,0.12)',
   shadow: 'rgba(0,0,0,0.06)',
@@ -91,7 +92,7 @@ const dark: Palette = {
   expense: '#46C98A',
   warning: '#FFB84D',
   danger: '#FF7461',
-  info: '#5AA7F0',
+  info: '#0A84FF',
   base: '#000000',
   card: '#1C1C1E',
   elevated: '#2C2C2E',
@@ -99,14 +100,14 @@ const dark: Palette = {
   textSecondary: 'rgba(235,235,245,0.6)',
   textTertiary: 'rgba(235,235,245,0.3)',
   separator: 'rgba(84,84,88,0.6)',
-  accent: '#F2F2F7',
-  onAccent: '#1C1C1E',
+  accent: '#0A84FF',
+  onAccent: '#FFFFFF',
   bannerTint: 'rgba(120,120,128,0.24)',
   shadow: 'rgba(0,0,0,0.4)',
   cardPill: 'rgba(255,255,255,0.12)',
 };
 
-/** 分类识别色（DESIGN §9.1），按主题取值。 */
+/** 分类识别色（DESIGN §2.8），按主题取值。 */
 export const CategoryColors = {
   light: {
     food: '#F4B183',
