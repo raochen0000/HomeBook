@@ -170,10 +170,10 @@ export type RowData = {
   editor: AvatarInfo | null;
 };
 
-/** 行内边距：bottom < top，缩小分隔线上方的空白，分隔线下方保持原节奏。 */
+/** 行内边距：分割线上下留白保持一致。 */
 const ROW_INSET_H = Space[1];
-const ROW_INSET_TOP = Space[2];
-const ROW_INSET_BOTTOM = Space[1];
+const ROW_DIVIDER_GAP = Space[2];
+const ROW_INSET_BOTTOM = 2;
 /** 分隔线左缩进 = 行内边距 + 分类图标宽 + 图标与文字间距。 */
 const DIVIDER_LEADING = ROW_INSET_H + 44 + Space[2];
 
@@ -189,28 +189,36 @@ function Divider({ color }: { color: string }) {
 
 function TransactionRow({
   row,
+  hasDividerBefore,
   showDividerAfter,
   onPress,
 }: {
   row: RowData;
+  /** 非首行：上方有上一条记录的自绘分割线，需要抵消 SwiftUI List row 的默认顶部空隙。 */
+  hasDividerBefore?: boolean;
   /** 非末行：分隔线贴在本行内容下方（同 List 行内），避免行间默认间距叠在分隔线上方。 */
   showDividerAfter?: boolean;
   onPress?: (id: string) => void;
 }) {
   const palette = usePalette();
+  const topInset = hasDividerBefore ? -ROW_DIVIDER_GAP : ROW_DIVIDER_GAP;
   return (
     <VStack
       spacing={0}
       // 整行（含留白）可点 → 详情弹窗；编辑/删除走左滑，不在此处。
-      modifiers={onPress ? [contentShape(shapes.rectangle()), onTapGesture(() => onPress(row.id))] : []}
+      modifiers={[
+        listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }),
+        listRowSeparator('hidden'),
+        ...(onPress ? [contentShape(shapes.rectangle()), onTapGesture(() => onPress(row.id))] : []),
+      ]}
     >
       <HStack
         spacing={Space[2]}
         alignment="center"
         modifiers={[
           padding({
-            top: ROW_INSET_TOP,
-            bottom: showDividerAfter ? 16 : ROW_INSET_BOTTOM,
+            top: topInset,
+            bottom: showDividerAfter ? ROW_DIVIDER_GAP : ROW_INSET_BOTTOM,
             horizontal: ROW_INSET_H,
           }),
         ]}
@@ -259,6 +267,9 @@ function TransactionRow({
   );
 }
 
+/** 与 Hero 卡等宽的内容宽度：屏宽 − 页边距(2×Space4)。用于分组头/横幅与卡片左右对齐。 */
+const CONTENT_WIDTH = Dimensions.get('window').width - Space[4] * 2;
+
 /** 当日净额颜色（红/绿语义，与本 App income=红/expense=绿一致）：正→红、负→绿、零→中性。 */
 function netColor(cents: number, palette: ReturnType<typeof usePalette>) {
   if (cents > 0) return palette.income;
@@ -284,8 +295,10 @@ export function DayGroup({
   onDelete?: (id: string) => void;
 }) {
   const palette = usePalette();
+  // 定宽 = 屏宽 − 页边距：header 在系统默认缩进的可用区内居中，溢出对称，
+  // 从而左右边缘与上方 Hero 卡 / 分组白卡对齐（系统 header 缩进不可直接清零）。
   const header = (
-    <HStack modifiers={[padding({ horizontal: Space[1] })]}>
+    <HStack modifiers={[frame({ width: CONTENT_WIDTH })]}>
       <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{label}</Text>
       <Spacer />
       <Text modifiers={[font({ size: 13, weight: 'bold' }), foregroundColor(netColor(totalCents, palette))]}>
@@ -305,7 +318,12 @@ export function DayGroup({
           key={row.id}
           modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }), listRowSeparator('hidden')]}
         >
-          <TransactionRow row={row} showDividerAfter={i < rows.length - 1} onPress={onRowPress} />
+          <TransactionRow
+            row={row}
+            hasDividerBefore={i > 0}
+            showDividerAfter={i < rows.length - 1}
+            onPress={onRowPress}
+          />
           {/* allowsFullSwipe=false：滑到底也不自动触发首个动作（否则误触「编辑」）。
               删除按钮不用 role="destructive"（那会让 SwiftUI 在点击时直接把行收起，取消后不复原）；
               改用红色 tint，真正的二次确认与危险色交给 RN Alert。 */}
@@ -439,7 +457,7 @@ export function PulseCard({
 }) {
   const palette = usePalette();
 
-  // 卡头：标题 + 眼睛（左）/「总结 ›」入口提示（右）。
+  // 卡头：标题 + 眼睛（左）/「总结 ›」入口（右，仅此处可点开总结）。
   const header = (label: string) => (
     <HStack alignment="center" spacing={Space[2]}>
       <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>{label}</Text>
@@ -450,8 +468,14 @@ export function PulseCard({
         modifiers={[padding({ horizontal: Space[1], vertical: Space[1] }), onTapGesture(() => onToggleHidden())]}
       />
       <Spacer />
-      <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>总结</Text>
-      <Image systemName="chevron.right" size={11} color={palette.textTertiary} />
+      <HStack
+        alignment="center"
+        spacing={Space[1]}
+        modifiers={[padding({ vertical: Space[1] }), contentShape(shapes.rectangle()), onTapGesture(() => onPress())]}
+      >
+        <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>总结</Text>
+        <Image systemName="chevron.right" size={11} color={palette.textTertiary} />
+      </HStack>
     </HStack>
   );
 
@@ -460,8 +484,6 @@ export function PulseCard({
     background(palette.card),
     cornerRadius(Radius.lg),
     shadow({ radius: 10, x: 0, y: 2, color: palette.shadow }),
-    contentShape(shapes.rectangle()),
-    onTapGesture(() => onPress()),
   ];
 
   // ── 未设预算：现金流摘要降级态 ──
@@ -602,16 +624,19 @@ export function InsightBanner({
       spacing={Space[3]}
       alignment="center"
       modifiers={[
-        padding({ vertical: Space[4], horizontal: Space[4] }),
+        padding({ vertical: Space[3], horizontal: Space[4] }),
         background(palette.bannerTint),
         cornerRadius(Radius.md),
+        // 与 Hero 卡等宽：Hero 卡内部进度条定宽（屏宽−2×Space4）撑出溢出居中，
+        // 横幅无定宽内容，需显式锁定同一宽度才能左右对齐。
+        frame({ width: CONTENT_WIDTH }),
         ...(onPress ? [onTapGesture(() => onPress())] : []),
       ]}
     >
-      <Image systemName="calendar" size={22} color={palette.textSecondary} />
+      <Image systemName="calendar" size={28} color={palette.textSecondary} />
       <VStack alignment="leading" spacing={2}>
         <Text modifiers={[font({ size: 15, weight: 'medium' }), foregroundColor(palette.textPrimary)]}>{title}</Text>
-        <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{subtitle}</Text>
+        <Text modifiers={[font({ size: 11 }), foregroundColor(palette.textSecondary)]}>{subtitle}</Text>
       </VStack>
       <Spacer />
       {onPress ? <Image systemName="chevron.right" size={13} color={palette.textTertiary} /> : null}

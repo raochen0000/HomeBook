@@ -311,7 +311,9 @@ export default function HomeScreen() {
                 </VStack>
                 {showLastMonthReminder ? (
                   <VStack
-                    modifiers={[listRowInsets({ top: 0, bottom: Space[2], leading: Space[4], trailing: Space[4] })]}
+                    modifiers={[
+                      listRowInsets({ top: Space[2], bottom: Space[2], leading: Space[4], trailing: Space[4] }),
+                    ]}
                   >
                     <InsightBanner
                       title="上月总结来啦 🎉"
@@ -321,7 +323,9 @@ export default function HomeScreen() {
                   </VStack>
                 ) : showCountBanner ? (
                   <VStack
-                    modifiers={[listRowInsets({ top: 0, bottom: Space[2], leading: Space[4], trailing: Space[4] })]}
+                    modifiers={[
+                      listRowInsets({ top: Space[2], bottom: Space[2], leading: Space[4], trailing: Space[4] }),
+                    ]}
                   >
                     <InsightBanner
                       title={`${month} 月家里一起记下了 ${monthCount} 笔`}
@@ -440,7 +444,7 @@ const styles = StyleSheet.create({
     paddingTop: Space[2],
     paddingBottom: Space[3],
   },
-  headerText: { flex: 1, gap: 2 },
+  headerText: { flex: 1, gap: Space[2] },
   title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
   subtitle: { fontSize: 14, lineHeight: 18 },
   searchBtn: { paddingTop: Space[2] },
