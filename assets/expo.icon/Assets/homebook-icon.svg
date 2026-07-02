@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">HomeBook app icon</title>
+  <desc id="desc">A house combined with an open book and a yen symbol.</desc>
+  <defs>
+    <linearGradient id="steel" x1="190" y1="160" x2="850" y2="870" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C8CCCF"/>
+      <stop offset="0.48" stop-color="#AEB3B7"/>
+      <stop offset="1" stop-color="#C3C7CA"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Keep the app-icon background opaque. iOS applies the corner mask. -->
+  <rect width="1024" height="1024" fill="#FFFFFF"/>
+
+  <g fill="none" stroke="url(#steel)" stroke-width="19" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Roof -->
+    <path d="M210 445 L488 178 C501 165 522 165 536 178 L633 273"/>
+
+    <!-- Chimney, right roof, eave and right wall -->
+    <path d="M654 223
+             C654 214 661 209 670 209
+             H700
+             C707 209 712 214 712 222
+             V322
+             C712 337 718 345 729 355
+             L815 434
+             C827 445 822 454 806 454
+             H749
+             C736 454 728 462 728 476
+             V699
+             C728 720 717 729 698 734
+             C638 743 584 748 548 724
+             C529 711 518 695 512 677"/>
+
+    <!-- Left eave, left wall and lower house curve -->
+    <path d="M210 445
+             H275
+             C288 445 296 453 296 466
+             V699
+             C296 720 307 729 326 734
+             C386 743 440 748 476 724
+             C495 711 506 695 512 677"/>
+
+    <!-- Chimney-to-center inner slope -->
+    <path d="M654 223
+             C653 250 674 273 674 305
+             C674 341 653 356 615 364
+             C589 369 574 389 559 415
+             L513 496"/>
+
+    <!-- Open book: outer silhouette -->
+    <path d="M193 521
+             V814
+             C193 829 201 837 216 837
+             H466
+             C476 855 493 864 512 864
+             C531 864 548 855 558 837
+             H808
+             C823 837 831 829 831 814
+             V521"/>
+
+    <!-- Open book: pages -->
+    <path d="M245 497 V779 C317 776 383 786 441 811"/>
+    <path d="M779 497 V779 C707 776 641 786 583 811"/>
+    <path d="M458 772 C483 788 501 807 512 831 C524 807 543 788 566 775"/>
+
+    <!-- Yen symbol -->
+    <path d="M410 381 C402 370 389 366 382 372 C373 380 377 393 383 402 L488 530"/>
+    <path d="M630 402 L538 529"/>
+    <path d="M487 531 H425 C413 531 406 539 406 550 C406 561 414 568 426 568 H599 C612 568 620 560 620 549 C620 538 612 531 599 531 H539"/>
+    <path d="M487 589 H425 C413 589 406 597 406 608 C406 619 414 627 426 627 H598 C611 627 619 619 619 608 C619 597 611 589 598 589 H538"/>
+    <path d="M513 531 V677"/>
+  </g>
+</svg>
