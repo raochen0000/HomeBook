@@ -15,19 +15,20 @@
  */
 import { Image } from 'expo-image';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
@@ -42,8 +43,11 @@ import {
 
 /** 协议链接蓝（一次性，沿用 iOS 系统蓝）。 */
 const LINK_BLUE = '#0A84FF';
+const CONTROL_SELECTED = '#1C1C1E';
 /** OTP 位数（与 Studio Phone provider 配置一致）。 */
 const OTP_LEN = 6;
+/** 切换手机号 / 邮箱登录时，底部内容区保持同一视觉高度。 */
+const LOGIN_PANEL_MIN_HEIGHT = 382;
 
 /**
  * 手机号 OTP 总开关。当前为开：手机号为主、显示「手机号 / 邮箱」互跳入口。
@@ -91,7 +95,9 @@ export function LoginScreen() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(true);
+  const [rememberMe, setRememberMe] = useState(true);
   const [appleAvailable, setAppleAvailable] = useState(false);
+  const [appleSheetOpen, setAppleSheetOpen] = useState(false);
 
   useEffect(() => {
     isAppleAuthAvailable().then(setAppleAvailable);
@@ -110,86 +116,129 @@ export function LoginScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
+      <Image
+        source={require('@/assets/images/login/login-background.png')}
+        style={styles.backgroundArt}
+        contentFit="cover"
+        pointerEvents="none"
+      />
       <SafeAreaView style={styles.flex}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <View style={styles.content}>
             {/* 品牌头 */}
             <View style={styles.brand}>
-              <Image source={require('@/assets/images/icon.png')} style={styles.logo} contentFit="contain" />
+              <Image
+                source={require('@/assets/expo.icon/Assets/homebook-Icon-appstore-1024.png')}
+                style={styles.logo}
+                contentFit="contain"
+              />
               <Text style={[styles.logoText, { color: palette.textPrimary }]}>家账</Text>
               <Text style={[styles.tagline, { color: palette.textSecondary }]}>和家人一起记账</Text>
               <Text style={[styles.tagline, { color: palette.textSecondary }]}>管理每一笔生活开支</Text>
             </View>
 
-            {/* 表单卡片 */}
-            <View style={[styles.card, { backgroundColor: palette.card }]}>
-              {mode === 'phone' ? (
-                <PhoneForm palette={palette} busy={busy} setBusy={setBusy} onToast={setToast} />
-              ) : (
-                <EmailForm palette={palette} busy={busy} setBusy={setBusy} onToast={setToast} />
-              )}
-            </View>
-
-            {/* 其它方式登录 */}
-            <View style={styles.others}>
-              <View style={styles.dividerRow}>
-                <View style={[styles.dividerLine, { backgroundColor: palette.separator }]} />
-                <Text style={[styles.dividerText, { color: palette.textTertiary }]}>其它方式登录</Text>
-                <View style={[styles.dividerLine, { backgroundColor: palette.separator }]} />
+            <View
+              style={[
+                styles.loginPanel,
+                {
+                  backgroundColor: palette.card,
+                  shadowColor: palette.shadow,
+                },
+              ]}
+            >
+              <View style={styles.formArea}>
+                {mode === 'phone' ? (
+                  <PhoneForm
+                    palette={palette}
+                    busy={busy}
+                    rememberMe={rememberMe}
+                    setRememberMe={setRememberMe}
+                    setBusy={setBusy}
+                    onToast={setToast}
+                  />
+                ) : (
+                  <EmailForm
+                    palette={palette}
+                    busy={busy}
+                    rememberMe={rememberMe}
+                    setRememberMe={setRememberMe}
+                    setBusy={setBusy}
+                    onToast={setToast}
+                  />
+                )}
               </View>
 
-              {/* 手机号入口受 PHONE_OTP_ENABLED 控制；关闭时只在邮箱态、不显示「手机号登录」 */}
-              {PHONE_OTP_ENABLED && mode === 'phone' ? (
-                <SecondaryButton
-                  palette={palette}
-                  icon="envelope"
-                  label="邮箱登录"
-                  disabled={busy}
-                  onPress={() => setMode('email')}
-                />
-              ) : null}
-              {PHONE_OTP_ENABLED && mode === 'email' ? (
-                <SecondaryButton
-                  palette={palette}
-                  icon="iphone"
-                  label="手机号登录"
-                  disabled={busy}
-                  onPress={() => setMode('phone')}
-                />
-              ) : null}
+              {/* 其它方式登录 */}
+              <View style={styles.others}>
+                <View style={styles.dividerRow}>
+                  <View style={[styles.dividerLine, { backgroundColor: palette.separator }]} />
+                  <Text style={[styles.dividerText, { color: palette.textTertiary }]}>其它方式登录</Text>
+                  <View style={[styles.dividerLine, { backgroundColor: palette.separator }]} />
+                </View>
 
-              {appleAvailable ? (
-                <SecondaryButton
-                  palette={palette}
-                  icon="apple.logo"
-                  label="通过 Apple 登录"
-                  disabled={busy}
-                  onPress={handleApple}
+                {/* 手机号入口受 PHONE_OTP_ENABLED 控制；关闭时只在邮箱态、不显示「手机号登录」 */}
+                {PHONE_OTP_ENABLED && mode === 'phone' ? (
+                  <SecondaryButton
+                    palette={palette}
+                    icon="envelope"
+                    label="邮箱登录"
+                    disabled={busy}
+                    onPress={() => setMode('email')}
+                  />
+                ) : null}
+                {PHONE_OTP_ENABLED && mode === 'email' ? (
+                  <SecondaryButton
+                    palette={palette}
+                    icon="iphone"
+                    label="手机号登录"
+                    disabled={busy}
+                    onPress={() => setMode('phone')}
+                  />
+                ) : null}
+
+                {appleAvailable ? (
+                  <SecondaryButton
+                    palette={palette}
+                    icon="apple.logo"
+                    label="通过 Apple 登录"
+                    disabled={busy}
+                    onPress={() => setAppleSheetOpen(true)}
+                  />
+                ) : null}
+              </View>
+
+              {/* 协议（默认勾选、仅告知，不拦截登录） */}
+              <Pressable style={styles.agreeRow} hitSlop={6} onPress={() => setAgreed((v) => !v)}>
+                <SymbolView
+                  name={agreed ? 'checkmark.circle.fill' : 'circle'}
+                  tintColor={agreed ? CONTROL_SELECTED : palette.textTertiary}
+                  size={16}
                 />
-              ) : null}
+                <Text style={[styles.agreeText, { color: palette.textTertiary }]}>
+                  登录即表示你已阅读并同意
+                  <Text style={{ color: LINK_BLUE }} onPress={() => setToast('用户协议 · 敬请期待')}>
+                    《用户协议》
+                  </Text>
+                  与
+                  <Text style={{ color: LINK_BLUE }} onPress={() => setToast('隐私政策 · 敬请期待')}>
+                    《隐私政策》
+                  </Text>
+                </Text>
+              </Pressable>
             </View>
-
-            {/* 协议（默认勾选、仅告知，不拦截登录） */}
-            <Pressable style={styles.agreeRow} hitSlop={6} onPress={() => setAgreed((v) => !v)}>
-              <SymbolView
-                name={agreed ? 'checkmark.circle.fill' : 'circle'}
-                tintColor={agreed ? palette.accent : palette.textTertiary}
-                size={16}
-              />
-              <Text style={[styles.agreeText, { color: palette.textTertiary }]}>
-                登录即表示你已阅读并同意
-                <Text style={{ color: LINK_BLUE }} onPress={() => setToast('用户协议 · 敬请期待')}>
-                  《用户协议》
-                </Text>
-                与
-                <Text style={{ color: LINK_BLUE }} onPress={() => setToast('隐私政策 · 敬请期待')}>
-                  《隐私政策》
-                </Text>
-              </Text>
-            </Pressable>
-          </ScrollView>
+          </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
+      <AppleLoginSheet
+        visible={appleSheetOpen}
+        palette={palette}
+        busy={busy}
+        onClose={() => setAppleSheetOpen(false)}
+        onContinue={async () => {
+          await handleApple();
+          setAppleSheetOpen(false);
+        }}
+      />
       <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
@@ -198,12 +247,14 @@ export function LoginScreen() {
 type FormProps = {
   palette: ReturnType<typeof usePalette>;
   busy: boolean;
+  rememberMe: boolean;
+  setRememberMe: (b: boolean) => void;
   setBusy: (b: boolean) => void;
   onToast: (t: string) => void;
 };
 
 // ── 手机号 OTP 表单 ───────────────────────────────────────────────────────────
-function PhoneForm({ palette, busy, setBusy, onToast }: FormProps) {
+function PhoneForm({ palette, busy, rememberMe, setRememberMe, setBusy, onToast }: FormProps) {
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [cooldown, setCooldown] = useState(0);
@@ -251,7 +302,6 @@ function PhoneForm({ palette, busy, setBusy, onToast }: FormProps) {
 
   return (
     <>
-      <Text style={[styles.label, { color: palette.textSecondary }]}>手机号</Text>
       <View style={[styles.field, { backgroundColor: palette.base }]}>
         <Text style={[styles.cc, { color: palette.textPrimary }]}>+86</Text>
         <SymbolView name="chevron.down" tintColor={palette.textTertiary} size={11} />
@@ -268,7 +318,6 @@ function PhoneForm({ palette, busy, setBusy, onToast }: FormProps) {
         />
       </View>
 
-      <Text style={[styles.label, { color: palette.textSecondary }]}>短信验证码</Text>
       <View style={[styles.field, { backgroundColor: palette.base }]}>
         <TextInput
           style={[styles.input, { color: palette.textPrimary }]}
@@ -290,7 +339,9 @@ function PhoneForm({ palette, busy, setBusy, onToast }: FormProps) {
         </Pressable>
       </View>
 
-      <PrimaryButton palette={palette} busy={busy} enabled={canLogin} label="登录" onPress={onLogin} />
+      <LoginOptionsRow palette={palette} rememberMe={rememberMe} setRememberMe={setRememberMe} />
+
+      <PrimaryButton busy={busy} enabled={canLogin} label="登录" onPress={onLogin} />
 
       <View style={styles.hintRow}>
         <SymbolView name="checkmark.shield" tintColor={palette.textTertiary} size={13} />
@@ -301,7 +352,7 @@ function PhoneForm({ palette, busy, setBusy, onToast }: FormProps) {
 }
 
 // ── 邮箱密码表单 ──────────────────────────────────────────────────────────────
-function EmailForm({ palette, busy, setBusy, onToast }: FormProps) {
+function EmailForm({ palette, busy, rememberMe, setRememberMe, setBusy, onToast }: FormProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -373,29 +424,214 @@ function EmailForm({ palette, busy, setBusy, onToast }: FormProps) {
         </Pressable>
       </View>
 
-      <Pressable hitSlop={6} style={styles.forgot} onPress={() => onToast('找回密码 · 敬请期待')}>
-        <Text style={[styles.forgotText, { color: palette.textTertiary }]}>忘记密码?</Text>
-      </Pressable>
+      <LoginOptionsRow
+        palette={palette}
+        rememberMe={rememberMe}
+        setRememberMe={setRememberMe}
+        onForgot={() => onToast('找回密码 · 敬请期待')}
+      />
 
-      <PrimaryButton palette={palette} busy={busy} enabled={canLogin} label="登录" onPress={onLogin} />
+      <PrimaryButton busy={busy} enabled={canLogin} label="登录" onPress={onLogin} />
 
       <View style={styles.hintRow}>
         <SymbolView name="checkmark.shield" tintColor={palette.textTertiary} size={13} />
-        <Text style={[styles.hint, { color: palette.textTertiary }]}>未注册的邮箱将自动创建账号并登录</Text>
+        <Text style={[styles.hint, { color: palette.textTertiary }]}>未注册的邮箱号验证通过后将自动创建账号并登录</Text>
       </View>
     </>
   );
 }
 
 // ── 复用件 ────────────────────────────────────────────────────────────────────
-function PrimaryButton({
+function LoginOptionsRow({
   palette,
+  rememberMe,
+  setRememberMe,
+  onForgot,
+}: {
+  palette: ReturnType<typeof usePalette>;
+  rememberMe: boolean;
+  setRememberMe: (b: boolean) => void;
+  onForgot?: () => void;
+}) {
+  return (
+    <View style={styles.optionsRow}>
+      <Pressable style={styles.remember} hitSlop={6} onPress={() => setRememberMe(!rememberMe)}>
+        <SymbolView
+          name={rememberMe ? 'checkmark.square.fill' : 'square'}
+          tintColor={rememberMe ? CONTROL_SELECTED : palette.textTertiary}
+          size={15}
+        />
+        <Text style={[styles.rememberText, { color: palette.textTertiary }]}>记住我</Text>
+      </Pressable>
+      {onForgot ? (
+        <Pressable hitSlop={6} onPress={onForgot}>
+          <Text style={[styles.forgotText, { color: palette.textTertiary }]}>忘记密码?</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function AppleLoginSheet({
+  visible,
+  palette,
+  busy,
+  onClose,
+  onContinue,
+}: {
+  visible: boolean;
+  palette: ReturnType<typeof usePalette>;
+  busy: boolean;
+  onClose: () => void;
+  onContinue: () => Promise<void>;
+}) {
+  const insets = useSafeAreaInsets();
+  const [translateY] = useState(() => new Animated.Value(0));
+  const busyRef = useRef(busy);
+  const dragStartY = useRef(0);
+  const currentDragY = useRef(0);
+
+  useEffect(() => {
+    if (visible) translateY.setValue(0);
+  }, [translateY, visible]);
+
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+
+  const closeWithDrag = useCallback(() => {
+    Animated.timing(translateY, {
+      toValue: 420,
+      duration: 180,
+      useNativeDriver: true,
+    }).start(() => {
+      translateY.setValue(0);
+      onClose();
+    });
+  }, [onClose, translateY]);
+
+  const resetSheetPosition = () => {
+    Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
+  };
+
+  const finishDrag = () => {
+    if (busyRef.current) {
+      resetSheetPosition();
+      return;
+    }
+    if (currentDragY.current > 80) {
+      closeWithDrag();
+      return;
+    }
+    resetSheetPosition();
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      presentationStyle="overFullScreen"
+      onRequestClose={onClose}
+    >
+      <View style={styles.appleModalRoot}>
+        <Animated.View
+          style={[
+            styles.appleSheet,
+            {
+              backgroundColor: palette.card,
+              paddingBottom: Math.max(insets.bottom + Space[2], Space[5]),
+              transform: [{ translateY }],
+            },
+          ]}
+        >
+          <View
+            style={styles.sheetGrabberHitArea}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={(event) => {
+              dragStartY.current = event.nativeEvent.pageY;
+              currentDragY.current = 0;
+            }}
+            onResponderMove={(event) => {
+              const dy = Math.max(0, event.nativeEvent.pageY - dragStartY.current);
+              currentDragY.current = dy;
+              translateY.setValue(dy);
+            }}
+            onResponderRelease={finishDrag}
+            onResponderTerminate={finishDrag}
+          >
+            <View style={[styles.sheetGrabber, { backgroundColor: palette.separator }]} />
+          </View>
+          <Pressable style={styles.sheetCancel} hitSlop={8} onPress={onClose} disabled={busy}>
+            <Text style={[styles.sheetCancelText, { color: LINK_BLUE }]}>取消</Text>
+          </Pressable>
+
+          <SymbolView name="apple.logo" tintColor={palette.textPrimary} size={38} />
+          <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>通过 Apple 登录</Text>
+
+          <View style={styles.sheetBenefits}>
+            <AppleBenefit
+              palette={palette}
+              icon="checkmark.shield"
+              title="快速、安全、保护隐私"
+              text="使用你已有的 Apple 账号登录，无需创建新账号，App 不会获取你的密码。"
+            />
+            <AppleBenefit
+              palette={palette}
+              icon="person"
+              title="仅分享必要信息"
+              text="你可选择分享姓名和电子邮件，App 将严格保护你的隐私。"
+            />
+            <AppleBenefit
+              palette={palette}
+              icon="key"
+              title="在设备间轻松登录"
+              text="使用 iCloud 钥匙串，帮你在所有 Apple 设备上自动登录。"
+            />
+          </View>
+
+          <View style={[styles.sheetRule, { backgroundColor: palette.separator }]} />
+          <PrimaryButton busy={busy} enabled={!busy} label="通过 Apple 继续" onPress={onContinue} />
+          <Text style={[styles.sheetBottomNote, { color: palette.textTertiary }]}>
+            Apple 账号只用于登录家账，不会用于 Apple 服务以外的其他用途。
+          </Text>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+function AppleBenefit({
+  palette,
+  icon,
+  title,
+  text,
+}: {
+  palette: ReturnType<typeof usePalette>;
+  icon: SymbolViewProps['name'];
+  title: string;
+  text: string;
+}) {
+  return (
+    <View style={styles.benefitRow}>
+      <View style={[styles.benefitIcon, { backgroundColor: palette.base }]}>
+        <SymbolView name={icon} tintColor={palette.textSecondary} size={24} />
+      </View>
+      <View style={styles.benefitText}>
+        <Text style={[styles.benefitTitle, { color: palette.textPrimary }]}>{title}</Text>
+        <Text style={[styles.benefitBody, { color: palette.textSecondary }]}>{text}</Text>
+      </View>
+    </View>
+  );
+}
+
+function PrimaryButton({
   busy,
   enabled,
   label,
   onPress,
 }: {
-  palette: ReturnType<typeof usePalette>;
   busy: boolean;
   enabled: boolean;
   label: string;
@@ -405,13 +641,9 @@ function PrimaryButton({
     <Pressable
       onPress={onPress}
       disabled={!enabled}
-      style={[styles.primary, { backgroundColor: palette.accent, opacity: enabled ? 1 : 0.35 }]}
+      style={[styles.primary, { backgroundColor: '#1C1C1E', opacity: enabled ? 1 : 0.35 }]}
     >
-      {busy ? (
-        <ActivityIndicator color={palette.onAccent} />
-      ) : (
-        <Text style={[styles.primaryText, { color: palette.onAccent }]}>{label}</Text>
-      )}
+      {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryText}>{label}</Text>}
     </Pressable>
   );
 }
@@ -433,7 +665,15 @@ function SecondaryButton({
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      style={[styles.secondary, { backgroundColor: palette.card, opacity: disabled ? 0.6 : 1 }]}
+      style={[
+        styles.secondary,
+        {
+          backgroundColor: palette.card,
+          borderColor: palette.separator,
+          shadowColor: '#000000',
+          opacity: disabled ? 0.6 : 1,
+        },
+      ]}
     >
       <SymbolView name={icon} tintColor={palette.textPrimary} size={18} />
       <Text style={[styles.secondaryText, { color: palette.textPrimary }]}>{label}</Text>
@@ -444,22 +684,45 @@ function SecondaryButton({
 const styles = StyleSheet.create({
   root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10 },
   flex: { flex: 1 },
+  backgroundArt: {
+    position: 'absolute',
+    top: 0,
+    left: -70,
+    right: 0,
+    height: 360,
+    opacity: 0.72,
+  },
   content: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingHorizontal: Space[5],
-    paddingVertical: Space[8],
-    gap: Space[6],
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingHorizontal: Space[4],
+    paddingTop: Space[8],
+    gap: Space[4],
   },
 
   // 品牌头
-  brand: { gap: Space[2] },
-  logo: { width: 64, height: 64, borderRadius: Radius.lg },
-  logoText: { fontSize: 40, fontWeight: '700', marginTop: Space[2] },
+  brand: { minHeight: 245, justifyContent: 'flex-end', gap: Space[2], paddingBottom: Space[2] },
+  logo: { width: 64, height: 64, borderRadius: Radius.lg, marginBottom: Space[2] },
+  logoText: { fontSize: 40, fontWeight: '700' },
   tagline: { fontSize: 17, lineHeight: 24 },
 
-  // 卡片
-  card: { borderRadius: Radius.lg, padding: Space[5], gap: Space[2] },
+  // 底部登录区域
+  loginPanel: {
+    minHeight: LOGIN_PANEL_MIN_HEIGHT,
+    borderRadius: Radius.lgPlus,
+    borderTopLeftRadius: Radius.lgPlus,
+    borderTopRightRadius: Radius.lgPlus,
+    borderBottomLeftRadius: Radius.lgPlus,
+    borderBottomRightRadius: Radius.lgPlus,
+    overflow: 'hidden',
+    padding: Space[4],
+    gap: Space[4],
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 1,
+    shadowRadius: 28,
+    elevation: 3,
+  },
+  formArea: { minHeight: 188, gap: Space[3] },
   label: { fontSize: 14, marginTop: Space[2], marginBottom: Space[1] },
   field: {
     flexDirection: 'row',
@@ -475,18 +738,27 @@ const styles = StyleSheet.create({
   sendText: { fontSize: 15, fontWeight: '600' },
 
   primary: {
+    alignSelf: 'stretch',
     height: 52,
     borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: Space[3],
   },
-  primaryText: { fontSize: 17, fontWeight: '600' },
+  primaryText: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' },
 
-  hintRow: { flexDirection: 'row', alignItems: 'center', gap: Space[1], marginTop: Space[2] },
-  hint: { flex: 1, fontSize: 12, lineHeight: 16 },
+  hintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Space[1],
+    marginTop: Space[2],
+  },
+  hint: { flexShrink: 1, fontSize: 12, lineHeight: 16, textAlign: 'center' },
 
-  forgot: { alignSelf: 'flex-end', marginTop: Space[2] },
+  optionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 24 },
+  remember: { flexDirection: 'row', alignItems: 'center', gap: Space[1] },
+  rememberText: { fontSize: 13 },
   forgotText: { fontSize: 13 },
 
   // 其它方式登录
@@ -501,10 +773,52 @@ const styles = StyleSheet.create({
     gap: Space[2],
     height: 52,
     borderRadius: Radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 1,
+    elevation: 1,
   },
   secondaryText: { fontSize: 16, fontWeight: '600' },
 
   // 协议
   agreeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Space[2], paddingHorizontal: Space[1] },
   agreeText: { flex: 1, fontSize: 12, lineHeight: 18 },
+
+  // Apple 登录说明 Sheet：不拉伸，靠内容自然决定高度。
+  appleModalRoot: { flex: 1, justifyContent: 'flex-end' },
+  appleSheet: {
+    minHeight: 526,
+    borderTopLeftRadius: Radius.lgPlus,
+    borderTopRightRadius: Radius.lgPlus,
+    paddingTop: Space[2],
+    paddingHorizontal: Space[5],
+    paddingBottom: Space[5],
+    alignItems: 'center',
+    gap: Space[2],
+  },
+  sheetGrabberHitArea: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    paddingTop: Space[1],
+    paddingBottom: Space[2],
+  },
+  sheetGrabber: { width: 38, height: 5, borderRadius: Radius.full },
+  sheetCancel: { position: 'absolute', top: Space[4], left: Space[5] },
+  sheetCancelText: { fontSize: 16 },
+  sheetTitle: { fontSize: 22, lineHeight: 28, marginBottom: Space[1] },
+  sheetBenefits: { width: '100%', gap: Space[6], marginVertical: Space[6] },
+  benefitRow: { flexDirection: 'row', gap: Space[4], alignItems: 'flex-start' },
+  benefitIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  benefitText: { flex: 1, gap: Space[1] },
+  benefitTitle: { fontSize: 13, lineHeight: 20, fontWeight: '500' },
+  benefitBody: { fontSize: 12, lineHeight: 17 },
+  sheetRule: { alignSelf: 'stretch', height: StyleSheet.hairlineWidth, marginTop: Space[6] },
+  sheetBottomNote: { fontSize: 11, lineHeight: 16, textAlign: 'center' },
 });
