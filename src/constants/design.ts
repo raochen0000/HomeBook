@@ -1,8 +1,8 @@
 /**
- * 设计令牌（对齐 docs/DESIGN.md v0.6.0）。
+ * 设计令牌（对齐 docs/DESIGN.md v0.6.3）。
  * 基调：黑白灰做骨架 + 系统蓝做交互（accent），iOS 设置式「灰底白卡」分区。
  * 收支语义色按 DESIGN §2.6：收入=红、支出=绿（中国大陆 红涨绿跌 惯例）。
- * 与既有 theme.ts（中性色 / Spacing）互补，这里补充语义色、分类识别色、圆角与间距全刻度。
+ * 与既有 theme.ts（中性色 / Spacing）互补，这里补充语义色、分类识别色、排版、圆角与间距全刻度。
  */
 import { useColorScheme } from 'react-native';
 
@@ -15,17 +15,30 @@ export const Radius = {
   full: 9999,
 } as const;
 
-/** 8pt 网格全刻度（DESIGN §6）。 */
+/** 自定义排版 fallback（DESIGN §4）：奇数字号 / 行高向下取偶数，实际界面仍优先支持 Dynamic Type。 */
+export const Typography = {
+  largeTitle: { fontSize: 34, lineHeight: 40, fontWeight: '700' },
+  title1: { fontSize: 28, lineHeight: 34, fontWeight: '700' },
+  headline: { fontSize: 16, lineHeight: 22, fontWeight: '600' },
+  body: { fontSize: 16, lineHeight: 22, fontWeight: '400' },
+  subheadline: { fontSize: 14, lineHeight: 20, fontWeight: '400' },
+  footnote: { fontSize: 12, lineHeight: 18, fontWeight: '400' },
+  caption: { fontSize: 12, lineHeight: 16, fontWeight: '400' },
+  amountHero: { fontSize: 40, lineHeight: 48, fontWeight: '700' },
+  amountRow: { fontSize: 16, lineHeight: 22, fontWeight: '600' },
+} as const;
+
+/** 8pt 网格的紧凑刻度（DESIGN §6）：旧刻度整体 -2pt。 */
 export const Space = {
-  1: 4,
-  2: 8,
-  3: 12,
-  4: 16,
-  5: 20,
-  6: 24,
-  8: 32,
-  10: 40,
-  12: 48,
+  1: 2,
+  2: 6,
+  3: 10,
+  4: 14,
+  5: 18,
+  6: 22,
+  8: 30,
+  10: 38,
+  12: 46,
 } as const;
 
 /**
@@ -64,7 +77,7 @@ type Palette = {
 };
 
 /**
- * iOS 设置式「浅灰底 + 白卡」分区（DESIGN §2.3，v0.6.0 已与本实现对齐）。
+ * iOS 设置式「浅灰底 + 白卡」分区（DESIGN §2.3，Light 基调灰 #F2F1F5）。
  * accent = 系统蓝 #007AFF（DESIGN §2.5）；onAccent = 蓝底上的白。
  */
 const light: Palette = {
@@ -73,9 +86,9 @@ const light: Palette = {
   warning: '#F5A623',
   danger: '#E2563D',
   info: '#007AFF',
-  base: '#F2F2F7',
+  base: '#F2F1F5',
   card: '#FFFFFF',
-  elevated: '#FFFFFF',
+  elevated: '#F2F1F5',
   textPrimary: '#1C1C1E',
   textSecondary: 'rgba(60,60,67,0.6)',
   textTertiary: 'rgba(60,60,67,0.3)',
