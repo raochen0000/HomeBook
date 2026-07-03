@@ -26,45 +26,228 @@ import {
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { categoryColorKey } from '@/lib/category-style';
 
-/** 可选图标库（SF Symbols）。 */
-const ICON_CHOICES = [
-  'fork.knife',
-  'cup.and.saucer.fill',
-  'cart.fill',
-  'bag.fill',
-  'gift.fill',
-  'car.fill',
-  'bus.fill',
-  'tram.fill',
-  'fuelpump.fill',
-  'airplane',
-  'house.fill',
-  'bolt.fill',
-  'drop.fill',
-  'wifi',
-  'phone.fill',
-  'gamecontroller.fill',
-  'film.fill',
-  'music.note',
-  'figure.run',
-  'dumbbell.fill',
-  'cross.case.fill',
-  'pills.fill',
-  'book.fill',
-  'graduationcap.fill',
-  'pawprint.fill',
-  'tshirt.fill',
-  'scissors',
-  'wrench.and.screwdriver.fill',
-  'creditcard.fill',
-  'heart.fill',
-  'star.fill',
-  'dollarsign.circle.fill',
-  'chart.line.uptrend.xyaxis',
-  'briefcase.fill',
-  'banknote.fill',
-  'ellipsis.circle.fill',
+type SymbolName = Extract<SymbolViewProps['name'], string>;
+type IconGroup = { title: string; icons: readonly SymbolName[] };
+
+/** 分类图标库（SF Symbols），收入/支出共用同一套分组交互。 */
+const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
+  {
+    title: '娱乐',
+    icons: [
+      'gamecontroller.fill',
+      'film.fill',
+      'music.note',
+      'tv.fill',
+      'theatermasks.fill',
+      'party.popper.fill',
+      'ticket.fill',
+      'dice.fill',
+      'mic.fill',
+      'headphones',
+    ],
+  },
+  {
+    title: '饮食',
+    icons: [
+      'fork.knife',
+      'cup.and.saucer.fill',
+      'mug.fill',
+      'wineglass.fill',
+      'takeoutbag.and.cup.and.straw.fill',
+      'birthday.cake.fill',
+      'carrot.fill',
+      'fish.fill',
+      'leaf.fill',
+      'waterbottle.fill',
+    ],
+  },
+  {
+    title: '医疗',
+    icons: [
+      'cross.case.fill',
+      'pills.fill',
+      'stethoscope',
+      'bandage.fill',
+      'syringe.fill',
+      'heart.text.square.fill',
+      'facemask.fill',
+      'medical.thermometer.fill',
+      'waveform.path.ecg',
+      'heart.fill',
+    ],
+  },
+  {
+    title: '学习',
+    icons: [
+      'book.fill',
+      'books.vertical.fill',
+      'graduationcap.fill',
+      'pencil.and.ruler.fill',
+      'pencil',
+      'highlighter',
+      'backpack.fill',
+      'text.book.closed.fill',
+      'character.book.closed.fill',
+      'brain.head.profile',
+    ],
+  },
+  {
+    title: '交通',
+    icons: [
+      'car.fill',
+      'bus.fill',
+      'tram.fill',
+      'fuelpump.fill',
+      'airplane',
+      'bicycle',
+      'figure.walk',
+      'ferry.fill',
+      'parkingsign.circle.fill',
+      'map.fill',
+    ],
+  },
+  {
+    title: '购物',
+    icons: [
+      'cart.fill',
+      'bag.fill',
+      'basket.fill',
+      'gift.fill',
+      'tag.fill',
+      'creditcard.fill',
+      'shippingbox.fill',
+      'storefront.fill',
+      'barcode.viewfinder',
+      'wallet.pass.fill',
+    ],
+  },
+  {
+    title: '生活',
+    icons: [
+      'phone.fill',
+      'wifi',
+      'bolt.fill',
+      'drop.fill',
+      'key.fill',
+      'umbrella.fill',
+      'calendar',
+      'clock.fill',
+      'doc.text.fill',
+      'bell.fill',
+    ],
+  },
+  {
+    title: '个人',
+    icons: [
+      'person.fill',
+      'person.crop.circle.fill',
+      'heart.fill',
+      'star.fill',
+      'tshirt.fill',
+      'scissors',
+      'eyeglasses',
+      'shoeprints.fill',
+      'sparkles',
+      'hands.sparkles.fill',
+    ],
+  },
+  {
+    title: '居家',
+    icons: [
+      'house.fill',
+      'bed.double.fill',
+      'sofa.fill',
+      'lamp.table.fill',
+      'lightbulb.fill',
+      'wrench.and.screwdriver.fill',
+      'paintbrush.fill',
+      'hammer.fill',
+      'shower.fill',
+      'washer.fill',
+    ],
+  },
+  {
+    title: '宠物',
+    icons: [
+      'pawprint.fill',
+      'pawprint.circle.fill',
+      'cat.fill',
+      'dog.fill',
+      'fish.fill',
+      'bird.fill',
+      'tortoise.fill',
+      'hare.fill',
+      'ant.fill',
+      'ladybug.fill',
+    ],
+  },
+  {
+    title: '健身',
+    icons: [
+      'figure.run',
+      'dumbbell.fill',
+      'figure.walk',
+      'figure.strengthtraining.traditional',
+      'figure.yoga',
+      'figure.pool.swim',
+      'figure.outdoor.cycle',
+      'sportscourt.fill',
+      'tennis.racket',
+      'soccerball',
+    ],
+  },
+  {
+    title: '办公',
+    icons: [
+      'briefcase.fill',
+      'folder.fill',
+      'doc.text.fill',
+      'paperclip',
+      'printer.fill',
+      'scanner.fill',
+      'desktopcomputer',
+      'keyboard.fill',
+      'calendar.badge.clock',
+      'chart.bar.fill',
+    ],
+  },
+  {
+    title: '理财',
+    icons: [
+      'dollarsign.circle.fill',
+      'banknote.fill',
+      'creditcard.fill',
+      'chart.line.uptrend.xyaxis',
+      'chart.pie.fill',
+      'percent',
+      'building.columns.fill',
+      'wallet.pass.fill',
+      'yensign.circle.fill',
+      'bitcoinsign.circle.fill',
+      'arrow.up.right.circle.fill',
+      'arrow.down.right.circle.fill',
+    ],
+  },
+  {
+    title: '其它',
+    icons: [
+      'ellipsis.circle.fill',
+      'questionmark.circle.fill',
+      'circle.grid.3x3.fill',
+      'square.grid.2x2.fill',
+      'archivebox.fill',
+      'exclamationmark.circle.fill',
+      'wand.and.stars',
+      'plus.circle.fill',
+      'minus.circle.fill',
+      'circle.fill',
+    ],
+  },
 ];
+
+const DEFAULT_EXPENSE_ICON = 'gamecontroller.fill';
+const DEFAULT_INCOME_ICON = 'dollarsign.circle.fill';
+const CATEGORY_NAME_MAX_LENGTH = 6;
 
 type ViewState = { mode: 'list' } | { mode: 'new'; type: CategoryType } | { mode: 'edit'; category: Category };
 
@@ -82,11 +265,21 @@ export function CategoryManageSheet({ visible, onClose }: { visible: boolean; on
 function Body({ onClose }: { onClose: () => void }) {
   const palette = usePalette();
   const [view, setView] = useState<ViewState>({ mode: 'list' });
+  const editorView = view.mode === 'list' ? null : view;
 
-  if (view.mode !== 'list') {
-    return <Editor view={view} onBack={() => setView({ mode: 'list' })} />;
-  }
-  return <List palette={palette} onClose={onClose} setView={setView} />;
+  return (
+    <>
+      <List palette={palette} onClose={onClose} setView={setView} />
+      <Modal
+        visible={!!editorView}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setView({ mode: 'list' })}
+      >
+        {editorView ? <Editor view={editorView} onBack={() => setView({ mode: 'list' })} /> : null}
+      </Modal>
+    </>
+  );
 }
 
 // ── 列表 ─────────────────────────────────────────────────────────────────────
@@ -287,14 +480,20 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
   const type: CategoryType = isEdit ? (view.category.type as CategoryType) : view.type;
 
   const [name, setName] = useState(isEdit ? view.category.name : '');
-  const [icon, setIcon] = useState(isEdit ? (view.category.icon ?? ICON_CHOICES[0]) : ICON_CHOICES[0]);
+  const defaultIcon = type === 'expense' ? DEFAULT_EXPENSE_ICON : DEFAULT_INCOME_ICON;
+  const [icon, setIcon] = useState(isEdit ? (view.category.icon ?? defaultIcon) : defaultIcon);
 
   const saving = createM.isPending || updateM.isPending;
   const trimmed = name.trim();
+  const nameTooLong = trimmed.length > CATEGORY_NAME_MAX_LENGTH;
   const color = catColors[categoryColorKey(trimmed, type)];
 
   const handleSave = async () => {
     if (!trimmed) return;
+    if (nameTooLong) {
+      Alert.alert('名称过长', `分类名称最多只能输入 ${CATEGORY_NAME_MAX_LENGTH} 个字符。`);
+      return;
+    }
     // 同类型同名查重（排除自身），与历史/系统分类不冲突。
     const dup = (catsQ.data ?? []).some(
       (c) => c.type === type && c.name === trimmed && c.status === 'active' && (!isEdit || c.id !== view.category.id),
@@ -320,26 +519,84 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
     }
   };
 
+  const renderIconChoice = (ic: SymbolName) => {
+    const active = ic === icon;
+    return (
+      <Pressable
+        key={ic}
+        onPress={() => setIcon(ic)}
+        style={[
+          styles.iconCell,
+          { backgroundColor: active ? color : palette.base },
+          active && { borderColor: palette.textPrimary, borderWidth: 2 },
+        ]}
+      >
+        <SymbolView
+          name={ic}
+          tintColor={active ? '#FFFFFF' : palette.textSecondary}
+          size={28}
+          resizeMode="scaleAspectFit"
+          style={styles.iconSymbol}
+        />
+      </Pressable>
+    );
+  };
+
+  const renderIconGrid = (icons: readonly SymbolName[]) => {
+    const rows: SymbolName[][] = [];
+    for (let i = 0; i < icons.length; i += 6) {
+      rows.push(icons.slice(i, i + 6));
+    }
+
+    return (
+      <View style={[styles.iconGrid, { backgroundColor: palette.card }]}>
+        {rows.map((row, index) => (
+          <View key={`${row.join('-')}-${index}`} style={styles.iconRow}>
+            {Array.from({ length: 6 }, (_, slotIndex) => {
+              const ic = row[slotIndex];
+              return (
+                <View key={ic ?? `empty-${index}-${slotIndex}`} style={styles.iconSlot}>
+                  {ic ? renderIconChoice(ic) : null}
+                </View>
+              );
+            })}
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         <View style={styles.topBar}>
           <Pressable hitSlop={8} onPress={onBack}>
             <Text style={[styles.action, { color: palette.textSecondary }]}>取消</Text>
           </Pressable>
           <Text style={[styles.title, { color: palette.textPrimary }]}>{isEdit ? '编辑分类' : '新增分类'}</Text>
-          <Pressable hitSlop={8} onPress={handleSave} disabled={!trimmed || saving}>
-            <Text style={[styles.action, { color: trimmed && !saving ? palette.accent : palette.textTertiary }]}>
+          <Pressable hitSlop={8} onPress={handleSave} disabled={!trimmed || nameTooLong || saving}>
+            <Text
+              style={[
+                styles.action,
+                { color: trimmed && !nameTooLong && !saving ? palette.accent : palette.textTertiary },
+              ]}
+            >
               保存
             </Text>
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={styles.editorContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.editorContent}>
           {/* 预览 + 名称 */}
           <View style={styles.preview}>
             <View style={[styles.previewDot, { backgroundColor: color }]}>
-              <SymbolView name={icon as SymbolViewProps['name']} tintColor="#FFFFFF" size={30} />
+              <SymbolView
+                name={icon as SymbolViewProps['name']}
+                tintColor="#FFFFFF"
+                size={34}
+                resizeMode="scaleAspectFit"
+                style={styles.previewSymbol}
+              />
             </View>
             <Text style={[styles.previewType, { color: palette.textSecondary }]}>
               {type === 'expense' ? '支出分类' : '收入分类'}
@@ -348,42 +605,31 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
 
           <TextInput
             style={[styles.nameInput, { backgroundColor: palette.card, color: palette.textPrimary }]}
-            placeholder="分类名称"
+            placeholder={`分类名称（最多 ${CATEGORY_NAME_MAX_LENGTH} 个字符）`}
             placeholderTextColor={palette.textTertiary}
             value={name}
             onChangeText={setName}
-            maxLength={6}
+            maxLength={CATEGORY_NAME_MAX_LENGTH}
             autoFocus={!isEdit}
             returnKeyType="done"
           />
 
-          {/* 图标选择 */}
-          <Text style={[styles.groupTitle, { color: palette.textSecondary, paddingHorizontal: Space[1] }]}>
-            选择图标
-          </Text>
-          <View style={[styles.iconGrid, { backgroundColor: palette.card }]}>
-            {ICON_CHOICES.map((ic) => {
-              const active = ic === icon;
-              return (
-                <Pressable
-                  key={ic}
-                  onPress={() => setIcon(ic)}
-                  style={[
-                    styles.iconCell,
-                    { backgroundColor: active ? color : palette.base },
-                    active && { borderColor: palette.textPrimary, borderWidth: 2 },
-                  ]}
-                >
-                  <SymbolView
-                    name={ic as SymbolViewProps['name']}
-                    tintColor={active ? '#FFFFFF' : palette.textSecondary}
-                    size={20}
-                  />
-                </Pressable>
-              );
-            })}
-          </View>
-        </ScrollView>
+          <ScrollView
+            style={styles.iconScroll}
+            contentContainerStyle={styles.iconScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.iconGroupList}>
+              {CATEGORY_ICON_GROUPS.map((group) => (
+                <View key={group.title} style={styles.iconPickerGroup}>
+                  <Text style={[styles.iconGroupTitle, { color: palette.textSecondary }]}>{group.title}</Text>
+                  {renderIconGrid(group.icons)}
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
       </SafeAreaView>
     </View>
   );
@@ -425,17 +671,24 @@ const styles = StyleSheet.create({
   rowName: { fontSize: 16, fontWeight: '500' },
   sysTag: { fontSize: 13 },
   archiveBtn: { padding: Space[1] },
-  editorContent: { paddingHorizontal: Space[4], paddingBottom: Space[12], gap: Space[4] },
+  editorContent: { flex: 1, paddingHorizontal: Space[4], gap: Space[4] },
   preview: { alignItems: 'center', gap: Space[2], paddingVertical: Space[4] },
-  previewDot: { width: 64, height: 64, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
+  previewDot: { width: 64, height: 64, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
   previewType: { fontSize: 13 },
   nameInput: { height: 50, borderRadius: Radius.md, paddingHorizontal: Space[4], fontSize: 17 },
+  iconScroll: { flex: 1 },
+  iconScrollContent: {},
+  iconGroupList: { gap: Space[4] },
+  iconPickerGroup: { gap: Space[2] },
+  iconGroupTitle: { fontSize: 13, paddingHorizontal: Space[1] },
   iconGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Space[3],
-    padding: Space[4],
+    gap: Space[2],
+    padding: Space[3],
     borderRadius: Radius.lg,
   },
+  iconRow: { flexDirection: 'row', alignItems: 'center' },
+  iconSlot: { flex: 1, alignItems: 'center' },
   iconCell: { width: 44, height: 44, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
+  iconSymbol: { width: 28, height: 28 },
+  previewSymbol: { width: 34, height: 34 },
 });
