@@ -6,7 +6,6 @@
 import { Image } from 'expo-image';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCategories, useFamilyMembers, useMyProfile, type Transaction } from '@/api';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
@@ -69,7 +68,6 @@ export function TransactionDetailSheet({
   onClose: () => void;
 }) {
   const palette = usePalette();
-  const insets = useSafeAreaInsets();
   const catColors = useCategoryColors();
   const categoriesQ = useCategories();
   const membersQ = useFamilyMembers();
@@ -93,7 +91,7 @@ export function TransactionDetailSheet({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={[styles.backdrop, { paddingBottom: insets.bottom + Space[4] }]} onPress={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose}>
         {/* 阻止冒泡：点击卡片本体不关闭 */}
         <Pressable style={[styles.card, { backgroundColor: palette.card }]} onPress={() => {}}>
           {/* 关闭 X */}
@@ -101,7 +99,7 @@ export function TransactionDetailSheet({
             <SymbolView name="xmark.circle.fill" tintColor={palette.textTertiary} size={26} />
           </Pressable>
 
-          {/* 头部：分类圆角方图标 + 名称 + 类型 */}
+          {/* 头部：分类图标 + 名称/类型 + 金额（同一水平行） */}
           <View style={styles.head}>
             <View style={[styles.catIcon, { backgroundColor: iconColor }]}>
               <SymbolView
@@ -110,16 +108,18 @@ export function TransactionDetailSheet({
                 size={26}
               />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.catName, { color: palette.textPrimary }]}>{cat?.name ?? '未分类'}</Text>
+            <View style={styles.headText}>
+              <Text style={[styles.catName, { color: palette.textPrimary }]} numberOfLines={1}>
+                {cat?.name ?? '未分类'}
+              </Text>
               <Text style={[styles.typeTag, { color: palette.textSecondary }]}>
                 {ttype === 'income' ? '收入' : '支出'}
               </Text>
             </View>
+            <Text style={[styles.amount, { color: amountColor }]} numberOfLines={1}>
+              {formatAmount(t.amount, signForType(ttype))}
+            </Text>
           </View>
-
-          {/* 金额 */}
-          <Text style={[styles.amount, { color: amountColor }]}>{formatAmount(t.amount, signForType(ttype))}</Text>
 
           <View style={[styles.divider, { backgroundColor: palette.separator }]} />
 
@@ -156,20 +156,28 @@ export function TransactionDetailSheet({
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end', paddingHorizontal: Space[4] },
-  card: { borderRadius: Radius.xl, padding: Space[5], gap: Space[3] },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Space[6],
+  },
+  card: { width: '100%', maxWidth: 400, borderRadius: Radius.xl, padding: Space[5], gap: Space[3] },
   close: { position: 'absolute', top: Space[3], right: Space[3], zIndex: 1 },
   head: { flexDirection: 'row', alignItems: 'center', gap: Space[3], paddingRight: Space[6] },
+  headText: { flex: 1, minWidth: 0 },
   catIcon: {
     width: 52,
     height: 52,
     borderRadius: Math.round(52 * 0.2237),
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   catName: { fontSize: 20, fontWeight: '700' },
   typeTag: { fontSize: 13, marginTop: 2 },
-  amount: { fontSize: 32, fontWeight: '700' },
+  amount: { fontSize: 26, fontWeight: '700', flexShrink: 0 },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: Space[1] },
   field: { gap: Space[1] },
   fieldLabel: { fontSize: 13 },

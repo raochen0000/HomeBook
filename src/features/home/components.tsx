@@ -14,11 +14,10 @@ import {
   frame,
   lineLimit,
   listRowInsets,
-  listRowSeparator,
   onTapGesture,
+  opacity,
   padding,
   resizable,
-  shadow,
   shapes,
   tint,
   truncationMode,
@@ -27,7 +26,7 @@ import {
 import type { ComponentProps } from 'react';
 import { Dimensions } from 'react-native';
 
-import { Radius, Space, usePalette } from '@/constants/design';
+import { Radius, Space, Typography, usePalette } from '@/constants/design';
 import { budgetLevel, budgetStage } from '@/lib/budget';
 import { amountParts, formatAmount, signForNet } from '@/lib/format';
 
@@ -170,45 +169,17 @@ export type RowData = {
   editor: AvatarInfo | null;
 };
 
-/** 行内边距：分割线上下留白保持一致。 */
+/** 行内边距。 */
 const ROW_INSET_H = Space[1];
-const ROW_DIVIDER_GAP = Space[2];
-const ROW_INSET_BOTTOM = 2;
-/** 分隔线左缩进 = 行内边距 + 分类图标宽 + 图标与文字间距。 */
-const DIVIDER_LEADING = ROW_INSET_H + 44 + Space[2];
 
-function Divider({ color }: { color: string }) {
-  return (
-    <HStack modifiers={[padding({ leading: DIVIDER_LEADING })]}>
-      <HStack modifiers={[frame({ height: 0.5, maxWidth: 9999 }), background(color)]}>
-        <Spacer />
-      </HStack>
-    </HStack>
-  );
-}
-
-function TransactionRow({
-  row,
-  hasDividerBefore,
-  showDividerAfter,
-  onPress,
-}: {
-  row: RowData;
-  /** 非首行：上方有上一条记录的自绘分割线，需要抵消 SwiftUI List row 的默认顶部空隙。 */
-  hasDividerBefore?: boolean;
-  /** 非末行：分隔线贴在本行内容下方（同 List 行内），避免行间默认间距叠在分隔线上方。 */
-  showDividerAfter?: boolean;
-  onPress?: (id: string) => void;
-}) {
+function TransactionRow({ row, onPress }: { row: RowData; onPress?: (id: string) => void }) {
   const palette = usePalette();
-  const topInset = hasDividerBefore ? -ROW_DIVIDER_GAP : ROW_DIVIDER_GAP;
   return (
     <VStack
       spacing={0}
       // 整行（含留白）可点 → 详情弹窗；编辑/删除走左滑，不在此处。
       modifiers={[
         listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }),
-        listRowSeparator('hidden'),
         ...(onPress ? [contentShape(shapes.rectangle()), onTapGesture(() => onPress(row.id))] : []),
       ]}
     >
@@ -217,8 +188,6 @@ function TransactionRow({
         alignment="center"
         modifiers={[
           padding({
-            top: topInset,
-            bottom: showDividerAfter ? ROW_DIVIDER_GAP : ROW_INSET_BOTTOM,
             horizontal: ROW_INSET_H,
           }),
         ]}
@@ -262,7 +231,6 @@ function TransactionRow({
           </HStack>
         </VStack>
       </HStack>
-      {showDividerAfter ? <Divider color={palette.separator} /> : null}
     </VStack>
   );
 }
@@ -307,23 +275,11 @@ export function DayGroup({
     </HStack>
   );
   return (
-    // listRow* 放在 Section 上（SwiftUI 会下发到每行）：清零 insetGrouped 默认行内边距 + 隐藏系统分隔线，
-    // 避免叠加 TransactionRow 自带的纵向内边距导致行间出现大空白。
-    <Section
-      header={header}
-      modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }), listRowSeparator('hidden')]}
-    >
-      {rows.map((row, i) => (
-        <SwipeActions
-          key={row.id}
-          modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }), listRowSeparator('hidden')]}
-        >
-          <TransactionRow
-            row={row}
-            hasDividerBefore={i > 0}
-            showDividerAfter={i < rows.length - 1}
-            onPress={onRowPress}
-          />
+    // listRowInsets 放在 Section 上：清零 insetGrouped 默认行内边距，避免叠加 TransactionRow 自带 padding。
+    <Section header={header} modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 })]}>
+      {rows.map((row) => (
+        <SwipeActions key={row.id} modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 })]}>
+          <TransactionRow row={row} onPress={onRowPress} />
           {/* allowsFullSwipe=false：滑到底也不自动触发首个动作（否则误触「编辑」）。
               删除按钮不用 role="destructive"（那会让 SwiftUI 在点击时直接把行收起，取消后不复原）；
               改用红色 tint，真正的二次确认与危险色交给 RN Alert。 */}
@@ -348,11 +304,18 @@ export function DayGroup({
 }
 
 // ── 本月脉搏卡（预算口径为主，超支预警内联；无预算降级为现金流摘要，DESIGN §5.9）──
+/** 金额行固定行高（对齐 DESIGN Typography，避免显/隐切换时行盒高度变化）。 */
+function amountLineHeight(integerSize: number): number {
+  if (integerSize >= 34) return Typography.largeTitle.lineHeight;
+  if (integerSize >= 22) return Typography.title1.lineHeight;
+  return Typography.amountRow.lineHeight;
+}
+
+/** 进度条副文案占位（固定最长宽度，避免显/隐切换时换行或行高变化）。 */
+const PROGRESS_CAPTION_RESERVE = '已用 ¥9,999,999.99 / ¥9,999,999.99 · 距月底 31 天';
+
 /**
- * 金额：隐藏态用圆点遮罩，可见态走两段式金额。
- * 圆点「•」与数字字形的行高/基线不一致（圆点会触发更高的行盒），
- * 直接切换会让金额行高变化、卡片跳动。这里给两态统一套一个按主字号
- * 计算的固定高度 frame（垂直居中），从而无论显/隐占位高度都一致。
+ * 金额：隐藏时用透明真实 AmountText 撑开行盒，遮罩层叠在上方；外层 HStack+Spacer 保证左对齐。
  */
 function MaskOrAmount({
   cents,
@@ -371,24 +334,60 @@ function MaskOrAmount({
   weight?: 'regular' | 'medium' | 'semibold' | 'bold';
   hidden: boolean;
 }) {
-  // SF Pro 正文行高约为字号的 1.2 倍，按主字号锁定金额行盒高度。
-  const boxHeight = Math.round(integerSize * 1.2);
-  const inner = hidden ? (
-    <HStack spacing={0} alignment="firstTextBaseline">
-      <Text modifiers={[font({ size: integerSize, weight }), foregroundColor(color)]}>¥••••</Text>
-      <Text modifiers={[font({ size: decimalSize, weight: 'regular' }), foregroundColor(color)]}>••</Text>
+  const boxHeight = amountLineHeight(integerSize);
+  return (
+    <HStack modifiers={[frame({ height: boxHeight })]}>
+      <ZStack alignment="topLeading">
+        <HStack modifiers={[opacity(hidden ? 0 : 1)]}>
+          <AmountText
+            cents={cents}
+            sign={sign}
+            color={color}
+            integerSize={integerSize}
+            decimalSize={decimalSize}
+            weight={weight}
+          />
+        </HStack>
+        {hidden ? (
+          <HStack spacing={0} alignment="firstTextBaseline">
+            <Text
+              modifiers={[font({ size: integerSize, weight }), foregroundColor(color)]}
+            >{`${sign ?? ''}¥••••`}</Text>
+            <Text modifiers={[font({ size: decimalSize, weight: 'regular' }), foregroundColor(color)]}>.••</Text>
+          </HStack>
+        ) : null}
+      </ZStack>
+      <Spacer />
     </HStack>
-  ) : (
-    <AmountText
-      cents={cents}
-      sign={sign}
-      color={color}
-      integerSize={integerSize}
-      decimalSize={decimalSize}
-      weight={weight}
-    />
   );
-  return <HStack modifiers={[frame({ height: boxHeight })]}>{inner}</HStack>;
+}
+
+/** 进度条下方「已用 / 距月底」副文案：固定占位行高。 */
+function ProgressCaption({
+  hidden,
+  usedCents,
+  totalCents,
+  daysLeft,
+}: {
+  hidden: boolean;
+  usedCents: number;
+  totalCents: number;
+  daysLeft: number;
+}) {
+  const palette = usePalette();
+  const lineHeight = Typography.footnote.lineHeight;
+  const visible = `已用 ${formatAmount(usedCents, '')} / ${formatAmount(totalCents, '')} · 距月底 ${daysLeft} 天`;
+  const masked = `已用 ¥•••• / ¥•••• · 距月底 ${daysLeft} 天`;
+  const textMods = [font({ size: 12 }), foregroundColor(palette.textSecondary), lineLimit(1), truncationMode('tail')];
+  return (
+    <HStack modifiers={[frame({ height: lineHeight, maxWidth: 9999 })]}>
+      <ZStack alignment="topLeading">
+        <Text modifiers={[...textMods, opacity(0)]}>{PROGRESS_CAPTION_RESERVE}</Text>
+        <Text modifiers={textMods}>{hidden ? masked : visible}</Text>
+      </ZStack>
+      <Spacer />
+    </HStack>
+  );
 }
 
 /** 进度条 4 档颜色（绿→蓝→黄→红）：充裕 绿 / 正常 蓝 / 预警 黄 / 超支 红。 */
@@ -465,7 +464,11 @@ export function PulseCard({
         systemName={hidden ? 'eye.slash' : 'eye'}
         size={15}
         color={palette.textSecondary}
-        modifiers={[padding({ horizontal: Space[1], vertical: Space[1] }), onTapGesture(() => onToggleHidden())]}
+        modifiers={[
+          frame({ width: 22, height: 22 }),
+          padding({ horizontal: Space[1], vertical: Space[1] }),
+          onTapGesture(() => onToggleHidden()),
+        ]}
       />
       <Spacer />
       <HStack
@@ -479,12 +482,7 @@ export function PulseCard({
     </HStack>
   );
 
-  const cardModifiers = [
-    padding({ all: Space[4] }),
-    background(palette.card),
-    cornerRadius(Radius.lg),
-    shadow({ radius: 10, x: 0, y: 2, color: palette.shadow }),
-  ];
+  const cardModifiers = [padding({ all: Space[4] }), background(palette.card), cornerRadius(Radius.lg)];
 
   // ── 未设预算：现金流摘要降级态 ──
   if (!hasBudget) {
@@ -565,11 +563,7 @@ export function PulseCard({
       />
       <VStack alignment="leading" spacing={Space[1]} modifiers={[padding({ top: Space[1] })]}>
         <ProgressBar frac={pct / 100} color={barColor} track={palette.base} />
-        <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textSecondary)]}>
-          {hidden
-            ? `已用 ¥•••• / ¥•••• · 距月底 ${daysLeft} 天`
-            : `已用 ${formatAmount(usedCents, '')} / ${formatAmount(totalCents, '')} · 距月底 ${daysLeft} 天`}
-        </Text>
+        <ProgressCaption hidden={hidden} usedCents={usedCents} totalCents={totalCents} daysLeft={daysLeft} />
       </VStack>
       {/* 分隔线 + 现金流结余行（对账口径，无环比） */}
       <HStack modifiers={[padding({ top: Space[2] })]}>
@@ -577,7 +571,13 @@ export function PulseCard({
           <Spacer />
         </HStack>
       </HStack>
-      <HStack alignment="center" modifiers={[padding({ top: Space[1] })]}>
+      <HStack
+        alignment="center"
+        modifiers={[
+          padding({ top: Space[1] }),
+          frame({ height: Typography.amountRow.lineHeight, alignment: 'center' }),
+        ]}
+      >
         <Text modifiers={[font({ size: 14 }), foregroundColor(palette.textSecondary)]}>本月结余</Text>
         <Spacer />
         <MaskOrAmount
@@ -626,7 +626,7 @@ export function InsightBanner({
       modifiers={[
         padding({ vertical: Space[3], horizontal: Space[4] }),
         background(palette.bannerTint),
-        cornerRadius(Radius.md),
+        cornerRadius(Radius.full),
         // 与 Hero 卡等宽：Hero 卡内部进度条定宽（屏宽−2×Space4）撑出溢出居中，
         // 横幅无定宽内容，需显式锁定同一宽度才能左右对齐。
         frame({ width: CONTENT_WIDTH }),
