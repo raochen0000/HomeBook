@@ -107,6 +107,35 @@ export async function verifyPhoneChange(phone: string, token: string): Promise<v
   if (error) throw error;
 }
 
+// ── 邮箱绑定 / 换绑（次登录方式，账号合并）───────────────────────────────────────
+
+/** 校验并规整邮箱（去空格、转小写）；格式非法返回 null。 */
+export function normalizeEmail(raw: string): string | null {
+  const email = raw.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+  return email;
+}
+
+/**
+ * 已登录用户绑定 / 换绑邮箱（把邮箱挂到当前 auth.users）。
+ * updateUser({ email }) 会向新邮箱发确认（email_change）；若开启 secure email change，
+ * 且当前已有邮箱，则新旧邮箱各发一封，均需确认。随后调 verifyEmailChange 完成。
+ */
+export async function bindEmail(email: string): Promise<void> {
+  const normalized = normalizeEmail(email);
+  if (!normalized) throw new Error('请输入有效的邮箱地址');
+  const { error } = await supabase.auth.updateUser({ email: normalized });
+  if (error) throw error;
+}
+
+/** 邮箱绑定的验证码确认（type=email_change，需邮件模板含 {{ .Token }}）。 */
+export async function verifyEmailChange(email: string, token: string): Promise<void> {
+  const normalized = normalizeEmail(email);
+  if (!normalized) throw new Error('请输入有效的邮箱地址');
+  const { error } = await supabase.auth.verifyOtp({ email: normalized, token, type: 'email_change' });
+  if (error) throw error;
+}
+
 /** Apple 原生设备是否支持 Sign in with Apple（仅 iOS）。 */
 export async function isAppleAuthAvailable(): Promise<boolean> {
   if (Platform.OS !== 'ios') return false;
@@ -146,7 +175,62 @@ export async function signInWithApple(): Promise<void> {
   }
 }
 
+/**
+ * 已登录用户绑定 Apple（账号合并）：原生取 Apple 身份令牌 → linkIdentity 传 token 走 id_token 关联
+ * （免浏览器 OAuth，GoTrue POST /token?grant_type=id_token&link_identity=true），成功后 session 自动刷新。
+ * 用户在 Apple 弹窗取消返回 false；绑定成功返回 true。需后端已配置 Apple provider 且开启 Manual Linking。
+ */
+export async function bindApple(): Promise<boolean> {
+  let credential: AppleAuthentication.AppleAuthenticationCredential;
+  try {
+    credential = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+    });
+  } catch (e) {
+    if ((e as { code?: string }).code === 'ERR_REQUEST_CANCELED') return false;
+    throw e;
+  }
+  if (!credential.identityToken) throw new Error('Apple 未返回身份令牌');
+  const { error } = await supabase.auth.linkIdentity({ provider: 'apple', token: credential.identityToken });
+  if (error) throw error;
+  return true;
+}
+
+/**
+ * 解绑 Apple：读身份列表找到 apple identity → unlinkIdentity。
+ * GoTrue 会拦截「唯一登录方式」的解绑（single_identity_not_deletable），错误原样抛出供 UI 展示。
+ */
+export async function unbindApple(): Promise<void> {
+  const { data, error } = await supabase.auth.getUserIdentities();
+  if (error) throw error;
+  const apple = data?.identities?.find((i) => i.provider === 'apple');
+  if (!apple) throw new Error('未找到已绑定的 Apple 账号');
+  const { error: unlinkError } = await supabase.auth.unlinkIdentity(apple);
+  if (unlinkError) throw unlinkError;
+}
+
+/** 设置 / 修改登录密码（当前 session 即授权，无需旧密码；Supabase updateUser）。 */
+export async function updatePassword(newPassword: string): Promise<void> {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+}
+
 export async function signOut(): Promise<void> {
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
+}
+
+/**
+ * 账号注销（软注销）：家庭流水等共享数据保留、原家庭成员仍可见，注销者从成员名单消失、登录身份被删除。
+ * 服务端在 delete_account RPC 内完成（含匿名化墓碑 + 清空凭据 + 删身份/会话）；成功后清本地 session。
+ * 多人家庭户主会被服务端拦下（须先转让/解散），错误原样抛出供 UI 展示。
+ */
+export async function deleteAccount(): Promise<void> {
+  const { error } = await supabase.rpc('delete_account');
+  if (error) throw error;
+  // 服务端已删会话，这里再清本地存储，触发 onAuthStateChange → 路由回登录页。
+  await supabase.auth.signOut();
 }

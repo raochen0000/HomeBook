@@ -290,3 +290,24 @@ export function useUpdateFamilyCover() {
     },
   });
 }
+
+/** 写回本人昵称（账号页个人资料编辑）。 */
+export async function updateMyNickname(nickname: string): Promise<void> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const uid = sessionData.session?.user.id;
+  if (!uid) throw new Error('未登录');
+  const { error } = await supabase.from('profiles').update({ nickname }).eq('id', uid);
+  if (error) throw error;
+}
+
+export function useUpdateMyNickname() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (nickname: string) => updateMyNickname(nickname),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.profile });
+      qc.invalidateQueries({ queryKey: queryKeys.familyMembers });
+      qc.invalidateQueries({ queryKey: queryKeys.memberships });
+    },
+  });
+}

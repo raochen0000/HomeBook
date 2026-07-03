@@ -1,10 +1,9 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
 import { LoginScreen } from '@/features/auth/login-screen';
 import { NotificationGate } from '@/features/notifications/notification-gate';
 import { SearchProvider } from '@/features/search/search-provider';
@@ -13,7 +12,7 @@ import { devAutoSignIn } from '@/lib/dev-auth';
 import { queryClient } from '@/lib/query-client';
 import { supabase } from '@/lib/supabase';
 
-export default function TabLayout() {
+export default function RootLayout() {
   const colorScheme = useColorScheme();
   const { session, loading } = useSession();
 
@@ -36,7 +35,13 @@ export default function TabLayout() {
         <AnimatedSplashOverlay />
         {/* 搜索单例：根级挂全屏搜索页，各 Tab 顶栏 🔍 共用（流程 14）。 */}
         <SearchProvider>
-          <AppTabs />
+          {/*
+           * 根导航栈：四 Tab 组 `(tabs)` 无头（各 Tab 自带折叠头）；「我的」子页为 push 全屏，
+           * 由各子页自行 `<Stack.Screen options>` 开启原生返回头（IA §6 G / DESIGN §10.4/§10.5）。
+           */}
+          <Stack screenOptions={{ headerShown: false, headerBackButtonDisplayMode: 'minimal' }}>
+            <Stack.Screen name="(tabs)" />
+          </Stack>
         </SearchProvider>
         {/* 已登录：关键通知兜底（被移除/解散/转让，流程 13）。 */}
         {session ? <NotificationGate /> : null}
