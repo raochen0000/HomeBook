@@ -8,7 +8,7 @@
  * 布局：固定区（抓手 / 标题 / 支出收入分段 / 大号金额）+ 可滚动详情卡（分类·备注·时间·记账人）
  * + 固定底部（数字键盘 / 保存）。详情卡内容多时滚动，键盘与保存恒贴底。
  */
-import { Host, DatePicker, Picker, Text as UIText } from '@expo/ui/swift-ui';
+import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
@@ -120,9 +120,9 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   // 分类区可用宽度（实测），用于折叠/展开两态统一每行 5 个、同一像素宽，避免切换时图标横向跳动。
   const [catAreaW, setCatAreaW] = useState(0);
 
-  // 同家庭成员；成员加载后即展示「记账人」行（含单人家庭，便于切换/确认记账人）。
+  // 同家庭成员；仅户主可查看并切换「记账人」，普通成员默认记到自己名下。
   const members = membersQ.data ?? [];
-  const showRecorder = members.length > 0;
+  const showRecorder = members.some((m) => m.userId === recorderId && m.role === 'owner');
   const recorderName = members.find((m) => m.userId === recorderUserId)?.nickname ?? '我';
 
   // 可手动选择的分类：当前类型 + 排除储蓄类系统分类（储蓄走专门入口，PRD 口径）+ 排除本家庭隐藏的系统分类。
@@ -318,7 +318,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
         </Host>
       </View>
 
-      {/* 记账人：成员加载后展示 */}
+      {/* 记账人：仅户主可选择 */}
       {showRecorder ? (
         <>
           {divider}
@@ -422,7 +422,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
 
       {/* 记账人选择（底部 sheet） */}
       <MemberPickerSheet
-        visible={memberOpen}
+        visible={showRecorder && memberOpen}
         members={members}
         selectedUserId={recorderUserId}
         onSelect={(uid) => {
