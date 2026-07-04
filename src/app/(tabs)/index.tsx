@@ -2,8 +2,15 @@
  * 首页（Tab 1）：本月概览卡 + 月度总结条 + 按日分组流水列表。
  * 内容主体用 @expo/ui/swift-ui 原生渲染；外层脚手架（标题栏 / FAB / 状态页）用 RN。
  */
-import { Host, List, Section, VStack } from '@expo/ui/swift-ui';
-import { listRowBackground, listRowInsets, listRowSeparator, listStyle } from '@expo/ui/swift-ui/modifiers';
+import { Host, List, Section, Spacer, VStack } from '@expo/ui/swift-ui';
+import {
+  frame,
+  listRowBackground,
+  listRowInsets,
+  listRowSeparator,
+  listSectionSpacing,
+  listStyle,
+} from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Link, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
@@ -56,6 +63,8 @@ const HIDE_AMOUNTS_KEY = 'home.amountsHidden';
 
 /** 月末「家里一起记下了 N 笔」提示条的关闭记忆（存被关闭的周期 YYYY-MM，本月内不再出现）。 */
 const COUNT_BANNER_DISMISSED_KEY = 'home.countBannerDismissedPeriod';
+/** 月初「上月总结来啦」提示条的关闭记忆（存上月周期 YYYY-MM，本周期不再出现）。 */
+const LAST_MONTH_REMINDER_DISMISSED_KEY = 'home.lastMonthReminderDismissedPeriod';
 
 export default function HomeScreen() {
   const palette = usePalette();
@@ -90,7 +99,8 @@ export default function HomeScreen() {
     () => (transactionsQ.data ?? []).some((t) => currentPeriod(new Date(t.occurred_at)) === prevPeriodStr),
     [transactionsQ.data, prevPeriodStr],
   );
-  const showLastMonthReminder = new Date().getDate() <= 7 && prevMonthHasData;
+  const [lastMonthReminderDismissed, setLastMonthReminderDismissed] = useState(false);
+  const showLastMonthReminder = new Date().getDate() <= 7 && prevMonthHasData && !lastMonthReminderDismissed;
 
   // 月度总结全屏视图（card 点击落本月至今；月初提醒落上月）。
   const [summary, setSummary] = useState<{ open: boolean; period: string }>({
@@ -142,6 +152,15 @@ export default function HomeScreen() {
     AsyncStorage.setItem(COUNT_BANNER_DISMISSED_KEY, currentPeriod());
     setCountBannerDismissed(true);
   }, []);
+  useEffect(() => {
+    AsyncStorage.getItem(LAST_MONTH_REMINDER_DISMISSED_KEY).then((v) => {
+      setLastMonthReminderDismissed(v === prevPeriodStr);
+    });
+  }, [prevPeriodStr]);
+  const dismissLastMonthReminder = useCallback(() => {
+    AsyncStorage.setItem(LAST_MONTH_REMINDER_DISMISSED_KEY, prevPeriodStr);
+    setLastMonthReminderDismissed(true);
+  }, [prevPeriodStr]);
 
   // 成员头像 → 本地缓存路径（供原生流水行的真实头像同步读取）。
   const avatarFiles = useAvatarFiles(membersQ.data ?? []);
@@ -279,62 +298,60 @@ export default function HomeScreen() {
         ) : (
           <Host style={styles.flex}>
             {/* insetGrouped List：按日分组 = 白卡 Section，行内左滑「编辑/删除」（原生 swipeActions 仅在 List 内生效）。 */}
-            <List modifiers={[listStyle('insetGrouped'), ...(scrollGeometry ? [scrollGeometry] : [])]}>
-              {/* 头部区：脉搏卡 + 提示条。清除分组卡样式（融入页面底色），首行顶部留白让内容落在悬浮头之下。 */}
-              <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
-                <VStack
-                  modifiers={[
-                    listRowInsets({
-                      // 顶部留白让脉搏卡落在悬浮头之下；List(insetGrouped) 本身已有分组顶距，
-                      // 故只补「头高 − 安全区」再减去这段分组顶距，避免标题与卡片间空太大。
-                      top: headerHeight - insets.top - Space[5],
-                      bottom: Space[2],
-                      leading: Space[4],
-                      trailing: Space[4],
-                    }),
-                  ]}
-                >
-                  <PulseCard
-                    hasBudget={hasBudget}
-                    totalCents={budget?.total_amount ?? 0}
-                    usedCents={usedTotal}
-                    balanceCents={balance}
-                    expenseCents={expense}
-                    incomeCents={income}
-                    daysLeft={daysToMonthEnd()}
-                    isOwner={isOwner}
-                    hidden={amountsHidden}
-                    onToggleHidden={toggleAmounts}
-                    onPress={() => setSummary({ open: true, period: currentPeriod() })}
-                    onSetBudget={() => setBudgetOpen(true)}
-                  />
-                </VStack>
-                {showLastMonthReminder ? (
+            <List
+              modifiers={[
+                listStyle('insetGrouped'),
+                listSectionSpacing(Space[3]),
+                ...(scrollGeometry ? [scrollGeometry] : []),
+              ]}
+            >
+              {/* 顶部 Hero/横幅走 insetGrouped 原生单行 Section，由系统 row 背景负责圆角。 */}
+              <Section
+                header={
                   <VStack
                     modifiers={[
-                      listRowInsets({ top: Space[2], bottom: Space[2], leading: Space[4], trailing: Space[4] }),
+                      // 顶部留白让脉搏卡落在悬浮头之下；放在 header，避免白卡背景向上延伸。
+                      frame({ height: Math.max(0, headerHeight - insets.top - Space[5]) }),
                     ]}
                   >
-                    <InsightBanner
-                      title="上月总结来啦 🎉"
-                      subtitle="看看上个月家里的开销与变化"
-                      onPress={() => setSummary({ open: true, period: prevPeriodStr })}
-                    />
+                    <Spacer />
                   </VStack>
-                ) : showCountBanner ? (
-                  <VStack
-                    modifiers={[
-                      listRowInsets({ top: Space[2], bottom: Space[2], leading: Space[4], trailing: Space[4] }),
-                    ]}
-                  >
-                    <InsightBanner
-                      title={`${month} 月家里一起记下了 ${monthCount} 笔`}
-                      subtitle="每一笔都是一家人生活的痕迹"
-                      onDismiss={dismissCountBanner}
-                    />
-                  </VStack>
-                ) : null}
+                }
+                modifiers={[listRowBackground(palette.card), listRowSeparator('hidden')]}
+              >
+                <PulseCard
+                  hasBudget={hasBudget}
+                  totalCents={budget?.total_amount ?? 0}
+                  usedCents={usedTotal}
+                  balanceCents={balance}
+                  expenseCents={expense}
+                  incomeCents={income}
+                  daysLeft={daysToMonthEnd()}
+                  isOwner={isOwner}
+                  hidden={amountsHidden}
+                  onToggleHidden={toggleAmounts}
+                  onPress={() => setSummary({ open: true, period: currentPeriod() })}
+                  onSetBudget={() => setBudgetOpen(true)}
+                />
               </Section>
+              {showLastMonthReminder ? (
+                <Section modifiers={[listRowBackground(palette.bannerTint), listRowSeparator('hidden')]}>
+                  <InsightBanner
+                    title="上月总结来啦 🎉"
+                    subtitle="看看上个月家里的开销与变化"
+                    onPress={() => setSummary({ open: true, period: prevPeriodStr })}
+                    onDismiss={dismissLastMonthReminder}
+                  />
+                </Section>
+              ) : showCountBanner ? (
+                <Section modifiers={[listRowBackground(palette.bannerTint), listRowSeparator('hidden')]}>
+                  <InsightBanner
+                    title={`${month} 月家里一起记下了 ${monthCount} 笔`}
+                    subtitle="每一笔都是一家人生活的痕迹"
+                    onDismiss={dismissCountBanner}
+                  />
+                </Section>
+              ) : null}
               {groups.map((g) => (
                 <DayGroup
                   key={g.key}

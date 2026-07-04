@@ -482,7 +482,7 @@ export function PulseCard({
     </HStack>
   );
 
-  const cardModifiers = [padding({ all: Space[4] }), background(palette.card), cornerRadius(Radius.lg)];
+  const cardModifiers = [listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 })];
 
   // ── 未设预算：现金流摘要降级态 ──
   if (!hasBudget) {
@@ -619,27 +619,25 @@ export function InsightBanner({
   onDismiss?: () => void;
 }) {
   const palette = usePalette();
+  const contentMods = [
+    frame({ maxWidth: 9999 }),
+    ...(onPress ? [contentShape(shapes.rectangle()), onTapGesture(() => onPress())] : []),
+  ];
   return (
     <HStack
       spacing={Space[3]}
       alignment="center"
-      modifiers={[
-        padding({ vertical: Space[3], horizontal: Space[4] }),
-        background(palette.bannerTint),
-        cornerRadius(Radius.full),
-        // 与 Hero 卡等宽：Hero 卡内部进度条定宽（屏宽−2×Space4）撑出溢出居中，
-        // 横幅无定宽内容，需显式锁定同一宽度才能左右对齐。
-        frame({ width: CONTENT_WIDTH }),
-        ...(onPress ? [onTapGesture(() => onPress())] : []),
-      ]}
+      modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 })]}
     >
-      <Image systemName="calendar" size={28} color={palette.textSecondary} />
-      <VStack alignment="leading" spacing={2}>
-        <Text modifiers={[font({ size: 15, weight: 'medium' }), foregroundColor(palette.textPrimary)]}>{title}</Text>
-        <Text modifiers={[font({ size: 11 }), foregroundColor(palette.textSecondary)]}>{subtitle}</Text>
-      </VStack>
-      <Spacer />
-      {onPress ? <Image systemName="chevron.right" size={13} color={palette.textTertiary} /> : null}
+      <HStack spacing={Space[3]} alignment="center" modifiers={contentMods}>
+        <Image systemName="calendar" size={28} color={palette.textSecondary} />
+        <VStack alignment="leading" spacing={2}>
+          <Text modifiers={[font({ size: 15, weight: 'medium' }), foregroundColor(palette.textPrimary)]}>{title}</Text>
+          <Text modifiers={[font({ size: 11 }), foregroundColor(palette.textSecondary)]}>{subtitle}</Text>
+        </VStack>
+        <Spacer />
+        {onPress ? <Image systemName="chevron.right" size={13} color={palette.textTertiary} /> : null}
+      </HStack>
       {onDismiss ? (
         <Image
           systemName="xmark.circle.fill"
