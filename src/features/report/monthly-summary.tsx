@@ -227,10 +227,11 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView style={styles.flex}>
         <View style={styles.topBar}>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>月度总结</Text>
-          <Pressable hitSlop={8} onPress={onClose}>
-            <Text style={[styles.action, { color: palette.textSecondary }]}>完成</Text>
+          <Pressable hitSlop={8} onPress={onClose} style={[styles.navBack, { backgroundColor: palette.cardPill }]}>
+            <SymbolView name="chevron.left" tintColor={palette.textPrimary} size={17} weight="semibold" />
           </Pressable>
+          <Text style={[styles.title, { color: palette.textPrimary }]}>月度总结</Text>
+          <View style={styles.navSide} />
         </View>
 
         {/* 翻月条：‹ 标题 ›（横滑亦可） */}
@@ -407,7 +408,14 @@ const styles = StyleSheet.create({
     paddingVertical: Space[3],
   },
   title: { fontSize: 20, fontWeight: '700' },
-  action: { fontSize: 16 },
+  navBack: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navSide: { width: 36 },
   periodBar: {
     flexDirection: 'row',
     alignItems: 'center',

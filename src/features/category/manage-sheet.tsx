@@ -5,6 +5,8 @@
  *   「其他支出 / 其他收入」作兜底不可隐藏；「储蓄·*」走专门入口、从列表过滤。
  * 单 Modal 内以 view 状态在「列表 / 编辑器」间切换，避免嵌套 Modal。
  */
+import { Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
+import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -409,28 +411,17 @@ function List({
           </Pressable>
         </View>
 
-        {/* 支出 / 收入 切换 */}
-        <View style={[styles.segment, { backgroundColor: palette.card }]}>
-          {(['expense', 'income'] as CategoryType[]).map((t) => {
-            const active = type === t;
-            return (
-              <Pressable
-                key={t}
-                style={[styles.segmentItem, active && { backgroundColor: palette.base, borderRadius: Radius.sm }]}
-                onPress={() => setType(t)}
-              >
-                <Text
-                  style={{
-                    color: active ? palette.textPrimary : palette.textSecondary,
-                    fontWeight: active ? '600' : '400',
-                  }}
-                >
-                  {t === 'expense' ? '支出' : '收入'}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {/* 支出 / 收入：iOS 原生分段控件（SwiftUI Picker.segmented） */}
+        <Host style={styles.segmentHost}>
+          <Picker
+            modifiers={[pickerStyle('segmented')]}
+            selection={type}
+            onSelectionChange={(t) => setType(t as CategoryType)}
+          >
+            <UIText modifiers={[tag('expense')]}>支出</UIText>
+            <UIText modifiers={[tag('income')]}>收入</UIText>
+          </Picker>
+        </Host>
 
         <ScrollView contentContainerStyle={styles.content}>
           {/* 新增 */}
@@ -647,8 +638,7 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 17, fontWeight: '700' },
   action: { fontSize: 16 },
-  segment: { flexDirection: 'row', borderRadius: Radius.md, padding: 3, marginHorizontal: Space[4] },
-  segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: Space[2] },
+  segmentHost: { height: 34, marginTop: Space[2], marginHorizontal: Space[4] },
   content: { paddingHorizontal: Space[4], paddingTop: Space[4], paddingBottom: Space[12], gap: Space[5] },
   addRow: {
     flexDirection: 'row',

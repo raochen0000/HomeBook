@@ -5,8 +5,8 @@
  * 这里用 RN `Modal`（iOS `pageSheet`，自带下滑关）承载原生 Sheet 观感，顶部用居中抓手提示「拖拽」，
  * 内部金额键盘按设计走自定义 RN 层（@expo/ui 无此交互），避免 RNHostView 桥接的脆弱性。
  *
- * 布局：固定区（抓手 / 标题 / 支出收入分段 / 大号金额）+ 可滚动详情卡（分类·备注·时间·记账人）
- * + 固定底部（数字键盘 / 保存）。详情卡内容多时滚动，键盘与保存恒贴底。
+ * 布局：固定区（抓手 / 标题 / 支出收入分段 / 大号金额）+ 详情卡（分类区可滚动；备注·时间·记账人固定）
+ * + 固定底部（数字键盘 / 保存）。展开分类时仅分类网格滚动，键盘与保存恒贴底。
  */
 import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
@@ -252,10 +252,9 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
 
   const divider = <View style={[styles.divider, { backgroundColor: palette.separator }]} />;
 
-  // 详情卡（分类/备注/时间/记账人）。折叠态直接渲染（随内容高度，余量落到底部使键盘+保存上移）；
-  // 展开态外套 flex:1 的 ScrollView，容纳 ≥3 行分类并滚动，键盘+保存仍固定贴底。
+  // 详情卡（分类/备注/时间/记账人）。折叠态分类横滑；展开态仅分类网格在卡内纵向滚动，备注等字段始终可见。
   const detailCardNode = (
-    <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
+    <View style={[styles.detailCard, { backgroundColor: palette.card }, catExpanded && styles.detailCardExpanded]}>
       {/* 分类标题行 + 展开/收起 */}
       <View style={styles.catHeader}>
         <Text style={[styles.catHeaderLabel, { color: palette.textSecondary }]}>分类</Text>
@@ -265,14 +264,24 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
         </Pressable>
       </View>
 
-      {/* 分类：折叠=横滑单行；展开=纵向网格。两态每行 5 个、图标同宽（catItemW），切换不抖动；只含当前类型分类。 */}
-      <View onLayout={(e) => setCatAreaW(e.nativeEvent.layout.width)}>
+      {/* 分类：折叠=横滑单行；展开=卡内 ScrollView 纵向网格（仅此区域滚动）。 */}
+      <View
+        style={catExpanded ? styles.catAreaExpanded : undefined}
+        onLayout={(e) => setCatAreaW(e.nativeEvent.layout.width)}
+      >
         {categoriesQ.isLoading ? (
           <View style={styles.catLoading}>
             <ActivityIndicator />
           </View>
         ) : catExpanded ? (
-          <View style={styles.catGrid}>{categories.map((c) => renderCat(c, catItemW))}</View>
+          <ScrollView
+            style={styles.catScroll}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            <View style={styles.catGrid}>{categories.map((c) => renderCat(c, catItemW))}</View>
+          </ScrollView>
         ) : (
           <ScrollView
             horizontal
@@ -373,14 +382,8 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
         {parts.hasDot ? <Text style={[styles.amountDec, { color: amountColor }]}>{`.${parts.decimal}`}</Text> : null}
       </View>
 
-      {/* 详情卡：折叠态直接渲染（随内容高度）；展开态套滚动容器以容纳多行分类 */}
-      {catExpanded ? (
-        <ScrollView style={styles.middleFlex} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-          {detailCardNode}
-        </ScrollView>
-      ) : (
-        detailCardNode
-      )}
+      {/* 详情卡：展开时外层弹性区 + 卡内分类滚动；折叠时随内容高度紧贴键盘 */}
+      {catExpanded ? <View style={styles.middleFlex}>{detailCardNode}</View> : detailCardNode}
 
       {/* 自定义数字键盘：每个键独立成块（白底圆角 + 键间留白），近似 iOS 系统键盘的独立按键观感 */}
       <View style={styles.keypad}>
@@ -498,9 +501,10 @@ const styles = StyleSheet.create({
   amountSign: { fontSize: 28, fontWeight: '700', fontVariant: ['tabular-nums'] },
   amountInt: { fontSize: 48, fontWeight: '700', fontVariant: ['tabular-nums'] },
   amountDec: { fontSize: 28, fontWeight: '400', fontVariant: ['tabular-nums'] },
-  // 展开态：填满分段/金额与键盘之间的空间并滚动（折叠态不套此容器，详情卡随内容高度）。
-  middleFlex: { flex: 1 },
+  // 金额与键盘之间的弹性区；展开态详情卡填满此区，分类 ScrollView 在卡内滚动。
+  middleFlex: { flex: 1, minHeight: 0 },
   detailCard: { borderRadius: Radius.lg, paddingHorizontal: Space[4] },
+  detailCardExpanded: { flex: 1, minHeight: 0 },
   catHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -511,6 +515,8 @@ const styles = StyleSheet.create({
   catHeaderLabel: { fontSize: 13, fontWeight: '600' },
   catToggle: { flexDirection: 'row', alignItems: 'center', gap: Space[1] },
   catToggleText: { fontSize: 13 },
+  catAreaExpanded: { flex: 1, minHeight: 0 },
+  catScroll: { flex: 1 },
   catLoading: { height: 80, alignItems: 'center', justifyContent: 'center' },
   // 折叠横滑：不留 gap，让前 5 个正好铺满实测宽，位置与展开第一行完全一致（切换不跳）。
   catRow: { paddingVertical: Space[2] },
