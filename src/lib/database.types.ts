@@ -498,6 +498,69 @@ export type Database = {
         };
         Relationships: [];
       };
+      notification_preferences: {
+        Row: {
+          user_id: string;
+          family_activity: boolean;
+          budget_alert: boolean;
+          savings_progress: boolean;
+          monthly_summary: boolean;
+          member_change: boolean;
+          account_security: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          family_activity?: boolean;
+          budget_alert?: boolean;
+          savings_progress?: boolean;
+          monthly_summary?: boolean;
+          member_change?: boolean;
+          account_security?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          family_activity?: boolean;
+          budget_alert?: boolean;
+          savings_progress?: boolean;
+          monthly_summary?: boolean;
+          member_change?: boolean;
+          account_security?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      device_tokens: {
+        Row: {
+          token: string;
+          user_id: string;
+          platform: string;
+          provider: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          token: string;
+          user_id: string;
+          platform: string;
+          provider?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          token?: string;
+          user_id?: string;
+          platform?: string;
+          provider?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       monthly_summaries: {
         Row: {
           id: string;
@@ -609,6 +672,20 @@ export type Database = {
           p_device?: Json;
         };
         Returns: string;
+      };
+      register_device_token: {
+        Args: {
+          p_token: string;
+          p_platform: string;
+          p_provider?: string;
+        };
+        Returns: undefined;
+      };
+      unregister_device_token: {
+        Args: {
+          p_token: string;
+        };
+        Returns: undefined;
       };
     };
     Enums: { [_ in never]: never };

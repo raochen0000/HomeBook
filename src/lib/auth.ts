@@ -11,6 +11,8 @@ import type { Session } from '@supabase/supabase-js';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
+import { unregisterCurrentDevice } from '@/api/device-tokens';
+
 import { supabase } from './supabase';
 
 /** 订阅当前会话；loading 用于首帧避免登录页闪现。 */
@@ -219,6 +221,8 @@ export async function updatePassword(newPassword: string): Promise<void> {
 }
 
 export async function signOut(): Promise<void> {
+  // 先注销本设备推送令牌（此时 session 仍有效；未注册过则内部直接返回）。
+  await unregisterCurrentDevice();
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 }
@@ -229,6 +233,8 @@ export async function signOut(): Promise<void> {
  * 多人家庭户主会被服务端拦下（须先转让/解散），错误原样抛出供 UI 展示。
  */
 export async function deleteAccount(): Promise<void> {
+  // 软注销保留 profiles 墓碑，device_tokens 不会随 FK 级联，故须在删会话前显式注销本设备令牌。
+  await unregisterCurrentDevice();
   const { error } = await supabase.rpc('delete_account');
   if (error) throw error;
   // 服务端已删会话，这里再清本地存储，触发 onAuthStateChange → 路由回登录页。

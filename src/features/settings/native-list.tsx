@@ -3,7 +3,7 @@
  * 用原生 List(insetGrouped) + Section + 行替代手写 RN 卡片：分组白卡、行分隔、点按高亮
  * 均由系统绘制，贴合 iOS 设置抽屉观感（DESIGN §9.3/§10.5；2026-07-02 按用户要求改原生 Form/List）。
  */
-import { Host, HStack, Image, List, Picker, Section, Spacer, Text } from '@expo/ui/swift-ui';
+import { Host, HStack, Image, List, Picker, Section, Spacer, Text, Toggle } from '@expo/ui/swift-ui';
 import {
   contentShape,
   font,
@@ -110,6 +110,24 @@ export function MenuRow<T extends string>({
       ))}
     </Picker>
   );
+}
+
+/**
+ * 开关行：图标 + 标题 + 尾随原生开关（SwiftUI Toggle）。外观同 iOS「设置」的 Toggle 行
+ * （系统绿开关、整行随行分隔），受控——value 由调用方持久化后回传。
+ */
+export function ToggleRow({
+  icon,
+  label,
+  value,
+  onValueChange,
+}: {
+  icon: IconName;
+  label: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+}) {
+  return <Toggle isOn={value} onIsOnChange={onValueChange} label={label} systemImage={icon} />;
 }
 
 /** 分组脚注（小灰字，落在页面底色上、无白卡）。Section 本版无 footer 属性，故自绘一段。 */

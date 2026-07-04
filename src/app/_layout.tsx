@@ -6,6 +6,7 @@ import { useColorScheme } from 'react-native';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { LoginScreen } from '@/features/auth/login-screen';
 import { NotificationGate } from '@/features/notifications/notification-gate';
+import { usePushRegistration } from '@/features/notifications/use-push-registration';
 import { SearchProvider } from '@/features/search/search-provider';
 import { useSession } from '@/lib/auth';
 import { devAutoSignIn } from '@/lib/dev-auth';
@@ -28,6 +29,9 @@ export default function RootLayout() {
   useEffect(() => {
     if (__DEV__) devAutoSignIn();
   }, []);
+
+  // 推送设备令牌注册（层级二骨架）：PUSH_DELIVERY_ENABLED 关时 no-op；APNs 配好翻开即通。
+  usePushRegistration();
 
   return (
     <QueryClientProvider client={queryClient}>

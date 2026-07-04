@@ -277,6 +277,37 @@ erDiagram
 
 **防刷**：`submit_feedback` RPC 服务端校验相邻两条最短间隔 30s、每人每日 ≤ 20 条。
 
+### 5.6 NOTIFICATION_PREFERENCE（通知偏好 · PRD §18.3.3）
+
+> 每用户一行、六列布尔的通知分类开关。客户端直读 + `upsert`（`onConflict = user_id`），RLS 仅本人可读写。行不存在（老用户 / 从未改过）→ 客户端回落**全开**默认。本表只落用户「愿不愿收该类系统推送」的意愿，App 内通知中心不受影响；系统推送落地后由投递侧读取本表决定是否推送对应分类。
+
+| 字段                | 类型      | 约束                              | 说明                                          |
+| ------------------- | --------- | --------------------------------- | --------------------------------------------- |
+| `user_id`           | UUID      | PK, FK→USER, on delete cascade    | 接收者（注销时随账号级联删除）                |
+| `family_activity`   | bool      | not null, default true            | 家庭动态（被移出 / 户主变更等，见 §15 事件）  |
+| `budget_alert`      | bool      | not null, default true            | 预算超支预警                                  |
+| `savings_progress`  | bool      | not null, default true            | 储蓄目标进展                                  |
+| `monthly_summary`   | bool      | not null, default true            | 月度总结提醒                                  |
+| `member_change`     | bool      | not null, default true            | 成员与邀请变动                                |
+| `account_security`  | bool      | not null, default true            | 账号安全                                      |
+| `created_at` / `updated_at` | timestamp |                           |                                               |
+
+**RLS**：`select` / `insert` / `update` 三条本人策略（`user_id = auth.uid()`）；无 delete 策略（随账号级联）。
+
+### 5.7 DEVICE_TOKEN（推送设备令牌 · PRD §18.3.3 层级二）
+
+> 每台设备一行的推送令牌，供服务端投递侧按 `notification_preferences` 决定后向该用户的设备发系统推送。**一台设备一行**（`token` 作主键）：同设备换登录用户时该行改挂新 `user_id`（设备只推给当前登录者）。客户端登录后注册、登出/注销时注销，均走 **SECURITY DEFINER RPC**（`register_device_token` / `unregister_device_token`，绕开「换用户认领他人行」的 RLS 死角）；投递侧以 `service_role` 读。**层级二 · 令牌获取（`getExpoPushTokenAsync` / APNs）依赖付费 Apple Developer + Push 能力**，故本表 + RPC 的落库链路先建、由客户端 `PUSH_DELIVERY_ENABLED` 开关灰度（默认关，配好 APNs 后开）。
+
+| 字段         | 类型      | 约束                              | 说明                                              |
+| ------------ | --------- | --------------------------------- | ------------------------------------------------- |
+| `token`      | text      | PK                                | Expo push token 或 APNs device token（设备唯一）  |
+| `user_id`    | UUID      | FK→USER, not null, on delete cascade | 当前登录者（注销随账号级联删除）               |
+| `platform`   | text      | `ios` / `android`                 | 设备平台                                          |
+| `provider`   | text      | `expo` / `apns`，default `expo`   | 令牌类型（Expo 推送服务 / 直连 APNs）             |
+| `created_at` / `updated_at` | timestamp |                     |                                                   |
+
+**RLS**：仅 `select` 本人策略（`user_id = auth.uid()`，便于客户端自查）；写（注册/注销）只走上述两个 RPC，投递读走 `service_role`。
+
 ---
 
 ## 6. 关键约束清单（落地规则）

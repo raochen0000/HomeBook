@@ -6,6 +6,7 @@ export const queryKeys = {
   memberships: ['memberships'] as const,
   notifications: ['notifications'] as const,
   notificationsAll: ['notifications', 'all'] as const,
+  notificationPrefs: ['notification_preferences'] as const,
   categories: (type?: 'expense' | 'income') => ['categories', type ?? 'all'] as const,
   hiddenCategories: ['hidden_categories'] as const,
   transactions: ['transactions'] as const,
