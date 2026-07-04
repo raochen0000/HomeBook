@@ -456,6 +456,48 @@ export type Database = {
         };
         Relationships: [];
       };
+      feedback: {
+        Row: {
+          id: string;
+          user_id: string;
+          family_id: string | null;
+          type: string;
+          content: string;
+          image_paths: string[];
+          contact_ok: boolean;
+          device: Json;
+          status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          family_id?: string | null;
+          type: string;
+          content: string;
+          image_paths?: string[];
+          contact_ok?: boolean;
+          device?: Json;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          family_id?: string | null;
+          type?: string;
+          content?: string;
+          image_paths?: string[];
+          contact_ok?: boolean;
+          device?: Json;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       monthly_summaries: {
         Row: {
           id: string;
@@ -557,6 +599,16 @@ export type Database = {
       delete_account: {
         Args: Record<string, never>;
         Returns: undefined;
+      };
+      submit_feedback: {
+        Args: {
+          p_type: string;
+          p_content: string;
+          p_image_paths?: string[];
+          p_contact_ok?: boolean;
+          p_device?: Json;
+        };
+        Returns: string;
       };
     };
     Enums: { [_ in never]: never };

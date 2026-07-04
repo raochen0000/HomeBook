@@ -26,11 +26,17 @@ import { supabase } from '@/lib/supabase';
 
 export const AVATAR_BUCKET = 'homebook-user-avatars';
 export const FAMILY_COVER_BUCKET = 'homebook-family-covers';
+/** 意见反馈截图桶（public；见迁移 0025）。路径 {userId}_{rand}.jpg，写策略校验前缀=本人 uid。 */
+export const FEEDBACK_IMAGE_BUCKET = 'homebook-feedback-images';
 
 /** 头像/封面统一方形边长（px）。自托管无服务端变换，故落地即最终尺寸。 */
 const IMAGE_SIZE = 512;
 /** JPEG 压缩质量（0–1）。 */
 const COMPRESS_QUALITY = 0.8;
+
+/** 反馈截图：长边上限（px，保宽高比只缩不放）与单张体积上限（字节，2MB）。 */
+const FEEDBACK_MAX_EDGE = 1600;
+const FEEDBACK_MAX_BYTES = 2 * 1024 * 1024;
 
 /** 用户主动取消选图（非错误，UI 静默处理）。 */
 export class PickCanceledError extends Error {
@@ -114,4 +120,65 @@ export async function pickAndUploadFamilyCover(familyId: string): Promise<string
   }
   const base64 = await compressToBase64(uri);
   return uploadPublic(FAMILY_COVER_BUCKET, `${familyId}.jpg`, base64);
+}
+
+// ── 意见反馈截图（多选、保宽高比、压到 2MB 内）──────────────────────────────────
+// 头像那套是「方形裁 512 + 单张覆盖」，反馈截图完全不同，故独立一套：pick 拿本地 uri 供
+// 即时预览，upload 在提交时统一压缩上传（提交失败仅留孤儿对象，MVP 可接受）。
+
+/** 已选待上传的反馈图（含尺寸，供压缩时判断长边、只缩不放）。 */
+export type PickedImage = { uri: string; width: number; height: number };
+
+/** 弹相册多选反馈截图（最多 remaining 张），返回本地 uri + 尺寸；取消返回 []。 */
+export async function pickFeedbackImages(remaining: number): Promise<PickedImage[]> {
+  if (remaining <= 0) return [];
+  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!perm.granted) throw new PermissionDeniedError();
+
+  const res = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsMultipleSelection: true, // 多选与 allowsEditing 互斥，故不裁剪
+    selectionLimit: remaining,
+    // 不设 quality：提交前会用 ImageManipulator 再压一次，此处再让 PHPicker 满质量重编码是白做，
+    // 且重编码要先载入图片表征——正是模拟器上 "无法载入 public.png 类型表征" 报错的那一步。
+  });
+  if (res.canceled || !res.assets?.length) return [];
+  return res.assets.slice(0, remaining).map((a) => ({ uri: a.uri, width: a.width, height: a.height }));
+}
+
+/** 压缩单张为 JPEG base64：长边超限等比缩小，先降质量、触底再降尺寸，直至 ≤ 2MB。 */
+async function compressFeedbackImage(img: PickedImage): Promise<string> {
+  const longEdge = Math.max(img.width, img.height);
+  let scale = longEdge > FEEDBACK_MAX_EDGE ? FEEDBACK_MAX_EDGE / longEdge : 1;
+  let quality = 0.7;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const ctx = ImageManipulator.manipulate(img.uri);
+    if (scale < 1) ctx.resize({ width: Math.round(img.width * scale) }); // 只给 width，等比缩放保宽高比
+    const ref = await ctx.renderAsync();
+    const out = await ref.saveAsync({ compress: quality, format: SaveFormat.JPEG, base64: true });
+    if (!out.base64) throw new Error('图片压缩失败');
+    // base64 长度 ×3/4 ≈ 原始字节数
+    if ((out.base64.length * 3) / 4 <= FEEDBACK_MAX_BYTES) return out.base64;
+    if (quality > 0.45) quality -= 0.15;
+    else scale *= 0.8;
+  }
+  throw new Error('图片过大，压缩后仍超过 2MB');
+}
+
+/** 上传反馈截图到 public 桶，返回桶内对象路径数组（供 submit_feedback 落库）。任一张失败即抛。 */
+export async function uploadFeedbackImages(userId: string, images: PickedImage[]): Promise<string[]> {
+  const paths: string[] = [];
+  for (const img of images) {
+    const base64 = await compressFeedbackImage(img);
+    // 前缀须为本人 uid（RLS 写策略 starts_with(name, owner || '_')）；后缀随机避免碰撞。
+    const path = `${userId}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const { error } = await supabase.storage.from(FEEDBACK_IMAGE_BUCKET).upload(path, decode(base64), {
+      contentType: 'image/jpeg',
+      upsert: false,
+    });
+    if (error) throw error;
+    paths.push(path);
+  }
+  return paths;
 }

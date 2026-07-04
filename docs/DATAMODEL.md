@@ -258,6 +258,25 @@ erDiagram
 | `warm_text`          | string    |           | 暖心文案（生成时随机落定）                       |
 | `generated_at`       | timestamp |           | 生成时间                                         |
 
+### 5.5 FEEDBACK（意见反馈 · PRD §18.3.7）
+
+> 用户主动提交的问题 / 建议。MVP 单向提交：客户端只 insert（走 `submit_feedback` RPC），不读回历史；运营侧经 service_role 查看跟进。
+
+| 字段          | 类型          | 约束                                                      | 说明                                                             |
+| ------------- | ------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
+| `id`          | UUID          | PK                                                        |                                                                  |
+| `user_id`     | UUID          | FK→USER, not null                                         | 提交者（服务端由 `auth.uid()` 落定，客户端不可传）              |
+| `family_id`   | UUID          | FK→FAMILY, null                                           | 提交时的当前家庭快照（便于复现家庭态问题）                       |
+| `type`        | enum          | `feature`/`bug`/`suggestion`/`other`                     | 反馈类型（对应 UI「功能 / Bug / 建议 / 其它」）                  |
+| `content`     | string        | not null, `trim` 后 5–200 字                              | 问题描述                                                         |
+| `image_paths` | text[]        | default `{}`，≤ 5                                         | `homebook-feedback-images` 桶内对象路径（`{userId}_{uuid}.jpg`） |
+| `contact_ok`  | bool          | default true                                              | 是否同意通过账号（手机 / 邮箱）回访                              |
+| `device`      | jsonb         |                                                           | 诊断信息：`app_version`/`build`/`platform`/`os_version`/`device_model`/`brand`/`timezone` |
+| `status`      | enum          | `open`/`in_progress`/`resolved`/`closed`，default `open` | 运营侧流转态（MVP 客户端不展示）                                 |
+| `created_at` / `updated_at` | timestamp |                                              |                                                                  |
+
+**防刷**：`submit_feedback` RPC 服务端校验相邻两条最短间隔 30s、每人每日 ≤ 20 条。
+
 ---
 
 ## 6. 关键约束清单（落地规则）
@@ -300,6 +319,8 @@ erDiagram
 | `CATEGORY.type`             | `expense` / `income`                                                                         |
 | `CATEGORY.status`           | `active` / `archived` / `hidden`                                                             |
 | `SAVINGS_GOAL.status`       | `active` / `deleted`                                                                         |
+| `FEEDBACK.type`             | `feature` / `bug` / `suggestion` / `other`                                                   |
+| `FEEDBACK.status`           | `open` / `in_progress` / `resolved` / `closed`                                               |
 | `SAVINGS_ENTRY.direction`   | `deposit` / `withdraw`                                                                       |
 | `SUCCESSION_REQUEST.status` | `pending` / `approved` / `rejected` / `cancelled`                                            |
 | `INVITATION.status`         | `valid` / `revoked` / `expired`                                                              |

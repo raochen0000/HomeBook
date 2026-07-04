@@ -6,3 +6,4 @@ export * from './families';
 export * from './savings';
 export * from './budgets';
 export * from './notifications';
+export * from './feedback';
