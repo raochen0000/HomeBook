@@ -3,6 +3,10 @@
 # dependencies
 node_modules/
 
+# pnpm 本地包仓库与工具缓存（可由 pnpm install 再生，勿提交）
+.pnpm-store/
+.cache/
+
 # Expo
 .expo/
 dist/

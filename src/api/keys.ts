@@ -7,6 +7,8 @@ export const queryKeys = {
   notifications: ['notifications'] as const,
   notificationsAll: ['notifications', 'all'] as const,
   notificationPrefs: ['notification_preferences'] as const,
+  accountingPrefs: ['accounting_preferences'] as const,
+  recurringRules: ['recurring_transactions'] as const,
   categories: (type?: 'expense' | 'income') => ['categories', type ?? 'all'] as const,
   hiddenCategories: ['hidden_categories'] as const,
   transactions: ['transactions'] as const,

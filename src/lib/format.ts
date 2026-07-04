@@ -45,6 +45,11 @@ export function formatAmount(cents: number, sign: '+' | '-' | '' = ''): string {
   return `${p.sign}${p.currency}${p.integer}.${p.decimal}`;
 }
 
+/** 金额隐私遮罩（PRD §18.3.1）：hidden 时把金额文案替换为 ****，防窥屏。 */
+export function maskAmount(text: string, hidden: boolean): string {
+  return hidden ? '****' : text;
+}
+
 /** YYYY-MM（按本地时区），用于本月范围判断。 */
 export function currentPeriod(date = new Date()): string {
   return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;

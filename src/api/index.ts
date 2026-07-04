@@ -7,5 +7,7 @@ export * from './savings';
 export * from './budgets';
 export * from './notifications';
 export * from './notification-prefs';
+export * from './accounting-prefs';
+export * from './recurring';
 export * from './device-tokens';
 export * from './feedback';

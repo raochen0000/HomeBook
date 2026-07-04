@@ -11,7 +11,7 @@ import Svg, { Path, Polyline } from 'react-native-svg';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { Donut } from '@/features/report/donut';
-import { formatAmount } from '@/lib/format';
+import { formatAmount, maskAmount } from '@/lib/format';
 import type { CumulativeSeries } from '@/lib/report';
 
 type Palette = ReturnType<typeof usePalette>;
@@ -95,7 +95,15 @@ export function BalanceGaugeCard({ rate, palette }: { rate: number | null; palet
 }
 
 // ── 累计同期对比（双线）────────────────────────────────────────────────────────
-export function CumulativeCard({ series, palette }: { series: CumulativeSeries; palette: Palette }) {
+export function CumulativeCard({
+  series,
+  palette,
+  hidden,
+}: {
+  series: CumulativeSeries;
+  palette: Palette;
+  hidden?: boolean;
+}) {
   const W = 320;
   const H = 132;
   const padX = 6;
@@ -171,7 +179,8 @@ export function CumulativeCard({ series, palette }: { series: CumulativeSeries; 
             ))}
           </View>
           <ThemedText style={[styles.cumCaption, { color: palette.textSecondary }]}>
-            本期至今 {formatAmount(series.currToDate, '')} · <Text style={{ color: deltaColor }}>{deltaText}</Text>
+            本期至今 {maskAmount(formatAmount(series.currToDate, ''), !!hidden)} ·{' '}
+            <Text style={{ color: deltaColor }}>{deltaText}</Text>
           </ThemedText>
         </>
       )}
@@ -199,7 +208,7 @@ function LegendDot({
 }
 
 // ── 分类环比 ──────────────────────────────────────────────────────────────────
-export function CategoryMomCard({ items, palette }: { items: MomItem[]; palette: Palette }) {
+export function CategoryMomCard({ items, palette, hidden }: { items: MomItem[]; palette: Palette; hidden?: boolean }) {
   if (items.length === 0) return null;
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
@@ -230,7 +239,7 @@ export function CategoryMomCard({ items, palette }: { items: MomItem[]; palette:
                 </ThemedText>
                 <View style={styles.flex} />
                 <ThemedText style={[styles.itemAmount, { color: palette.textPrimary }]}>
-                  {formatAmount(it.cur, '')}
+                  {maskAmount(formatAmount(it.cur, ''), !!hidden)}
                 </ThemedText>
                 <Text style={[styles.chip, { color: chipColor }]}>{chipText}</Text>
               </View>
@@ -243,7 +252,7 @@ export function CategoryMomCard({ items, palette }: { items: MomItem[]; palette:
 }
 
 // ── 大额支出 Top 5 ────────────────────────────────────────────────────────────
-export function TopExpensesCard({ items, palette }: { items: TopItem[]; palette: Palette }) {
+export function TopExpensesCard({ items, palette, hidden }: { items: TopItem[]; palette: Palette; hidden?: boolean }) {
   if (items.length === 0) return null;
   const max = Math.max(1, ...items.map((i) => i.amount));
   return (
@@ -266,7 +275,7 @@ export function TopExpensesCard({ items, palette }: { items: TopItem[]; palette:
                 </Text>
               </View>
               <ThemedText style={[styles.itemAmount, { color: palette.textPrimary }]}>
-                {formatAmount(it.amount, '-')}
+                {maskAmount(formatAmount(it.amount, '-'), !!hidden)}
               </ThemedText>
             </View>
             <View style={[styles.barTrack, { backgroundColor: palette.base }]}>
@@ -280,7 +289,15 @@ export function TopExpensesCard({ items, palette }: { items: TopItem[]; palette:
 }
 
 // ── 收入结构 ──────────────────────────────────────────────────────────────────
-export function IncomeStructureCard({ slices, palette }: { slices: IncomeSlice[]; palette: Palette }) {
+export function IncomeStructureCard({
+  slices,
+  palette,
+  hidden,
+}: {
+  slices: IncomeSlice[];
+  palette: Palette;
+  hidden?: boolean;
+}) {
   if (slices.length === 0) return null;
   const total = slices.reduce((s, x) => s + x.amount, 0);
   return (
@@ -289,7 +306,9 @@ export function IncomeStructureCard({ slices, palette }: { slices: IncomeSlice[]
       <View style={styles.donutWrap}>
         <Donut slices={slices.map((s) => ({ value: s.amount, color: s.color }))} trackColor={palette.base}>
           <ThemedText style={[styles.donutCaption, { color: palette.textSecondary }]}>总收入</ThemedText>
-          <ThemedText style={[styles.donutTotal, { color: palette.textPrimary }]}>{formatAmount(total, '')}</ThemedText>
+          <ThemedText style={[styles.donutTotal, { color: palette.textPrimary }]}>
+            {maskAmount(formatAmount(total, ''), !!hidden)}
+          </ThemedText>
         </Donut>
       </View>
       <View style={styles.list}>
@@ -308,7 +327,7 @@ export function IncomeStructureCard({ slices, palette }: { slices: IncomeSlice[]
                 <ThemedText style={[styles.pct, { color: palette.textSecondary }]}>{pct}%</ThemedText>
                 <View style={styles.flex} />
                 <ThemedText style={[styles.itemAmount, { color: palette.income }]}>
-                  {formatAmount(s.amount, '')}
+                  {maskAmount(formatAmount(s.amount, ''), !!hidden)}
                 </ThemedText>
               </View>
             </View>

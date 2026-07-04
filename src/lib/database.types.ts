@@ -612,9 +612,127 @@ export type Database = {
         };
         Relationships: [];
       };
+      accounting_preferences: {
+        Row: {
+          user_id: string;
+          default_txn_type: string;
+          after_record_behavior: string;
+          amount_privacy: boolean;
+          report_card_order: string[];
+          report_card_hidden: string[];
+          show_monthly_summary_entry: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          default_txn_type?: string;
+          after_record_behavior?: string;
+          amount_privacy?: boolean;
+          report_card_order?: string[];
+          report_card_hidden?: string[];
+          show_monthly_summary_entry?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          default_txn_type?: string;
+          after_record_behavior?: string;
+          amount_privacy?: boolean;
+          report_card_order?: string[];
+          report_card_hidden?: string[];
+          show_monthly_summary_entry?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      recurring_transactions: {
+        Row: {
+          id: string;
+          family_id: string;
+          type: string;
+          amount: number;
+          category_id: string;
+          note: string | null;
+          recorder_user_id: string;
+          created_by: string;
+          day_of_month: number;
+          frequency: string;
+          start_date: string;
+          end_date: string | null;
+          enabled: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          family_id: string;
+          type: string;
+          amount: number;
+          category_id: string;
+          note?: string | null;
+          recorder_user_id: string;
+          created_by: string;
+          day_of_month: number;
+          frequency?: string;
+          start_date: string;
+          end_date?: string | null;
+          enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          family_id?: string;
+          type?: string;
+          amount?: number;
+          category_id?: string;
+          note?: string | null;
+          recorder_user_id?: string;
+          created_by?: string;
+          day_of_month?: number;
+          frequency?: string;
+          start_date?: string;
+          end_date?: string | null;
+          enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      recurring_runs: {
+        Row: {
+          id: string;
+          rule_id: string;
+          period_key: string;
+          transaction_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          rule_id: string;
+          period_key: string;
+          transaction_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          rule_id?: string;
+          period_key?: string;
+          transaction_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: {
+      generate_due_recurring_transactions: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
       create_family: {
         Args: { p_name: string; p_timezone: string };
         Returns: Database['public']['Tables']['families']['Row'];

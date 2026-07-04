@@ -20,12 +20,15 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  DEFAULT_ACCOUNTING_PREFS,
+  useAccountingPrefs,
   useBudget,
   useCategories,
   useCreateFamily,
   useFamilyMembers,
   useMyFamily,
   useMyProfile,
+  useSaveAccountingPrefs,
   useSoftDeleteTransaction,
   useTransactions,
   type Transaction,
@@ -58,9 +61,6 @@ import { clockTime, currentPeriod, dayKey, greetingForHour, humanDay, previousPe
 
 type Group = { key: string; label: string; totalCents: number; rows: RowData[] };
 
-/** 「本月结余/收入/支出」金额显隐状态（眼睛），跨重启保留。 */
-const HIDE_AMOUNTS_KEY = 'home.amountsHidden';
-
 /** 月末「家里一起记下了 N 笔」提示条的关闭记忆（存被关闭的周期 YYYY-MM，本月内不再出现）。 */
 const COUNT_BANNER_DISMISSED_KEY = 'home.countBannerDismissedPeriod';
 /** 月初「上月总结来啦」提示条的关闭记忆（存上月周期 YYYY-MM，本周期不再出现）。 */
@@ -84,6 +84,10 @@ export default function HomeScreen() {
   const budgetQ = useBudget(currentPeriod());
   const createFamilyM = useCreateFamily();
 
+  // 记账设置偏好（accounting_preferences，个人级）：金额隐私 + 首页月度总结横幅开关等。
+  const accountingPrefs = useAccountingPrefs().data ?? DEFAULT_ACCOUNTING_PREFS;
+  const saveAccountingPrefs = useSaveAccountingPrefs();
+
   // 本月脉搏卡数据（流程 8）：预算总额 + 已用（排除储蓄类）+ 是否户主。
   const budget = budgetQ.data?.budget ?? null;
   const hasBudget = !!budget && budget.total_amount > 0;
@@ -100,7 +104,12 @@ export default function HomeScreen() {
     [transactionsQ.data, prevPeriodStr],
   );
   const [lastMonthReminderDismissed, setLastMonthReminderDismissed] = useState(false);
-  const showLastMonthReminder = new Date().getDate() <= 7 && prevMonthHasData && !lastMonthReminderDismissed;
+  // 月度总结横幅入口可在「记账设置」关闭（show_monthly_summary_entry，默认开）。
+  const showLastMonthReminder =
+    accountingPrefs.show_monthly_summary_entry &&
+    new Date().getDate() <= 7 &&
+    prevMonthHasData &&
+    !lastMonthReminderDismissed;
 
   // 月度总结全屏视图（card 点击落本月至今；月初提醒落上月）。
   const [summary, setSummary] = useState<{ open: boolean; period: string }>({
@@ -126,20 +135,12 @@ export default function HomeScreen() {
   const [detail, setDetail] = useState<{ open: boolean; txn: Transaction | null }>({ open: false, txn: null });
   const softDeleteM = useSoftDeleteTransaction();
 
-  // 金额显隐（眼睛）：启动时读回上次状态，切换时写入。
-  const [amountsHidden, setAmountsHidden] = useState(false);
-  useEffect(() => {
-    AsyncStorage.getItem(HIDE_AMOUNTS_KEY).then((v) => {
-      if (v === '1') setAmountsHidden(true);
-    });
-  }, []);
+  // 金额显隐（眼睛）：统一到「记账设置 → 金额隐私模式」的服务端偏好（accountingPrefs 见上），
+  // 跨设备一致；点眼睛即 toggle 该偏好（乐观更新）。
+  const amountsHidden = accountingPrefs.amount_privacy;
   const toggleAmounts = useCallback(() => {
-    setAmountsHidden((prev) => {
-      const next = !prev;
-      AsyncStorage.setItem(HIDE_AMOUNTS_KEY, next ? '1' : '0');
-      return next;
-    });
-  }, []);
+    saveAccountingPrefs.mutate({ ...accountingPrefs, amount_privacy: !accountingPrefs.amount_privacy });
+  }, [saveAccountingPrefs, accountingPrefs]);
 
   // 月末计数提示条的「已关闭」记忆：关掉后本月内不再出现。
   const [countBannerDismissed, setCountBannerDismissed] = useState(false);

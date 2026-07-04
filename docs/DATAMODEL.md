@@ -308,6 +308,58 @@ erDiagram
 
 **RLS**：仅 `select` 本人策略（`user_id = auth.uid()`，便于客户端自查）；写（注册/注销）只走上述两个 RPC，投递读走 `service_role`。
 
+### 5.8 ACCOUNTING_PREFERENCE（记账偏好 · PRD §18.3.1）
+
+> 每用户一行的**个人级**记账偏好（仅影响本人视角，不涉及全家共享数据）。客户端直读 + 整行 `upsert`（`onConflict = user_id`），RLS 仅本人可读写；行不存在（老用户 / 从未改过）→ 客户端回落默认。收纳：默认记账类型、记一笔后行为、金额隐私、报表卡片显隐 / 排序。
+
+| 字段                    | 类型      | 约束                                          | 说明                                             |
+| ----------------------- | --------- | --------------------------------------------- | ------------------------------------------------ |
+| `user_id`               | UUID      | PK, FK→USER, on delete cascade                | 归属用户（注销随账号级联删除）                   |
+| `default_txn_type`      | text      | not null, default `expense`, in(expense,income) | 打开记账面板默认选中类型                        |
+| `after_record_behavior` | text      | not null, default `close`, in(close,continue) | 记一笔后：保存即关 / 继续记下一笔                |
+| `amount_privacy`        | bool      | not null, default false                       | 开启后首页 / 报表金额显示 `****`（防窥屏）        |
+| `report_card_order`     | text[]    | not null, default `{}`                        | 报表卡片用户排序（卡 id 全序；空 = 用默认序）     |
+| `report_card_hidden`    | text[]    | not null, default `{}`                        | 报表隐藏卡片 id 集合（「收支概览」锁定卡恒不入）  |
+| `show_monthly_summary_entry` | bool | not null, default true                        | 首页「上月总结来啦」月度总结入口横幅显隐（迁移 0030 增列） |
+| `created_at` / `updated_at` | timestamp |                                           |                                                  |
+
+**RLS**：`select` / `insert` / `update` 三条本人策略（`user_id = auth.uid()`）；无 delete（随账号级联）。卡片显隐 / 排序的合并语义（未知卡兜底、锁定卡、至少展示 3 张）由客户端 `@/lib/report-cards resolveCardLayout` 负责。
+
+### 5.9 RECURRING_TRANSACTION / RECURRING_RUN（定时收支 · PRD §18 自定义能力）
+
+> **家庭共享**的「每月 N 号自动记一笔」规则（如工资、订阅），口径同流水账本，RLS 复用 `private.is_family_member`。生成的流水记入家庭账本、记账人 = 规则创建者。自动记录采用「**客户端触发、服务端幂等生成**」：客户端在 App 前台调 `generate_due_recurring_transactions()` RPC 补记缺失的到期流水；`RECURRING_RUN` 上的 `unique(rule_id, period_key)` 保证多设备 / 多成员并发下同一期只生成一条。
+
+**RECURRING_TRANSACTION（规则）**
+
+| 字段               | 类型      | 约束                                         | 说明                                        |
+| ------------------ | --------- | -------------------------------------------- | ------------------------------------------- |
+| `id`               | UUID      | PK, default gen_random_uuid()                |                                             |
+| `family_id`        | UUID      | FK→FAMILY, not null, on delete cascade       | 归属家庭                                    |
+| `type`             | text      | not null, in(expense,income)                 | 收支类型                                    |
+| `amount`           | bigint    | not null, > 0                                | 单位：分                                    |
+| `category_id`      | UUID      | FK→CATEGORY, not null                        | 分类                                        |
+| `note`             | text      |                                              | 备注（如「工资」「Apple Music」）           |
+| `recorder_user_id` | UUID      | FK→USER, not null                            | 生成流水的记账人 = 规则创建者               |
+| `created_by`       | UUID      | FK→USER, not null                            | 规则创建者（RLS insert 校验 = auth.uid()）  |
+| `day_of_month`     | int       | not null, between 1 and 28                   | 每月记账日（限 1–28，规避小月边界）         |
+| `frequency`        | text      | not null, default `monthly`, in(monthly)     | 预留列，MVP 仅按月                          |
+| `start_date`       | date      | not null                                     | 首个生效月（含）；客户端落当月 1 日         |
+| `end_date`         | date      |                                              | 可选结束（含）；null = 长期有效             |
+| `enabled`          | bool      | not null, default true                       | 关闭 = 暂停自动记账（不删规则）             |
+| `created_at` / `updated_at` | timestamp |                                    |                                             |
+
+**RECURRING_RUN（幂等台账，每规则每期至多一行）**
+
+| 字段             | 类型      | 约束                                          | 说明                                          |
+| ---------------- | --------- | --------------------------------------------- | --------------------------------------------- |
+| `id`             | UUID      | PK, default gen_random_uuid()                 |                                               |
+| `rule_id`        | UUID      | FK→RECURRING_TRANSACTION, on delete cascade   | 所属规则                                      |
+| `period_key`     | text      | not null, `unique(rule_id, period_key)`       | 期键，如 `2026-07`                            |
+| `transaction_id` | UUID      | FK→TRANSACTION（可空）                        | 该期生成的流水；先占位 run 抢 unique 再回填   |
+| `created_at`     | timestamp |                                               |                                               |
+
+**RLS**：`RECURRING_TRANSACTION` 家庭成员可 select/insert/update/delete（`private.is_family_member(family_id)`，insert 另校验 `created_by = auth.uid()`）；`RECURRING_RUN` 经所属规则的家庭做只读（写入仅经 RPC，`SECURITY DEFINER` 绕过 RLS）。**RPC `generate_due_recurring_transactions()`**：为调用者当前家庭遍历 `enabled` 规则，plpgsql 计算到期月份，「先占位 run（`on conflict do nothing`）→ 抢到者建流水并回填 `transaction_id`」，返回本次新生成条数。
+
 ---
 
 ## 6. 关键约束清单（落地规则）

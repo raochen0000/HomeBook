@@ -27,6 +27,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  useAccountingPrefs,
   useCategories,
   useCreateTransaction,
   useHiddenCategoryIds,
@@ -38,6 +39,7 @@ import {
   type FamilyMembership,
   type Transaction,
 } from '@/api';
+import { Toast } from '@/components/toast';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 
@@ -108,8 +110,15 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   const transactionsQ = useTransactions();
   const saving = createM.isPending || updateM.isPending;
 
-  // 初值按 editing 还原（表单随每次打开重新挂载，初值即生效）。
-  const [type, setType] = useState<TxnType>(editing?.type === 'income' ? 'income' : 'expense');
+  // 记账偏好（记账设置 §18.3.1）：默认记账类型 + 记一笔后行为。
+  const prefs = useAccountingPrefs().data;
+  const afterBehavior = prefs?.after_record_behavior ?? 'close';
+
+  // 初值按 editing 还原（表单随每次打开重新挂载，初值即生效）；新建时用「默认记账类型」偏好。
+  const [type, setType] = useState<TxnType>(
+    editing ? (editing.type === 'income' ? 'income' : 'expense') : (prefs?.default_txn_type ?? 'expense'),
+  );
+  const [toast, setToast] = useState<string | null>(null);
   const [raw, setRaw] = useState(editing?.amount ? (editing.amount / 100).toString() : '');
   const [categoryId, setCategoryId] = useState<string | null>(editing?.category_id ?? null);
   const [note, setNote] = useState(editing?.note ?? '');
@@ -182,20 +191,32 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
           occurred_at: occurredAt.toISOString(),
           recorder_user_id: recorderUserId,
         });
-      } else {
-        await createM.mutateAsync({
-          family_id: familyId,
-          recorder_user_id: recorderUserId,
-          type,
-          amount: cents,
-          category_id: effectiveCategoryId,
-          note: note || null,
-          occurred_at: occurredAt.toISOString(),
-        });
+        onSaved?.({ firstRecord: false });
+        onClose();
+        return;
       }
-      // 庆祝交由父层在面板关闭后展示（onDismiss），这里只上报「是否家庭第一笔」并关闭面板。
-      onSaved?.({ firstRecord: isFirstRecord });
-      onClose();
+
+      await createM.mutateAsync({
+        family_id: familyId,
+        recorder_user_id: recorderUserId,
+        type,
+        amount: cents,
+        category_id: effectiveCategoryId,
+        note: note || null,
+        occurred_at: occurredAt.toISOString(),
+      });
+
+      // 记一笔后行为（§18.3.1）：继续记下一笔 → 清空金额/备注/分类、面板不关；否则保存即关。
+      if (afterBehavior === 'continue') {
+        setRaw('');
+        setNote('');
+        setCategoryId(null);
+        setToast('已保存，继续记下一笔');
+      } else {
+        // 庆祝交由父层在面板关闭后展示（onDismiss），这里只上报「是否家庭第一笔」并关闭面板。
+        onSaved?.({ firstRecord: isFirstRecord });
+        onClose();
+      }
     } catch (e) {
       Alert.alert('保存失败', (e as Error).message ?? String(e));
     }
@@ -434,6 +455,9 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
         }}
         onClose={() => setMemberOpen(false)}
       />
+
+      {/* 「继续记下一笔」的轻提示 */}
+      <Toast visible={toast !== null} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
 }

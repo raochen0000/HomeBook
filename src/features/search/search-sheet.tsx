@@ -1,39 +1,24 @@
 /**
- * 搜索（流程 14 / PRD §16）：全屏页，按参考图实现。
- * 顶栏搜索框 + X；筛选为一行下拉胶囊（类型 / 时间 / 分类(多选) / 成员(多选) / 金额区间），
- * 各胶囊点开底部下拉面板选值，已设值的胶囊高亮（中性黑）。
- * 空 / 无条件态展示搜索历史（标签云，点回填 / 长按删 / 清空）；有条件时展示按日分组结果。
- * 结果行：分类图标 + 分类名 + 备注 + 「时间 · 成员」，点击复用记账面板编辑 / 删除（流程 10）。
- *
- * 检索为内存过滤（数据已由 useTransactions 全量加载）；过滤逻辑集中在 lib/search.ts，
- * 将来切本地 WatermelonDB 只改那一层。
+ * 搜索（流程 14 / PRD §16）：独立路由页，按参考图实现。
+ * 顶栏：返回 + 搜索框 + 取消；筛选为单行横向滚动摘要胶囊。
+ * 空态：最近搜索卡片 + 引导插图；无结果：search-empty.png 占位图。
+ * 金额 / 日期筛选为底部 BottomSheet；结果列表复用首页 DayGroup（点击查看详情、左滑编辑/删除）。
  */
+import { DatePicker, Host, List, Section, VStack } from '@expo/ui/swift-ui';
 import {
-  DatePicker,
-  Host,
-  HStack,
-  ScrollView as UIScrollView,
-  Spacer,
-  Text as UIText,
-  VStack,
-} from '@expo/ui/swift-ui';
-import {
-  background,
-  contentShape,
-  cornerRadius,
   datePickerStyle,
-  font,
-  foregroundColor,
-  frame,
   labelsHidden,
-  onTapGesture,
-  padding,
-  shadow,
-  shapes,
+  listRowBackground,
+  listRowInsets,
+  listRowSeparator,
+  listSectionSpacing,
+  listStyle,
 } from '@expo/ui/swift-ui/modifiers';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
 import {
+  Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -46,13 +31,23 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useCategories, useFamilyMembers, useMyFamily, useMyProfile, useTransactions, type Transaction } from '@/api';
+import {
+  useCategories,
+  useFamilyMembers,
+  useMyFamily,
+  useMyProfile,
+  useSoftDeleteTransaction,
+  useTransactions,
+  type Transaction,
+} from '@/api';
 import { Toast } from '@/components/toast';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
-import { AmountText, CategoryAvatar } from '@/features/home/components';
+import { avatarTint, DayGroup, EndOfListHint, type AvatarInfo, type RowData } from '@/features/home/components';
+import { TransactionDetailSheet } from '@/features/home/transaction-detail-sheet';
+import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { RecordSheet } from '@/features/record/record-sheet';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import { dayKey, formatAmount, humanDay, signForNet, signForType } from '@/lib/format';
+import { clockTime, dayKey, humanDay, signForType } from '@/lib/format';
 import {
   hasAnyQuery,
   runSearch,
@@ -61,48 +56,38 @@ import {
   type SearchFilters,
   type TxnType,
 } from '@/lib/search';
+import {
+  compactAmountFilterLabel,
+  customDateFilterLabel,
+  DATE_PRESET_LABELS,
+  summarizeSelectedLabels,
+} from '@/lib/search-labels';
 
 import { useSearchHistory } from './use-search-history';
 
-const DATE_PRESETS: { key: DatePresetKey; label: string }[] = [
-  { key: 'all', label: '全部时间' },
+const DATE_PRESET_OPTIONS: { key: DatePresetKey; label: string }[] = [
+  { key: 'all', label: '不限' },
   { key: 'thisMonth', label: '本月' },
   { key: 'lastMonth', label: '上月' },
   { key: 'last7', label: '近 7 天' },
   { key: 'last30', label: '近 30 天' },
   { key: 'thisYear', label: '今年' },
-  { key: 'custom', label: '自定义' },
 ];
 
 /** 哪个筛选下拉面板正打开。 */
 type FilterKind = 'type' | 'date' | 'category' | 'member' | 'amount';
 
-/** 单条结果行数据（比首页更丰富：含时间与成员两段）。 */
-type ResultRowData = {
-  id: string;
-  title: string;
-  note: string | null;
-  meta: string;
-  symbol: string;
-  iconColor: string;
-  amountCents: number;
-  sign: '+' | '-';
-  amountColor: string;
-};
-type ResultGroup = { key: string; label: string; totalCents: number; rows: ResultRowData[] };
+type ResultGroup = { key: string; label: string; totalCents: number; rows: RowData[] };
 
-/** 记账时间 → HH:MM。 */
-function hhmm(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-}
+const AMOUNT_RANGES = [
+  { label: '0–100', min: '0', max: '100' },
+  { label: '100–500', min: '100', max: '500' },
+  { label: '500–1000', min: '500', max: '1000' },
+  { label: '1000 以上', min: '1000', max: '' },
+] as const;
 
-export function SearchSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      {visible ? <SearchBody onClose={onClose} /> : null}
-    </Modal>
-  );
+export function SearchScreen({ onClose }: { onClose: () => void }) {
+  return <SearchBody onClose={onClose} />;
 }
 
 function SearchBody({ onClose }: { onClose: () => void }) {
@@ -128,12 +113,15 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const [amountMaxYuan, setAmountMaxYuan] = useState('');
 
   const [openFilter, setOpenFilter] = useState<FilterKind | null>(null);
-  // 点击结果行 → 复用记账面板编辑（流程 10）；储蓄类不可在此编辑（PRD §12.2）。
+  // 点击结果行 → 详情；左滑 → 编辑 / 删除，与首页列表一致。
+  const [detail, setDetail] = useState<{ open: boolean; txn: Transaction | null }>({ open: false, txn: null });
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [hint, setHint] = useState<string | null>(null);
+  const softDeleteM = useSoftDeleteTransaction();
 
   const multiMember = (familyQ.data?.member_count ?? 1) > 1;
   const myId = profileQ.data?.id;
+  const avatarFiles = useAvatarFiles(membersQ.data ?? []);
 
   const filters = useMemo<SearchFilters>(
     () => ({
@@ -159,6 +147,8 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     const members = membersQ.data ?? [];
     const catById = new Map(cats.map((c) => [c.id, c]));
     const nameById = new Map(members.map((m) => [m.id, m.nickname]));
+    const memberById = new Map(members.map((m) => [m.id, m]));
+    const myNick = profileQ.data?.nickname;
 
     const result = runSearch(txns, filters, {
       categoryNameById: new Map(cats.map((c) => [c.id, c.name])),
@@ -166,15 +156,20 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       myId,
     });
 
+    const avatarOf = (userId: string): AvatarInfo => {
+      const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? '成员';
+      const initial = [...nick.trim()][0]?.toUpperCase() ?? '?';
+      return { uri: avatarFiles.get(userId) ?? null, initial, tint: avatarTint(userId) };
+    };
+
     const map = new Map<string, ResultGroup>();
     for (const t of result.matched) {
       const cat = catById.get(t.category_id);
       const ttype: 'income' | 'expense' = t.type === 'income' ? 'income' : 'expense';
-      const who = t.recorder_user_id === myId ? '我' : (nameById.get(t.recorder_user_id) ?? '成员');
       const isSavings = t.source !== 'normal';
       // 储蓄类在备注行单独标注，金额不并入合计口径（已在 lib/search.ts 处理）。
       const note = isSavings ? (t.note ? `储蓄 · ${t.note}` : '储蓄') : t.note;
-      const meta = multiMember ? `${hhmm(t.occurred_at)} · ${who}` : hhmm(t.occurred_at);
+      const editedByOther = !!t.last_editor_user_id && t.last_editor_user_id !== t.recorder_user_id;
 
       const key = dayKey(t.occurred_at);
       const group =
@@ -189,16 +184,18 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         id: t.id,
         title: cat?.name ?? '未分类',
         note,
-        meta,
         symbol: categorySymbol(cat?.icon ?? null, ttype),
         iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype)],
         amountCents: t.amount,
         sign: signForType(ttype),
         amountColor: ttype === 'income' ? palette.income : palette.expense,
+        timeLabel: clockTime(editedByOther ? t.updated_at : t.occurred_at),
+        recorder: avatarOf(t.recorder_user_id),
+        editor: editedByOther ? avatarOf(t.last_editor_user_id as string) : null,
       });
     }
     return { groups: Array.from(map.values()), valid: result.valid };
-  }, [txnsQ.data, catsQ.data, membersQ.data, filters, myId, multiMember, catColors, palette]);
+  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, filters, myId, avatarFiles, catColors, palette]);
 
   const categories = catsQ.data ?? [];
   const members = membersQ.data ?? [];
@@ -219,13 +216,20 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       const now = new Date();
       setCustomFrom((v) => v ?? new Date(now.getFullYear(), now.getMonth(), 1));
       setCustomTo((v) => v ?? now);
-    } else {
-      setOpenFilter(null);
     }
   };
 
-  // 点击结果行：储蓄类引导去目标页；已被他人删除时提示并刷新。
   const onRowPress = (id: string) => {
+    const txn = (txnsQ.data ?? []).find((t) => t.id === id);
+    if (!txn) {
+      setHint('该记录已不存在');
+      txnsQ.refetch();
+      return;
+    }
+    setDetail({ open: true, txn });
+  };
+
+  const openEdit = (id: string) => {
     const txn = (txnsQ.data ?? []).find((t) => t.id === id);
     if (!txn) {
       setHint('该记录已不存在');
@@ -239,19 +243,69 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     setEditing(txn);
   };
 
-  // 筛选胶囊：固定标签，已设值仅变色（方案 A：标签恒定，5 个全部可见、不横滑）。
+  const confirmDelete = (id: string) => {
+    const txn = (txnsQ.data ?? []).find((t) => t.id === id);
+    if (txn?.source !== 'normal') {
+      setHint('储蓄流水请在对应储蓄目标内管理');
+      return;
+    }
+    Alert.alert('删除这笔记录？', '删除后将从账单中移除，无法在 App 内恢复。', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: () => softDeleteM.mutate(id, { onError: (e) => Alert.alert('删除失败', (e as Error).message) }),
+      },
+    ]);
+  };
+
   const amountSet = amountMinYuan.trim() !== '' || amountMaxYuan.trim() !== '';
+  const filtersActive = !typeIsAll || categoryIds.size > 0 || recorderIds.size > 0 || datePreset !== 'all' || amountSet;
+  const typeLabel = types.has('expense') ? '支出' : types.has('income') ? '收入' : '类型';
+  const categoryLabel =
+    categoryIds.size > 0
+      ? summarizeSelectedLabels(categories.filter((c) => categoryIds.has(c.id)).map((c) => c.name))
+      : '分类';
+  const memberLabel =
+    recorderIds.size > 0
+      ? summarizeSelectedLabels(
+          members.filter((m) => recorderIds.has(m.id)).map((m) => (m.id === myId ? '我' : m.nickname)),
+        )
+      : '成员';
+  const dateLabel =
+    datePreset === 'custom' ? customDateFilterLabel(customFrom, customTo) : DATE_PRESET_LABELS[datePreset];
+  const amountLabel = compactAmountFilterLabel(amountMinYuan, amountMaxYuan);
+
+  const clearFilters = () => {
+    setTypes(new Set());
+    setCategoryIds(new Set());
+    setRecorderIds(new Set());
+    setDatePreset('all');
+    setCustomFrom(null);
+    setCustomTo(null);
+    setAmountMinYuan('');
+    setAmountMaxYuan('');
+  };
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView style={styles.flex} edges={['top']}>
-        {/* 顶栏：搜索框（含关闭 X） */}
+        {/* 顶栏：返回 + 搜索框 + 取消，独立路由页形态。 */}
         <View style={styles.topBar}>
+          <Pressable
+            style={styles.navIconButton}
+            hitSlop={10}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="返回"
+          >
+            <SymbolView name="chevron.left" tintColor={palette.textPrimary} size={21} />
+          </Pressable>
           <View style={[styles.searchBox, { backgroundColor: palette.card }]}>
             <SymbolView name="magnifyingglass" tintColor={palette.textTertiary} size={17} />
             <TextInput
               style={[styles.searchInput, { color: palette.textPrimary }]}
-              placeholder="搜索备注 / 分类 / 成员 / 金额"
+              placeholder="搜索备注、分类或成员"
               placeholderTextColor={palette.textTertiary}
               value={keyword}
               onChangeText={setKeyword}
@@ -259,45 +313,60 @@ function SearchBody({ onClose }: { onClose: () => void }) {
               autoFocus
               autoCorrect={false}
               returnKeyType="search"
-              clearButtonMode="while-editing"
+              clearButtonMode="never"
             />
-            <View style={[styles.searchDivider, { backgroundColor: palette.separator }]} />
-            <Pressable hitSlop={10} onPress={onClose}>
-              <SymbolView name="xmark" tintColor={palette.textSecondary} size={16} />
-            </Pressable>
+            {keyword.trim() ? (
+              <Pressable
+                hitSlop={8}
+                onPress={() => setKeyword('')}
+                accessibilityRole="button"
+                accessibilityLabel="清空搜索关键词"
+              >
+                <SymbolView name="xmark.circle.fill" tintColor={palette.textTertiary} size={17} />
+              </Pressable>
+            ) : null}
           </View>
+          <Pressable style={styles.cancelButton} hitSlop={10} onPress={onClose} accessibilityRole="button">
+            <Text style={[styles.cancelText, { color: palette.info }]}>取消</Text>
+          </Pressable>
         </View>
 
-        {/* 筛选：等宽平铺一行（标签固定，已设值变色，全部可见、不横滑） */}
-        <View style={styles.pillRow}>
+        {/* 筛选：单行横向滚动，每个维度聚合为一个摘要胶囊。 */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.pillScroller}
+          contentContainerStyle={styles.pillRow}
+        >
           <FilterPill
             icon="arrow.up.arrow.down"
-            label="类型"
+            label={typeLabel}
             active={!typeIsAll}
             onPress={() => setOpenFilter('type')}
           />
           <FilterPill
             icon="calendar"
-            label="时间"
+            label={dateLabel}
             active={datePreset !== 'all'}
             onPress={() => setOpenFilter('date')}
           />
           <FilterPill
             icon="square.grid.2x2"
-            label="分类"
+            label={categoryLabel}
             active={categoryIds.size > 0}
             onPress={() => setOpenFilter('category')}
           />
           {multiMember ? (
             <FilterPill
               icon="person"
-              label="成员"
+              label={memberLabel}
               active={recorderIds.size > 0}
               onPress={() => setOpenFilter('member')}
             />
           ) : null}
-          <FilterPill icon="yensign" label="金额" active={amountSet} onPress={() => setOpenFilter('amount')} />
-        </View>
+          <FilterPill icon="yensign" label={amountLabel} active={amountSet} onPress={() => setOpenFilter('amount')} />
+          {filtersActive ? <ResetPill onPress={clearFilters} /> : null}
+        </ScrollView>
 
         <View style={[styles.separator, { backgroundColor: palette.separator }]} />
 
@@ -310,28 +379,31 @@ function SearchBody({ onClose }: { onClose: () => void }) {
             <Text style={{ color: palette.textSecondary }}>筛选条件有误，请检查金额 / 日期区间</Text>
           </View>
         ) : groups.length === 0 ? (
-          <View style={styles.center}>
-            <SymbolView name="magnifyingglass" tintColor={palette.textTertiary} size={44} />
-            <Text style={{ color: palette.textSecondary }}>没有匹配的流水，换个词或放宽条件</Text>
-          </View>
+          <NoResultEmpty filtersActive={filtersActive} onClearFilters={clearFilters} />
         ) : (
           <Host style={styles.flex}>
-            <UIScrollView>
-              <VStack
-                spacing={Space[5]}
-                modifiers={[padding({ horizontal: Space[4], top: Space[2], bottom: Space[10] })]}
-              >
-                {groups.map((g) => (
-                  <ResultDayGroup
-                    key={g.key}
-                    label={g.label}
-                    totalCents={g.totalCents}
-                    rows={g.rows}
-                    onRowPress={onRowPress}
-                  />
-                ))}
-              </VStack>
-            </UIScrollView>
+            <List modifiers={[listStyle('insetGrouped'), listSectionSpacing(Space[3])]}>
+              {groups.map((g) => (
+                <DayGroup
+                  key={g.key}
+                  label={g.label}
+                  totalCents={g.totalCents}
+                  rows={g.rows}
+                  onRowPress={onRowPress}
+                  onEdit={openEdit}
+                  onDelete={confirmDelete}
+                />
+              ))}
+              <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
+                <VStack
+                  modifiers={[
+                    listRowInsets({ top: Space[2], bottom: Space[6], leading: Space[4], trailing: Space[4] }),
+                  ]}
+                >
+                  <EndOfListHint />
+                </VStack>
+              </Section>
+            </List>
           </Host>
         )}
       </SafeAreaView>
@@ -345,6 +417,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         typeIsAll={typeIsAll}
         datePreset={datePreset}
         onPickPreset={onPickPreset}
+        setDatePreset={setDatePreset}
         customFrom={customFrom}
         customTo={customTo}
         setCustomFrom={setCustomFrom}
@@ -363,6 +436,12 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         setAmountMaxYuan={setAmountMaxYuan}
         amountError={errors.amount}
         toggle={toggle}
+      />
+
+      <TransactionDetailSheet
+        visible={detail.open}
+        transaction={detail.txn}
+        onClose={() => setDetail({ open: false, txn: null })}
       />
 
       {/* 编辑 / 删除（流程 10）；保存后 RQ 失效 → 结果自动重算 */}
@@ -392,19 +471,51 @@ function FilterPill({
   onPress: () => void;
 }) {
   const palette = usePalette();
-  const fg = active ? palette.onAccent : palette.textPrimary;
+  const fg = active ? palette.info : palette.textPrimary;
+  const bg = active ? 'rgba(0,122,255,0.12)' : palette.cardPill;
   return (
-    <Pressable onPress={onPress} style={[styles.pill, { backgroundColor: active ? palette.accent : palette.card }]}>
-      <SymbolView name={icon} tintColor={active ? palette.onAccent : palette.textSecondary} size={13} />
-      <Text numberOfLines={1} style={{ color: fg, fontSize: 13 }}>
+    <Pressable onPress={onPress} style={[styles.pill, { backgroundColor: bg }]}>
+      <SymbolView name={icon} tintColor={palette.info} size={13} />
+      <Text numberOfLines={1} style={{ color: fg, fontSize: 13, maxWidth: 140, fontWeight: active ? '500' : '400' }}>
         {label}
       </Text>
-      <SymbolView name="chevron.down" tintColor={active ? palette.onAccent : palette.textTertiary} size={9} />
+      <SymbolView name="chevron.down" tintColor={palette.textTertiary} size={9} />
     </Pressable>
   );
 }
 
-// ── 搜索历史（标签云）─────────────────────────────────────────────────────────
+function ResetPill({ onPress }: { onPress: () => void }) {
+  const palette = usePalette();
+  return (
+    <Pressable onPress={onPress} hitSlop={6} style={styles.resetPill}>
+      <Text style={{ color: palette.info, fontSize: 13, fontWeight: '500' }}>重置</Text>
+    </Pressable>
+  );
+}
+
+// ── 无结果占位 ────────────────────────────────────────────────────────────────
+function NoResultEmpty({ filtersActive, onClearFilters }: { filtersActive: boolean; onClearFilters: () => void }) {
+  const palette = usePalette();
+  return (
+    <View style={styles.center}>
+      <Image
+        source={require('@/assets/images/search/search-empty.png')}
+        style={styles.emptyImage}
+        resizeMode="contain"
+        accessibilityLabel="无搜索结果"
+      />
+      <Text style={[styles.emptyTitle, { color: palette.textPrimary }]}>没有找到相关记录</Text>
+      <Text style={[styles.emptySubtitle, { color: palette.textSecondary }]}>试试更换关键词或放宽筛选条件</Text>
+      {filtersActive ? (
+        <Pressable onPress={onClearFilters} hitSlop={10} style={{ marginTop: Space[4] }}>
+          <Text style={{ color: palette.info, fontSize: 15 }}>清除筛选条件</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+// ── 搜索历史 + 默认引导空态 ─────────────────────────────────────────────────
 function HistoryCloud({
   history,
   onPick,
@@ -413,124 +524,47 @@ function HistoryCloud({
   onPick: (kw: string) => void;
 }) {
   const palette = usePalette();
-  if (history.items.length === 0) {
-    return (
-      <View style={styles.center}>
-        <SymbolView name="text.magnifyingglass" tintColor={palette.textTertiary} size={44} />
-        <Text style={{ color: palette.textSecondary }}>输入关键词或选择筛选条件，开始搜索</Text>
-      </View>
-    );
-  }
   return (
-    <View style={styles.historyWrap}>
-      <View style={styles.historyHeader}>
-        <View style={styles.historyTitleWrap}>
-          <SymbolView name="clock" tintColor={palette.textSecondary} size={15} />
-          <Text style={[styles.historyTitle, { color: palette.textPrimary }]}>搜索历史</Text>
+    <View style={styles.historyContainer}>
+      {history.items.length > 0 ? (
+        <View style={[styles.historyCard, { backgroundColor: palette.card }]}>
+          <View style={styles.historyHeader}>
+            <View style={styles.historyTitleWrap}>
+              <SymbolView name="clock" tintColor={palette.textSecondary} size={15} />
+              <Text style={[styles.historyTitle, { color: palette.textPrimary }]}>最近搜索</Text>
+            </View>
+            <Pressable hitSlop={8} onPress={history.clear} accessibilityRole="button">
+              <Text style={[styles.historyClear, { color: palette.info }]}>清空</Text>
+            </Pressable>
+          </View>
+          <View style={styles.cloud}>
+            {history.items.map((kw) => (
+              <Pressable
+                key={kw}
+                style={[styles.historyTag, { backgroundColor: palette.cardPill }]}
+                onPress={() => onPick(kw)}
+                onLongPress={() => history.remove(kw)}
+                accessibilityHint="长按可删除"
+              >
+                <Text style={[styles.historyTagText, { color: palette.textPrimary }]} numberOfLines={1}>
+                  {kw}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={[styles.historyHint, { color: palette.textTertiary }]}>长按可删除</Text>
         </View>
-        <Pressable hitSlop={8} onPress={history.clear}>
-          <Text style={[styles.historyClear, { color: palette.info }]}>清空历史</Text>
-        </Pressable>
+      ) : null}
+
+      <View style={styles.defaultEmpty}>
+        <View style={[styles.defaultEmptyIconWrap, { backgroundColor: palette.cardPill }]}>
+          <SymbolView name="magnifyingglass" tintColor={palette.textTertiary} size={44} />
+        </View>
+        <Text style={[styles.defaultEmptyText, { color: palette.textSecondary }]}>
+          输入关键词或选择筛选条件，开始搜索
+        </Text>
       </View>
-      <View style={styles.cloud}>
-        {history.items.map((kw) => (
-          <Pressable
-            key={kw}
-            style={[styles.historyTag, { backgroundColor: palette.card }]}
-            onPress={() => onPick(kw)}
-            onLongPress={() => history.remove(kw)}
-          >
-            <Text style={[styles.historyTagText, { color: palette.textPrimary }]} numberOfLines={1}>
-              {kw}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-      <Text style={[styles.historyHint, { color: palette.textTertiary }]}>长按可删除单条</Text>
     </View>
-  );
-}
-
-// ── 结果：按日分组（SwiftUI 卡片，含富信息行）─────────────────────────────────
-function ResultDayGroup({
-  label,
-  totalCents,
-  rows,
-  onRowPress,
-}: {
-  label: string;
-  totalCents: number;
-  rows: ResultRowData[];
-  onRowPress: (id: string) => void;
-}) {
-  const palette = usePalette();
-  return (
-    <VStack alignment="leading" spacing={Space[2]}>
-      <HStack modifiers={[padding({ horizontal: Space[1] })]}>
-        <UIText modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{label}</UIText>
-        <Spacer />
-        <UIText modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>
-          {formatAmount(totalCents, signForNet(totalCents))}
-        </UIText>
-      </HStack>
-      <VStack
-        spacing={0}
-        modifiers={[
-          background(palette.card),
-          cornerRadius(Radius.lg),
-          shadow({ radius: 8, x: 0, y: 1, color: palette.shadow }),
-        ]}
-      >
-        {rows.map((row, i) => (
-          <VStack key={row.id} spacing={0}>
-            {i > 0 ? (
-              <HStack modifiers={[padding({ leading: 70 })]}>
-                <HStack modifiers={[frame({ height: 0.5, maxWidth: 9999 }), background(palette.separator)]}>
-                  <Spacer />
-                </HStack>
-              </HStack>
-            ) : null}
-            <ResultRow row={row} onPress={onRowPress} />
-          </VStack>
-        ))}
-      </VStack>
-    </VStack>
-  );
-}
-
-function ResultRow({ row, onPress }: { row: ResultRowData; onPress: (id: string) => void }) {
-  const palette = usePalette();
-  return (
-    <HStack
-      spacing={Space[3]}
-      alignment="center"
-      modifiers={[
-        padding({ vertical: Space[3], horizontal: Space[4] }),
-        // 整行（含 Spacer 空隙）都可点，否则结果行留白处点不动
-        contentShape(shapes.rectangle()),
-        onTapGesture(() => onPress(row.id)),
-      ]}
-    >
-      <CategoryAvatar symbol={row.symbol} color={row.iconColor} />
-      <VStack alignment="leading" spacing={2}>
-        <UIText modifiers={[font({ size: 17, weight: 'medium' }), foregroundColor(palette.textPrimary)]}>
-          {row.title}
-        </UIText>
-        {row.note ? (
-          <UIText modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{row.note}</UIText>
-        ) : null}
-        <UIText modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>{row.meta}</UIText>
-      </VStack>
-      <Spacer />
-      <AmountText
-        cents={row.amountCents}
-        sign={row.sign}
-        color={row.amountColor}
-        integerSize={17}
-        decimalSize={13}
-        weight="semibold"
-      />
-    </HStack>
   );
 }
 
@@ -543,6 +577,7 @@ type DropdownProps = {
   typeIsAll: boolean;
   datePreset: DatePresetKey;
   onPickPreset: (k: DatePresetKey) => void;
+  setDatePreset: (k: DatePresetKey) => void;
   customFrom: Date | null;
   customTo: Date | null;
   setCustomFrom: (d: Date) => void;
@@ -565,11 +600,22 @@ type DropdownProps = {
 
 const TITLES: Record<FilterKind, string> = {
   type: '类型',
-  date: '时间',
+  date: '日期',
   category: '分类',
   member: '成员',
-  amount: '金额区间',
+  amount: '金额',
 };
+
+function formatSlashDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = (d.getMonth() + 1).toString().padStart(2, '0');
+  const day = d.getDate().toString().padStart(2, '0');
+  return `${y}/${m}/${day}`;
+}
+
+function matchesQuickRange(minYuan: string, maxYuan: string, range: (typeof AMOUNT_RANGES)[number]): boolean {
+  return minYuan.trim() === range.min && maxYuan.trim() === range.max;
+}
 
 function FilterDropdown(props: DropdownProps) {
   const { kind, onClose } = props;
@@ -613,6 +659,7 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
     typeIsAll,
     datePreset,
     onPickPreset,
+    setDatePreset,
     customFrom,
     customTo,
     setCustomFrom,
@@ -644,33 +691,35 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
   }
 
   if (kind === 'date') {
+    const onCustomFrom = (d: Date) => {
+      setCustomFrom(d);
+      setDatePreset('custom');
+    };
+    const onCustomTo = (d: Date) => {
+      setCustomTo(d);
+      setDatePreset('custom');
+    };
     return (
-      <View>
-        {DATE_PRESETS.map((p) => (
-          <OptionRow key={p.key} label={p.label} active={datePreset === p.key} onPress={() => onPickPreset(p.key)} />
-        ))}
-        {datePreset === 'custom' ? (
-          <View style={styles.customDateRow}>
-            <Text style={[styles.fieldLabel, { color: palette.textSecondary }]}>从</Text>
-            <Host matchContents style={styles.dateHost}>
-              <DatePicker
-                selection={customFrom ?? new Date()}
-                displayedComponents={['date']}
-                onDateChange={setCustomFrom}
-                modifiers={[datePickerStyle('compact'), labelsHidden()]}
-              />
-            </Host>
-            <Text style={[styles.fieldLabel, { color: palette.textSecondary }]}>到</Text>
-            <Host matchContents style={styles.dateHost}>
-              <DatePicker
-                selection={customTo ?? new Date()}
-                displayedComponents={['date']}
-                onDateChange={setCustomTo}
-                modifiers={[datePickerStyle('compact'), labelsHidden()]}
-              />
-            </Host>
+      <View style={styles.sheetBody}>
+        <View style={[styles.optionCard, { backgroundColor: palette.card }]}>
+          {DATE_PRESET_OPTIONS.map((p, i) => (
+            <OptionRow
+              key={p.key}
+              label={p.label}
+              active={datePreset === p.key}
+              onPress={() => onPickPreset(p.key)}
+              showDivider={i < DATE_PRESET_OPTIONS.length - 1}
+            />
+          ))}
+        </View>
+        <View style={[styles.customDateCard, { backgroundColor: palette.card }]}>
+          <Text style={[styles.customDateTitle, { color: palette.textPrimary }]}>自定义日期</Text>
+          <View style={styles.customDateFields}>
+            <DateFieldBox label="开始日期" date={customFrom} onChange={onCustomFrom} />
+            <Text style={[styles.customDateDash, { color: palette.textTertiary }]}>—</Text>
+            <DateFieldBox label="结束日期" date={customTo} onChange={onCustomTo} />
           </View>
-        ) : null}
+        </View>
         {dateError ? <Text style={[styles.errorText, { color: palette.danger }]}>起始日期不能晚于结束日期</Text> : null}
       </View>
     );
@@ -711,47 +760,133 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
   // amount
   return (
     <View style={styles.amountSheet}>
-      <View style={styles.amountRow}>
-        <TextInput
-          style={[styles.amountInput, { backgroundColor: palette.card, color: palette.textPrimary }]}
-          placeholder="最小"
-          placeholderTextColor={palette.textTertiary}
-          value={amountMinYuan}
-          onChangeText={setAmountMinYuan}
-          keyboardType="decimal-pad"
-        />
-        <Text style={[styles.fieldLabel, { color: palette.textSecondary }]}>至</Text>
-        <TextInput
-          style={[styles.amountInput, { backgroundColor: palette.card, color: palette.textPrimary }]}
-          placeholder="最大"
-          placeholderTextColor={palette.textTertiary}
-          value={amountMaxYuan}
-          onChangeText={setAmountMaxYuan}
-          keyboardType="decimal-pad"
-        />
-        <Text style={[styles.fieldUnit, { color: palette.textTertiary }]}>元</Text>
+      <View style={styles.amountInputsRow}>
+        <AmountField label="最低金额" value={amountMinYuan} onChange={setAmountMinYuan} />
+        <AmountField label="最高金额" value={amountMaxYuan} onChange={setAmountMaxYuan} />
       </View>
+      <Text style={[styles.quickRangeTitle, { color: palette.textPrimary }]}>快捷区间</Text>
+      <View style={styles.quickRangeRow}>
+        {AMOUNT_RANGES.map((range) => {
+          const selected = matchesQuickRange(amountMinYuan, amountMaxYuan, range);
+          return (
+            <Pressable
+              key={range.label}
+              style={[
+                styles.quickRangeChip,
+                {
+                  backgroundColor: selected ? 'rgba(0,122,255,0.12)' : palette.cardPill,
+                },
+              ]}
+              onPress={() => {
+                setAmountMinYuan(range.min);
+                setAmountMaxYuan(range.max);
+              }}
+            >
+              <Text
+                style={{
+                  color: selected ? palette.info : palette.textPrimary,
+                  fontSize: 14,
+                  fontWeight: selected ? '500' : '400',
+                }}
+              >
+                {range.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={[styles.amountHint, { color: palette.textTertiary }]}>可单独填写最低或最高金额</Text>
       {amountError ? <Text style={[styles.errorText, { color: palette.danger }]}>最小金额不能大于最大金额</Text> : null}
     </View>
   );
 }
 
-function OptionRow({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+function AmountField({ label, value, onChange }: { label: string; value: string; onChange: (s: string) => void }) {
   const palette = usePalette();
   return (
-    <Pressable style={styles.optionRow} onPress={onPress}>
-      <Text style={{ color: palette.textPrimary, fontSize: 16 }}>{label}</Text>
-      <View style={styles.flex} />
-      {active ? <SymbolView name="checkmark" tintColor={palette.info} size={18} /> : null}
-    </Pressable>
+    <View style={[styles.amountFieldBox, { backgroundColor: palette.cardPill }]}>
+      <Text style={[styles.amountFieldLabel, { color: palette.textTertiary }]}>{label}</Text>
+      <View style={styles.amountFieldValueRow}>
+        <Text style={[styles.amountFieldPrefix, { color: palette.textPrimary }]}>¥</Text>
+        <TextInput
+          style={[styles.amountFieldInput, { color: palette.textPrimary }]}
+          value={value}
+          onChangeText={onChange}
+          placeholder="0"
+          placeholderTextColor={palette.textTertiary}
+          keyboardType="decimal-pad"
+        />
+      </View>
+    </View>
+  );
+}
+
+function DateFieldBox({ label, date, onChange }: { label: string; date: Date | null; onChange: (d: Date) => void }) {
+  const palette = usePalette();
+  return (
+    <View style={[styles.dateFieldBox, { backgroundColor: palette.cardPill, borderColor: palette.separator }]}>
+      <Text style={[styles.dateFieldLabel, { color: palette.textTertiary }]}>{label}</Text>
+      <View style={styles.dateFieldValueRow}>
+        <Text style={[styles.dateFieldValue, { color: palette.textPrimary }]}>
+          {date ? formatSlashDate(date) : '选择日期'}
+        </Text>
+        <SymbolView name="calendar" tintColor={palette.textTertiary} size={15} />
+      </View>
+      <Host matchContents style={styles.datePickerOverlay}>
+        <DatePicker
+          selection={date ?? new Date()}
+          displayedComponents={['date']}
+          onDateChange={onChange}
+          modifiers={[datePickerStyle('compact'), labelsHidden()]}
+        />
+      </Host>
+    </View>
+  );
+}
+
+function OptionRow({
+  label,
+  active,
+  onPress,
+  showDivider = false,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  showDivider?: boolean;
+}) {
+  const palette = usePalette();
+  return (
+    <>
+      <Pressable style={styles.optionRow} onPress={onPress}>
+        <Text style={{ color: active ? palette.info : palette.textPrimary, fontSize: 16 }}>{label}</Text>
+        <View style={styles.flex} />
+        {active ? <SymbolView name="checkmark" tintColor={palette.info} size={18} /> : null}
+      </Pressable>
+      {showDivider ? <View style={[styles.optionDivider, { backgroundColor: palette.separator }]} /> : null}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
-  topBar: { paddingHorizontal: Space[4], paddingTop: Space[2], paddingBottom: Space[2] },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[2],
+    paddingHorizontal: Space[4],
+    paddingTop: Space[2],
+    paddingBottom: Space[2],
+  },
+  navIconButton: {
+    width: 32,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   searchBox: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space[2],
@@ -760,7 +895,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: Space[3],
   },
   searchInput: { flex: 1, fontSize: 16, paddingVertical: 0 },
-  searchDivider: { width: StyleSheet.hairlineWidth, height: 20 },
+  cancelButton: {
+    minWidth: 44,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Space[1],
+  },
+  cancelText: { fontSize: 16 },
+  pillScroller: { flexGrow: 0 },
   pillRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -769,28 +912,59 @@ const styles = StyleSheet.create({
     paddingVertical: Space[2],
   },
   pill: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: Space[1],
-    paddingHorizontal: Space[2],
+    paddingHorizontal: Space[3],
     height: 34,
     borderRadius: Radius.full,
   },
+  resetPill: {
+    height: 34,
+    justifyContent: 'center',
+    paddingHorizontal: Space[2],
+  },
   separator: { height: StyleSheet.hairlineWidth, marginTop: Space[1] },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[3] },
-  // 搜索历史
-  historyWrap: { paddingHorizontal: Space[4], paddingTop: Space[4] },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Space[3],
+    paddingHorizontal: Space[6],
+  },
+  emptyImage: { width: 180, height: 180 },
+  emptyTitle: { fontSize: 17, fontWeight: '600', textAlign: 'center' },
+  emptySubtitle: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  historyContainer: { flex: 1, paddingHorizontal: Space[4], paddingTop: Space[3] },
+  historyCard: {
+    borderRadius: Radius.lg,
+    paddingHorizontal: Space[4],
+    paddingTop: Space[4],
+    paddingBottom: Space[3],
+  },
   historyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   historyTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
   historyTitle: { fontSize: 15, fontWeight: '600' },
   historyClear: { fontSize: 14 },
-  cloud: { flexDirection: 'row', flexWrap: 'wrap', gap: Space[2], marginTop: Space[4] },
+  cloud: { flexDirection: 'row', flexWrap: 'wrap', gap: Space[2], marginTop: Space[3] },
   historyTag: { paddingHorizontal: Space[4], paddingVertical: Space[2], borderRadius: Radius.full, maxWidth: 200 },
   historyTagText: { fontSize: 14 },
-  historyHint: { fontSize: 12, marginTop: Space[4] },
-  // 底部下拉面板
+  historyHint: { fontSize: 12, marginTop: Space[3] },
+  defaultEmpty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Space[4],
+    paddingBottom: Space[10],
+  },
+  defaultEmptyIconWrap: {
+    width: 120,
+    height: 120,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  defaultEmptyText: { fontSize: 14, textAlign: 'center', lineHeight: 20, paddingHorizontal: Space[6] },
   backdrop: { backgroundColor: 'rgba(0,0,0,0.35)' },
   sheetAnchor: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
@@ -808,14 +982,63 @@ const styles = StyleSheet.create({
   sheetHeaderSide: { width: 48, alignItems: 'flex-end' },
   sheetTitle: { fontSize: 16, fontWeight: '600' },
   sheetDone: { fontSize: 16 },
+  sheetBody: { gap: Space[3], paddingBottom: Space[2] },
   sheetScroll: { maxHeight: 360 },
-  optionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: Space[3], minHeight: 48 },
-  customDateRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2], paddingVertical: Space[3] },
-  dateHost: { minWidth: 120, minHeight: 30 },
-  amountSheet: { paddingVertical: Space[3] },
-  amountRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
-  amountInput: { width: 96, height: 38, borderRadius: Radius.sm, paddingHorizontal: Space[3], fontSize: 15 },
-  fieldLabel: { fontSize: 14 },
-  fieldUnit: { fontSize: 13 },
-  errorText: { fontSize: 12, paddingTop: Space[2] },
+  optionCard: { borderRadius: Radius.lg, overflow: 'hidden' },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Space[3],
+    paddingHorizontal: Space[4],
+    minHeight: 48,
+  },
+  optionDivider: { height: StyleSheet.hairlineWidth, marginLeft: Space[4] },
+  customDateCard: { borderRadius: Radius.lg, padding: Space[4], gap: Space[3] },
+  customDateTitle: { fontSize: 15, fontWeight: '600' },
+  customDateFields: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
+  customDateDash: { fontSize: 16, paddingHorizontal: Space[1] },
+  dateFieldBox: {
+    flex: 1,
+    borderRadius: Radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Space[3],
+    paddingVertical: Space[2],
+    minHeight: 64,
+    overflow: 'hidden',
+  },
+  dateFieldLabel: { fontSize: 12, marginBottom: Space[1] },
+  dateFieldValueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  dateFieldValue: { fontSize: 15, fontVariant: ['tabular-nums'] },
+  datePickerOverlay: {
+    position: 'absolute',
+    right: Space[2],
+    bottom: Space[1],
+    opacity: 0.02,
+    minWidth: 44,
+    minHeight: 44,
+  },
+  amountSheet: { paddingVertical: Space[2], gap: Space[4] },
+  amountInputsRow: { flexDirection: 'row', gap: Space[3] },
+  amountFieldBox: {
+    flex: 1,
+    borderRadius: Radius.md,
+    paddingHorizontal: Space[3],
+    paddingVertical: Space[3],
+    gap: Space[1],
+  },
+  amountFieldLabel: { fontSize: 12 },
+  amountFieldValueRow: { flexDirection: 'row', alignItems: 'baseline' },
+  amountFieldPrefix: { fontSize: 18, fontWeight: '600', marginRight: Space[1] },
+  amountFieldInput: { flex: 1, fontSize: 18, fontWeight: '600', paddingVertical: 0, fontVariant: ['tabular-nums'] },
+  quickRangeTitle: { fontSize: 15, fontWeight: '600' },
+  quickRangeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Space[2] },
+  quickRangeChip: {
+    paddingHorizontal: Space[4],
+    paddingVertical: Space[2],
+    borderRadius: Radius.full,
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  amountHint: { fontSize: 12 },
+  errorText: { fontSize: 12, paddingTop: Space[1] },
 });

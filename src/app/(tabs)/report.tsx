@@ -7,14 +7,23 @@
  * / 分类环比 / 成员贡献 / 大额 Top N 仅算「支出 + source=normal」；收入结构仅算 source=normal 收入
  * （均排除储蓄类）。
  */
+import { useRouter, type Href } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Polyline } from 'react-native-svg';
 
-import { useCategories, useFamilyMembers, useMyProfile, useTransactions, type Transaction } from '@/api';
+import {
+  DEFAULT_ACCOUNTING_PREFS,
+  useAccountingPrefs,
+  useCategories,
+  useFamilyMembers,
+  useMyProfile,
+  useTransactions,
+  type Transaction,
+} from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, TabBarInset, useCategoryColors, usePalette } from '@/constants/design';
 import {
@@ -31,7 +40,8 @@ import { Donut } from '@/features/report/donut';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import { formatAmount, signForNet } from '@/lib/format';
+import { formatAmount, maskAmount, signForNet } from '@/lib/format';
+import { resolveCardLayout, type ReportCardId } from '@/lib/report-cards';
 import {
   balanceRate,
   cumulativeSeries,
@@ -59,10 +69,17 @@ export default function ReportScreen() {
   // estimate 必须等于实测头高（paddingTop 8 + 标题 41 + paddingBottom 12），否则裁切框（overflow:hidden）
   // 偏小会在首帧切掉标题底部。
   const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 61);
+  const router = useRouter();
   const txnsQ = useTransactions();
   const catsQ = useCategories();
   const membersQ = useFamilyMembers();
   const profileQ = useMyProfile();
+  const prefsQ = useAccountingPrefs();
+
+  // 卡片显隐 / 排序 + 金额隐私（记账设置，个人级偏好）；行不存在回落默认。
+  const prefs = prefsQ.data ?? DEFAULT_ACCOUNTING_PREFS;
+  const privacy = prefs.amount_privacy;
+  const layout = resolveCardLayout(prefs.report_card_order, prefs.report_card_hidden);
 
   const [dimension, setDimension] = useState<Dimension>('month');
   const [anchor, setAnchor] = useState(() => new Date());
@@ -206,6 +223,128 @@ export default function ReportScreen() {
   const loading = txnsQ.isLoading || catsQ.isLoading;
   const memberMax = Math.max(1, ...members.map((m) => m.amount));
 
+  // 按卡片 id 分发渲染；顺序 / 显隐由 layout.visible 决定（记账设置 → 报表卡片）。
+  // 「成员贡献」本就无成员不渲染，与显隐叠加即可。
+  const renderCard = (id: ReportCardId): ReactNode => {
+    switch (id) {
+      case 'overview':
+        return (
+          <View style={[styles.card, styles.summary, { backgroundColor: palette.card }]}>
+            <View style={styles.summaryItem}>
+              <ThemedText style={[styles.summaryLabel, { color: palette.textSecondary }]}>支出</ThemedText>
+              <ThemedText style={[styles.summaryAmount, { color: palette.expense }]}>
+                {maskAmount(formatAmount(expense, '-'), privacy)}
+              </ThemedText>
+            </View>
+            <View style={styles.summaryItem}>
+              <ThemedText style={[styles.summaryLabel, { color: palette.textSecondary }]}>收入</ThemedText>
+              <ThemedText style={[styles.summaryAmount, { color: palette.income }]}>
+                {maskAmount(formatAmount(income, '+'), privacy)}
+              </ThemedText>
+            </View>
+            <View style={styles.summaryItem}>
+              <ThemedText style={[styles.summaryLabel, { color: palette.textSecondary }]}>结余</ThemedText>
+              <ThemedText style={[styles.summaryAmount, { color: palette.textPrimary }]}>
+                {maskAmount(formatAmount(balance, signForNet(balance)), privacy)}
+              </ThemedText>
+            </View>
+          </View>
+        );
+      case 'balance_rate':
+        return <BalanceGaugeCard rate={balRate} palette={palette} />;
+      case 'trend':
+        return (
+          <View style={[styles.card, { backgroundColor: palette.card }]}>
+            <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>消费趋势</ThemedText>
+            <TrendChart buckets={trend} palette={palette} />
+          </View>
+        );
+      case 'cumulative':
+        return <CumulativeCard series={cumulative} palette={palette} hidden={privacy} />;
+      case 'expense_category':
+        return (
+          <View style={[styles.card, { backgroundColor: palette.card }]}>
+            <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>支出分类占比</ThemedText>
+            {byCat.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <SymbolView name="chart.pie" tintColor={palette.textTertiary} size={40} />
+                <ThemedText style={{ color: palette.textSecondary }}>这个周期还没有支出记录</ThemedText>
+              </View>
+            ) : (
+              <>
+                <View style={styles.donutWrap}>
+                  <Donut slices={byCat.map((c) => ({ value: c.amount, color: c.color }))} trackColor={palette.base}>
+                    <ThemedText style={[styles.donutCaption, { color: palette.textSecondary }]}>总支出</ThemedText>
+                    <ThemedText style={[styles.donutTotal, { color: palette.textPrimary }]}>
+                      {maskAmount(formatAmount(expenseTotal, ''), privacy)}
+                    </ThemedText>
+                  </Donut>
+                </View>
+                <View style={styles.list}>
+                  {byCat.map((c, i) => {
+                    const pct = expenseTotal > 0 ? Math.round((c.amount / expenseTotal) * 100) : 0;
+                    return (
+                      <View key={c.id}>
+                        {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
+                        <Pressable style={styles.catRow} onPress={() => setDetail({ id: c.id, name: c.name })}>
+                          <View style={[styles.catDot, { backgroundColor: c.color }]}>
+                            <SymbolView name={c.symbol as SymbolViewProps['name']} tintColor="#FFFFFF" size={15} />
+                          </View>
+                          <ThemedText style={[styles.catName, { color: palette.textPrimary }]}>{c.name}</ThemedText>
+                          <ThemedText style={[styles.catPct, { color: palette.textSecondary }]}>{pct}%</ThemedText>
+                          <View style={styles.flex} />
+                          <ThemedText style={[styles.catAmount, { color: palette.textPrimary }]}>
+                            {maskAmount(formatAmount(c.amount, ''), privacy)}
+                          </ThemedText>
+                          <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={12} />
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+          </View>
+        );
+      case 'category_mom':
+        return <CategoryMomCard items={momItems} palette={palette} hidden={privacy} />;
+      case 'member':
+        return members.length > 0 ? (
+          <View style={[styles.card, { backgroundColor: palette.card }]}>
+            <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>成员贡献</ThemedText>
+            <View style={styles.memberList}>
+              {members.map((m) => (
+                <View key={m.id} style={styles.memberRow}>
+                  <ThemedText style={[styles.memberName, { color: palette.textPrimary }]} numberOfLines={1}>
+                    {m.name}
+                  </ThemedText>
+                  <View style={styles.memberBarWrap}>
+                    <View style={[styles.memberBarTrack, { backgroundColor: palette.base }]}>
+                      <View
+                        style={[
+                          styles.memberBarFill,
+                          { backgroundColor: palette.accent, width: `${(m.amount / memberMax) * 100}%` },
+                        ]}
+                      />
+                    </View>
+                  </View>
+                  <ThemedText style={[styles.memberAmount, { color: palette.textSecondary }]}>
+                    {maskAmount(formatAmount(m.amount, ''), privacy)}
+                  </ThemedText>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null;
+      case 'top_expenses':
+        return <TopExpensesCard items={topItems} palette={palette} hidden={privacy} />;
+      case 'income_structure':
+        return <IncomeStructureCard slices={incomeSlices} palette={palette} hidden={privacy} />;
+      default:
+        return null;
+    }
+  };
+
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <View style={styles.flex}>
@@ -265,121 +404,21 @@ export default function ReportScreen() {
               </Pressable>
             </View>
 
-            {/* 收支结余概览 */}
-            <View style={[styles.card, styles.summary, { backgroundColor: palette.card }]}>
-              <View style={styles.summaryItem}>
-                <ThemedText style={[styles.summaryLabel, { color: palette.textSecondary }]}>支出</ThemedText>
-                <ThemedText style={[styles.summaryAmount, { color: palette.expense }]}>
-                  {formatAmount(expense, '-')}
-                </ThemedText>
-              </View>
-              <View style={styles.summaryItem}>
-                <ThemedText style={[styles.summaryLabel, { color: palette.textSecondary }]}>收入</ThemedText>
-                <ThemedText style={[styles.summaryAmount, { color: palette.income }]}>
-                  {formatAmount(income, '+')}
-                </ThemedText>
-              </View>
-              <View style={styles.summaryItem}>
-                <ThemedText style={[styles.summaryLabel, { color: palette.textSecondary }]}>结余</ThemedText>
-                <ThemedText style={[styles.summaryAmount, { color: palette.textPrimary }]}>
-                  {formatAmount(balance, signForNet(balance))}
-                </ThemedText>
-              </View>
-            </View>
+            {/* 数据卡片：按记账设置的显隐 / 排序渲染（renderCard 分发） */}
+            {layout.visible.map((id) => (
+              <Fragment key={id}>{renderCard(id)}</Fragment>
+            ))}
 
-            {/* 结余率仪表 */}
-            <BalanceGaugeCard rate={balRate} palette={palette} />
-
-            {/* 消费趋势 */}
-            <View style={[styles.card, { backgroundColor: palette.card }]}>
-              <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>消费趋势</ThemedText>
-              <TrendChart buckets={trend} palette={palette} />
-            </View>
-
-            {/* 累计同期对比 */}
-            <CumulativeCard series={cumulative} palette={palette} />
-
-            {/* 支出分类占比 */}
-            <View style={[styles.card, { backgroundColor: palette.card }]}>
-              <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>支出分类占比</ThemedText>
-              {byCat.length === 0 ? (
-                <View style={styles.emptyBox}>
-                  <SymbolView name="chart.pie" tintColor={palette.textTertiary} size={40} />
-                  <ThemedText style={{ color: palette.textSecondary }}>这个周期还没有支出记录</ThemedText>
-                </View>
-              ) : (
-                <>
-                  <View style={styles.donutWrap}>
-                    <Donut slices={byCat.map((c) => ({ value: c.amount, color: c.color }))} trackColor={palette.base}>
-                      <ThemedText style={[styles.donutCaption, { color: palette.textSecondary }]}>总支出</ThemedText>
-                      <ThemedText style={[styles.donutTotal, { color: palette.textPrimary }]}>
-                        {formatAmount(expenseTotal, '')}
-                      </ThemedText>
-                    </Donut>
-                  </View>
-                  <View style={styles.list}>
-                    {byCat.map((c, i) => {
-                      const pct = expenseTotal > 0 ? Math.round((c.amount / expenseTotal) * 100) : 0;
-                      return (
-                        <View key={c.id}>
-                          {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
-                          <Pressable style={styles.catRow} onPress={() => setDetail({ id: c.id, name: c.name })}>
-                            <View style={[styles.catDot, { backgroundColor: c.color }]}>
-                              <SymbolView name={c.symbol as SymbolViewProps['name']} tintColor="#FFFFFF" size={15} />
-                            </View>
-                            <ThemedText style={[styles.catName, { color: palette.textPrimary }]}>{c.name}</ThemedText>
-                            <ThemedText style={[styles.catPct, { color: palette.textSecondary }]}>{pct}%</ThemedText>
-                            <View style={styles.flex} />
-                            <ThemedText style={[styles.catAmount, { color: palette.textPrimary }]}>
-                              {formatAmount(c.amount, '')}
-                            </ThemedText>
-                            <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={12} />
-                          </Pressable>
-                        </View>
-                      );
-                    })}
-                  </View>
-                </>
-              )}
-            </View>
-
-            {/* 分类环比 */}
-            <CategoryMomCard items={momItems} palette={palette} />
-
-            {/* 成员贡献 */}
-            {members.length > 0 ? (
-              <View style={[styles.card, { backgroundColor: palette.card }]}>
-                <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>成员贡献</ThemedText>
-                <View style={styles.memberList}>
-                  {members.map((m) => (
-                    <View key={m.id} style={styles.memberRow}>
-                      <ThemedText style={[styles.memberName, { color: palette.textPrimary }]} numberOfLines={1}>
-                        {m.name}
-                      </ThemedText>
-                      <View style={styles.memberBarWrap}>
-                        <View style={[styles.memberBarTrack, { backgroundColor: palette.base }]}>
-                          <View
-                            style={[
-                              styles.memberBarFill,
-                              { backgroundColor: palette.accent, width: `${(m.amount / memberMax) * 100}%` },
-                            ]}
-                          />
-                        </View>
-                      </View>
-                      <ThemedText style={[styles.memberAmount, { color: palette.textSecondary }]}>
-                        {formatAmount(m.amount, '')}
-                      </ThemedText>
-                    </View>
-                  ))}
-                </View>
-              </View>
+            {/* 有隐藏卡时，底部「添加数据卡片」入口 → 卡片管理页 */}
+            {layout.hidden.length > 0 ? (
+              <Pressable
+                style={[styles.addCard, { borderColor: palette.separator }]}
+                onPress={() => router.push('/settings/report-cards' as Href)}
+              >
+                <SymbolView name="plus.circle" tintColor={palette.accent} size={18} />
+                <ThemedText style={[styles.addCardText, { color: palette.accent }]}>添加数据卡片</ThemedText>
+              </Pressable>
             ) : null}
-
-            {/* 大额支出 Top 5 */}
-            <TopExpensesCard items={topItems} palette={palette} />
-
-            {/* 收入结构 */}
-            <IncomeStructureCard slices={incomeSlices} palette={palette} />
           </Animated.ScrollView>
         )}
 
@@ -550,6 +589,17 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: Space[4], paddingBottom: TabBarInset, gap: Space[4] },
   card: { borderRadius: Radius.lg, padding: Space[4] },
+  addCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Space[2],
+    paddingVertical: Space[4],
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderStyle: 'dashed',
+  },
+  addCardText: { fontSize: 15, fontWeight: '600' },
   summary: { flexDirection: 'row', justifyContent: 'space-between' },
   summaryItem: { gap: Space[1] },
   summaryLabel: { fontSize: 13 },
