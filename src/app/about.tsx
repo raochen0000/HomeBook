@@ -3,16 +3,9 @@
  * Logo + 版本 + 检查更新；用户协议 / 隐私政策 = 内置页 + 底部 Sheet（右上角 X 关闭，复用 B2 · RN Modal）；
  * 给我们评分 / 分享给朋友 / 版权。评分依赖 expo-store-review（未安装）→ 暂以提示兜底。
  */
-import { HStack, Image, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
-import {
-  background,
-  cornerRadius,
-  font,
-  foregroundColor,
-  frame,
-  listRowBackground,
-  listRowSeparator,
-} from '@expo/ui/swift-ui/modifiers';
+import { HStack, RNHostView, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
+import { font, foregroundColor, listRowBackground, listRowSeparator } from '@expo/ui/swift-ui/modifiers';
+import { Image } from 'expo-image';
 import { Stack } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Share, View } from 'react-native';
@@ -42,12 +35,13 @@ export default function AboutScreen() {
           <HStack alignment="center">
             <Spacer />
             <VStack spacing={Space[2]}>
-              <Image
-                systemName="book.closed.fill"
-                size={38}
-                color={palette.accent}
-                modifiers={[frame({ width: 84, height: 84 }), background(palette.card), cornerRadius(18)]}
-              />
+              <RNHostView matchContents>
+                <Image
+                  source={require('@/assets/expo.icon/Assets/homebook-Icon-appstore-1024.png')}
+                  style={{ width: 84, height: 84, borderRadius: 18 }}
+                  contentFit="contain"
+                />
+              </RNHostView>
               <Text modifiers={[font({ size: 24, weight: 'bold' }), foregroundColor(palette.textPrimary)]}>家账</Text>
               <Text modifiers={[font({ size: 14 }), foregroundColor(palette.textSecondary)]}>{APP_VERSION}</Text>
             </VStack>
