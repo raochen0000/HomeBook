@@ -13,6 +13,7 @@
  * 设计取舍（2026-06-26 与用户确认）：纯品牌头无插画；协议默认勾选仅告知（不拦截登录）；
  * 协议页 / 忘记密码先占位（toast）；走设计令牌、适配 Light/Night。
  */
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -40,6 +41,8 @@ import {
   signInWithEmail,
   verifyPhoneOtp,
 } from '@/lib/auth';
+
+import { ForgotPasswordSheet } from './forgot-password-sheet';
 
 /** 协议链接蓝（一次性，沿用 iOS 系统蓝）。 */
 const LINK_BLUE = '#0A84FF';
@@ -88,6 +91,24 @@ function otpErrorText(err: unknown): string {
 }
 
 type Mode = 'phone' | 'email';
+type RememberedLogin = { rememberMe: boolean; mode?: Mode; phone?: string; email?: string };
+
+const REMEMBER_LOGIN_KEY = '@homebook/auth/remember-login-v1';
+
+function parseRememberedLogin(raw: string | null): RememberedLogin | null {
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw) as Partial<RememberedLogin>;
+    return {
+      rememberMe: data.rememberMe !== false,
+      mode: data.mode === 'phone' || data.mode === 'email' ? data.mode : undefined,
+      phone: typeof data.phone === 'string' ? data.phone : undefined,
+      email: typeof data.email === 'string' ? data.email : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export function LoginScreen() {
   const palette = usePalette();
@@ -96,12 +117,55 @@ export function LoginScreen() {
   const [toast, setToast] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(true);
   const [rememberMe, setRememberMe] = useState(true);
+  const [phoneInput, setPhoneInput] = useState('');
+  const [emailInput, setEmailInput] = useState('');
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [appleSheetOpen, setAppleSheetOpen] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   useEffect(() => {
     isAppleAuthAvailable().then(setAppleAvailable);
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(REMEMBER_LOGIN_KEY).then((raw) => {
+      if (!alive) return;
+      const remembered = parseRememberedLogin(raw);
+      if (!remembered) return;
+      setRememberMe(remembered.rememberMe);
+      if (!remembered.rememberMe) return;
+      if (remembered.phone) setPhoneInput(remembered.phone);
+      if (remembered.email) setEmailInput(remembered.email);
+      if (remembered.mode === 'email' || (remembered.mode === 'phone' && PHONE_OTP_ENABLED)) {
+        setMode(remembered.mode);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const persistRememberChoice = useCallback(
+    async (nextRememberMe: boolean, payload?: Omit<RememberedLogin, 'rememberMe'>) => {
+      const next: RememberedLogin = { rememberMe: nextRememberMe };
+      if (nextRememberMe && payload?.mode) {
+        next.mode = payload.mode;
+        if (payload.mode === 'phone' && payload.phone) next.phone = payload.phone.replace(/\D/g, '').slice(0, 11);
+        if (payload.mode === 'email' && payload.email) next.email = payload.email.trim().toLowerCase();
+      }
+      await AsyncStorage.setItem(REMEMBER_LOGIN_KEY, JSON.stringify(next)).catch(() => {});
+    },
+    [],
+  );
+
+  const handleRememberChange = useCallback(
+    (next: boolean) => {
+      setRememberMe(next);
+      void persistRememberChoice(next);
+    },
+    [persistRememberChoice],
+  );
 
   const handleApple = async () => {
     setBusy(true);
@@ -152,18 +216,25 @@ export function LoginScreen() {
                     palette={palette}
                     busy={busy}
                     rememberMe={rememberMe}
-                    setRememberMe={setRememberMe}
+                    setRememberMe={handleRememberChange}
+                    phone={phoneInput}
+                    setPhone={setPhoneInput}
                     setBusy={setBusy}
                     onToast={setToast}
+                    onRememberLogin={(payload) => void persistRememberChoice(rememberMe, payload)}
                   />
                 ) : (
                   <EmailForm
                     palette={palette}
                     busy={busy}
                     rememberMe={rememberMe}
-                    setRememberMe={setRememberMe}
+                    setRememberMe={handleRememberChange}
+                    email={emailInput}
+                    setEmail={setEmailInput}
                     setBusy={setBusy}
                     onToast={setToast}
+                    onRememberLogin={(payload) => void persistRememberChoice(rememberMe, payload)}
+                    onForgot={() => setForgotOpen(true)}
                   />
                 )}
               </View>
@@ -239,6 +310,7 @@ export function LoginScreen() {
           setAppleSheetOpen(false);
         }}
       />
+      <ForgotPasswordSheet visible={forgotOpen} initialEmail={emailInput} onClose={() => setForgotOpen(false)} />
       <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
@@ -251,11 +323,21 @@ type FormProps = {
   setRememberMe: (b: boolean) => void;
   setBusy: (b: boolean) => void;
   onToast: (t: string) => void;
+  onRememberLogin: (payload: Omit<RememberedLogin, 'rememberMe'>) => void;
 };
 
 // ── 手机号 OTP 表单 ───────────────────────────────────────────────────────────
-function PhoneForm({ palette, busy, rememberMe, setRememberMe, setBusy, onToast }: FormProps) {
-  const [phone, setPhone] = useState('');
+function PhoneForm({
+  palette,
+  busy,
+  rememberMe,
+  setRememberMe,
+  setBusy,
+  onToast,
+  onRememberLogin,
+  phone,
+  setPhone,
+}: FormProps & { phone: string; setPhone: (value: string) => void }) {
   const [code, setCode] = useState('');
   const [cooldown, setCooldown] = useState(0);
 
@@ -292,6 +374,7 @@ function PhoneForm({ palette, busy, rememberMe, setRememberMe, setBusy, onToast 
     setBusy(true);
     try {
       await verifyPhoneOtp(phone, code);
+      onRememberLogin({ mode: 'phone', phone });
       // 成功后 session 变化会卸载本页。
     } catch (err) {
       onToast(otpErrorText(err));
@@ -311,7 +394,7 @@ function PhoneForm({ palette, busy, rememberMe, setRememberMe, setBusy, onToast 
           placeholder="请输入手机号"
           placeholderTextColor={palette.textTertiary}
           value={phone}
-          onChangeText={setPhone}
+          onChangeText={(t) => setPhone(t.replace(/\D/g, '').slice(0, 11))}
           keyboardType="number-pad"
           maxLength={11}
           editable={!busy}
@@ -352,8 +435,18 @@ function PhoneForm({ palette, busy, rememberMe, setRememberMe, setBusy, onToast 
 }
 
 // ── 邮箱密码表单 ──────────────────────────────────────────────────────────────
-function EmailForm({ palette, busy, rememberMe, setRememberMe, setBusy, onToast }: FormProps) {
-  const [email, setEmail] = useState('');
+function EmailForm({
+  palette,
+  busy,
+  rememberMe,
+  setRememberMe,
+  setBusy,
+  onToast,
+  onRememberLogin,
+  email,
+  setEmail,
+  onForgot,
+}: FormProps & { email: string; setEmail: (value: string) => void; onForgot: () => void }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -368,6 +461,7 @@ function EmailForm({ palette, busy, rememberMe, setRememberMe, setBusy, onToast 
     setBusy(true);
     try {
       await signInWithEmail(email, password);
+      onRememberLogin({ mode: 'email', email });
       // 成功后 session 变化会卸载本页。
     } catch (err) {
       onToast((err as Error).message ?? String(err));
@@ -424,12 +518,7 @@ function EmailForm({ palette, busy, rememberMe, setRememberMe, setBusy, onToast 
         </Pressable>
       </View>
 
-      <LoginOptionsRow
-        palette={palette}
-        rememberMe={rememberMe}
-        setRememberMe={setRememberMe}
-        onForgot={() => onToast('找回密码 · 敬请期待')}
-      />
+      <LoginOptionsRow palette={palette} rememberMe={rememberMe} setRememberMe={setRememberMe} onForgot={onForgot} />
 
       <PrimaryButton busy={busy} enabled={canLogin} label="登录" onPress={onLogin} />
 

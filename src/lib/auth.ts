@@ -13,6 +13,7 @@ import { Platform } from 'react-native';
 
 import { unregisterCurrentDevice } from '@/api/device-tokens';
 
+import { normalizeDefaultNickname } from './profile';
 import { supabase } from './supabase';
 
 /** 订阅当前会话；loading 用于首帧避免登录页闪现。 */
@@ -45,13 +46,13 @@ export async function signInWithEmail(email: string, password: string): Promise<
   const signUp = await supabase.auth.signUp({
     email: trimmed,
     password,
-    options: { data: { nickname: trimmed.split('@')[0] } },
+    options: { data: { nickname: normalizeDefaultNickname(trimmed.split('@')[0]) } },
   });
   if (signUp.error) {
     // 邮箱已注册 → 说明账号存在、是密码不对；其它则是注册校验失败（如邮箱格式被拒）
     const code = (signUp.error as { code?: string }).code;
     if (code === 'user_already_exists') {
-      throw new Error('该邮箱已注册，但密码不正确');
+      throw new Error('密码错误');
     }
     throw new Error(signUp.error.message || '注册失败，请重试');
   }
@@ -59,6 +60,29 @@ export async function signInWithEmail(email: string, password: string): Promise<
   if (!signUp.data.session) {
     throw new Error('注册成功，请前往邮箱确认后再登录');
   }
+}
+
+/**
+ * 忘记密码 · 发送找回验证码。resetPasswordForEmail 触发 recovery 动作；自托管无 SMTP 出口，
+ * 邮件经 Send Email Hook → 阿里云 FC → 邮件推送下发 6 位 OTP（见 services/email-hook-fc/）。
+ * 出于防枚举，账号不存在时服务端同样返回成功（用户只是收不到码），故不据此判断账号是否存在。
+ */
+export async function sendPasswordResetOtp(email: string): Promise<void> {
+  const normalized = normalizeEmail(email);
+  if (!normalized) throw new Error('请输入有效的邮箱地址');
+  const { error } = await supabase.auth.resetPasswordForEmail(normalized);
+  if (error) throw error;
+}
+
+/**
+ * 忘记密码 · 校验找回验证码。verifyOtp(type=recovery) 通过后 GoTrue 即签发 session，
+ * 随后调 updatePassword 设新密码（当前 session 即授权）。成功后用户直接进入登录态。
+ */
+export async function verifyPasswordResetOtp(email: string, token: string): Promise<void> {
+  const normalized = normalizeEmail(email);
+  if (!normalized) throw new Error('请输入有效的邮箱地址');
+  const { error } = await supabase.auth.verifyOtp({ email: normalized, token, type: 'recovery' });
+  if (error) throw error;
 }
 
 // ── 手机号 OTP（主登录方式，仅 +86 大陆）──────────────────────────────────────
@@ -173,7 +197,11 @@ export async function signInWithApple(): Promise<void> {
   // Apple 仅首次登录返回姓名；有则回填本人昵称，且仅当仍是默认 '用户'（不覆盖已改过的）。
   const name = [credential.fullName?.familyName, credential.fullName?.givenName].filter(Boolean).join('');
   if (name && data.user) {
-    await supabase.from('profiles').update({ nickname: name }).eq('id', data.user.id).eq('nickname', '用户');
+    await supabase
+      .from('profiles')
+      .update({ nickname: normalizeDefaultNickname(name) })
+      .eq('id', data.user.id)
+      .eq('nickname', '用户');
   }
 }
 
