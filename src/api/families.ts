@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { pickAndUploadAvatar, pickAndUploadFamilyCover } from '@/adapters/storage';
 import type { Tables } from '@/lib/database.types';
+import { validateNickname } from '@/lib/profile';
 import { supabase } from '@/lib/supabase';
 
 import { queryKeys } from './keys';
@@ -296,7 +297,10 @@ export async function updateMyNickname(nickname: string): Promise<void> {
   const { data: sessionData } = await supabase.auth.getSession();
   const uid = sessionData.session?.user.id;
   if (!uid) throw new Error('未登录');
-  const { error } = await supabase.from('profiles').update({ nickname }).eq('id', uid);
+  const next = nickname.trim();
+  const invalid = validateNickname(next);
+  if (invalid) throw new Error(invalid);
+  const { error } = await supabase.from('profiles').update({ nickname: next }).eq('id', uid);
   if (error) throw error;
 }
 

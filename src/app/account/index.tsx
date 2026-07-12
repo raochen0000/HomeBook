@@ -29,6 +29,7 @@ import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { Row, SettingsList } from '@/features/settings/native-list';
 import { deleteAccount, useSession } from '@/lib/auth';
+import { NICKNAME_MAX_LENGTH, NICKNAME_MIN_LENGTH, validateNickname } from '@/lib/profile';
 
 /** +86 手机号脱敏为 138****5678。 */
 function maskPhone(e164?: string | null): string {
@@ -74,10 +75,15 @@ export default function AccountScreen() {
   const onEditNickname = () => {
     Alert.prompt(
       '修改昵称',
-      undefined,
+      `请输入 ${NICKNAME_MIN_LENGTH}-${NICKNAME_MAX_LENGTH} 个字符`,
       (text) => {
         const v = text?.trim();
         if (!v || v === profile?.nickname) return;
+        const invalid = validateNickname(v);
+        if (invalid) {
+          Alert.alert('昵称不符合要求', invalid);
+          return;
+        }
         updateNickname.mutate(v, { onError: (e) => Alert.alert('保存失败', (e as Error).message ?? String(e)) });
       },
       'plain-text',

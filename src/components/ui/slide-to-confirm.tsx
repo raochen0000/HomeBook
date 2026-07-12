@@ -80,7 +80,7 @@ export function SlideToConfirm({
         pointerEvents="none"
         style={[styles.fill, { backgroundColor: thumbColor, width: Animated.add(fill, THUMB) }]}
       />
-      <Text style={[styles.label, { color: palette.textSecondary }]} numberOfLines={1}>
+      <Text style={[styles.label, { color: danger ? palette.danger : palette.textSecondary }]} numberOfLines={1}>
         {label}
       </Text>
       <Animated.View

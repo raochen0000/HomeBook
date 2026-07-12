@@ -44,12 +44,12 @@ function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: nu
 
 // ── 结余率仪表 ────────────────────────────────────────────────────────────────
 export function BalanceGaugeCard({ rate, palette }: { rate: number | null; palette: Palette }) {
-  const W = 200;
-  const H = 118;
+  const W = 280;
+  const H = 160;
   const cx = W / 2;
-  const cy = 104;
-  const r = 80;
-  const sw = 14;
+  const cy = 140;
+  const r = 108;
+  const sw = 18;
   const over = rate != null && rate < 0;
   const frac = rate == null ? 0 : Math.max(0, Math.min(1, rate));
   const pct = rate == null ? '—' : `${Math.round(Math.abs(rate) * 100)}%`;
@@ -59,7 +59,7 @@ export function BalanceGaugeCard({ rate, palette }: { rate: number | null; palet
     <View style={[styles.card, { backgroundColor: palette.card }]}>
       <ThemedText style={[styles.title, { color: palette.textPrimary }]}>结余率</ThemedText>
       <View style={styles.gaugeWrap}>
-        <Svg width={W} height={H}>
+        <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
           <Path
             d={arcPath(cx, cy, r, 180, 0)}
             stroke={palette.base}
@@ -82,7 +82,12 @@ export function BalanceGaugeCard({ rate, palette }: { rate: number | null; palet
             <ThemedText style={[styles.gaugeHint, { color: palette.textTertiary }]}>暂无收入</ThemedText>
           ) : (
             <>
-              <ThemedText style={[styles.gaugePct, { color: over ? palette.danger : palette.textPrimary }]}>
+              <ThemedText
+                style={[styles.gaugePct, { color: over ? palette.danger : palette.textPrimary }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+              >
                 {over ? `超支 ${pct}` : pct}
               </ThemedText>
               <ThemedText style={[styles.gaugeSub, { color: palette.textSecondary }]}>结余 ÷ 收入</ThemedText>
@@ -350,10 +355,17 @@ const styles = StyleSheet.create({
   itemAmount: { fontSize: 16, fontWeight: '600', fontVariant: ['tabular-nums'] },
   pct: { fontSize: 13, fontVariant: ['tabular-nums'], marginLeft: Space[2] },
   // 仪表
-  gaugeWrap: { alignItems: 'center', justifyContent: 'center' },
-  gaugeCenter: { position: 'absolute', left: 0, right: 0, top: 52, alignItems: 'center' },
-  gaugePct: { fontSize: 28, fontWeight: '700', lineHeight: 34, fontVariant: ['tabular-nums'] },
-  gaugeSub: { fontSize: 12, marginTop: 2 },
+  gaugeWrap: { alignItems: 'center', justifyContent: 'center', minHeight: 160 },
+  gaugeCenter: { position: 'absolute', left: Space[2], right: Space[2], top: 74, alignItems: 'center' },
+  gaugePct: {
+    alignSelf: 'stretch',
+    textAlign: 'center',
+    fontSize: 34,
+    fontWeight: '700',
+    lineHeight: 40,
+    fontVariant: ['tabular-nums'],
+  },
+  gaugeSub: { fontSize: 14, marginTop: 2 },
   gaugeHint: { fontSize: 17, fontWeight: '600' },
   // 累计同期
   legendRow: { flexDirection: 'row', alignItems: 'center', marginBottom: Space[3] },
