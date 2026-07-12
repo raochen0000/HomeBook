@@ -24,7 +24,7 @@ import { useSession } from '@/lib/auth';
 import { getNotifications } from './expo-notifications-safe';
 
 /** 层级二灰度开关：APNs（付费 Apple Developer + Push 能力 + aps-environment）就绪后置 true。 */
-export const PUSH_DELIVERY_ENABLED = false;
+export const PUSH_DELIVERY_ENABLED = true;
 
 /** 取本设备推送令牌（有 EAS projectId 走 Expo 推送服务，否则回落直连 APNs）。失败/不可用回 null。 */
 async function fetchPushToken(): Promise<{ token: string; provider: TokenProvider } | null> {

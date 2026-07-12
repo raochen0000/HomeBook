@@ -431,6 +431,7 @@ export type Database = {
           channel: string;
           payload: Json | null;
           read_at: string | null;
+          pushed_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -441,6 +442,7 @@ export type Database = {
           channel: string;
           payload?: Json | null;
           read_at?: string | null;
+          pushed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -451,6 +453,7 @@ export type Database = {
           channel?: string;
           payload?: Json | null;
           read_at?: string | null;
+          pushed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

@@ -237,6 +237,7 @@ erDiagram
 | `channel` | enum      |         | `in_app` / `push`                                                                            |
 | `payload` | json      | null    | 事件附加数据                                                                                 |
 | `read_at` | timestamp | null    | 已读时间                                                                                     |
+| `pushed_at` | timestamp | null  | 系统推送已投递时间（`push-fc` 定时轮询标记；`in_app` 行推送后落定，避免重复推。迁移 0028）    |
 
 ### 5.4 MONTHLY_SUMMARY（月度总结，快照存储）
 

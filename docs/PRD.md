@@ -1661,7 +1661,8 @@ flowchart TD
 - 顶部权限态（**层级一 · 已实现**）：读真实系统授权态（`expo-notifications` 权限 API `getPermissionsAsync`）——未授权且可弹框 → 点按弹系统授权框（`requestPermissionsAsync`，首次请求后系统才为本 App 建「通知」设置行）；已拒（不可再弹）→ 点按跳系统设置（`Linking.openSettings`）；已授权 → 显示「已开启」。
 - 远程推送投递（**层级二**）：
   - **落库链路已建（不依赖 Apple 账号）**：`device_tokens` 表（DATAMODEL §5.7）+ `register_device_token` / `unregister_device_token` RPC；客户端登录注册、登出注销的骨架已就位，由 `PUSH_DELIVERY_ENABLED` 开关灰度（默认关）。
-  - **待付费 Apple Developer 后接入**：Push 能力 + `expo-notifications` 配置插件（`aps-environment` 入口）；真机取 `getExpoPushTokenAsync` / `getDevicePushTokenAsync` → 经 RPC 存 `device_tokens`；服务端读 `notification_preferences` 决定该类是否推送后经 Expo Push / APNs 发出。开关翻开即通。
+  - **令牌链路（已通）**：真机取 `getExpoPushTokenAsync` → 经 RPC 存 `device_tokens`（`PUSH_DELIVERY_ENABLED=true`）。
+  - **服务端投递（已建，阿里云 FC 定时轮询）**：自建实例出网受限（SMTP 被墙、无 `pg_net`），故不走 DB 触发，改由 `services/push-fc/`（FC 定时器每 ~1min）以 `service_role` 拉取 `channel='in_app'` 且 `pushed_at is null` 的通知 → 按 `notification_preferences`（type→分类映射）决定是否推 → 查 `device_tokens` → 发 **Expo Push API** → 标记 `pushed_at`（迁移 0028）。失效令牌（`DeviceNotRegistered`）顺带清理。App 内通知中心（流程 13）始终可见，push 仅为唤回副本。
 - 分类开关：家庭动态、预算超支预警、储蓄目标进展、月度总结提醒、成员 / 邀请变动、账号安全。
 - **持久化（服务端）**：六类开关落 `notification_preferences` 表（**每用户一行、六列布尔**，见 DATAMODEL §5.6），RLS 仅本人可读写；客户端直读 + `upsert`（`onConflict = user_id`）。行不存在（老用户 / 从未改过）→ 回落**全开**默认。跨设备一致，不再仅存本机。
 - 语义：本表只落用户「愿不愿收该类系统推送」的意愿；关掉某类**仅停系统推送**，App 内通知中心（流程 13）该类消息**始终可见**。推送落地后由投递侧读取本表决定是否推送对应分类。
