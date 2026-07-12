@@ -13,6 +13,7 @@ export type ReportCardId =
   | 'balance_rate'
   | 'trend'
   | 'cumulative'
+  | 'income_expense'
   | 'expense_category'
   | 'category_mom'
   | 'member'
@@ -34,6 +35,7 @@ export const REPORT_CARDS: ReportCardMeta[] = [
   { id: 'balance_rate', title: '结余率', icon: 'gauge.medium' },
   { id: 'trend', title: '消费趋势', icon: 'chart.xyaxis.line' },
   { id: 'cumulative', title: '累计同期对比', icon: 'chart.line.uptrend.xyaxis' },
+  { id: 'income_expense', title: '收支对比', icon: 'chart.bar.xaxis' },
   { id: 'expense_category', title: '支出分类占比', icon: 'chart.pie.fill' },
   { id: 'category_mom', title: '分类环比', icon: 'arrow.up.arrow.down' },
   { id: 'member', title: '成员贡献', icon: 'person.2.fill' },

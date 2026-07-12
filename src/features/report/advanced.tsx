@@ -1,18 +1,19 @@
 /**
- * P1 高级报表卡（PRD §11.5.1）：结余率仪表 / 累计同期对比 / 分类环比 / 大额支出 Top 5 / 收入结构。
+ * P1 高级报表卡（PRD §11.5.1）：结余率仪表 / 累计同期对比 / 收支对比双柱 / 分类环比
+ * / 大额支出 Top 5 / 收入结构。
  * 全部沿用已安装的 react-native-svg 自绘（与 donut.tsx / 趋势折线一致），不引入 Skia/Victory。
- * 口径：结余率 = 结余÷收入（对账，含储蓄）；累计同期/分类环比为日常消费（排除储蓄类）；
+ * 口径：结余率 = 结余÷收入、收支对比（对账，含储蓄）；累计同期/分类环比为日常消费（排除储蓄类）；
  * 收入结构仅算 source=normal 收入（排除储蓄取出）。
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Path, Polyline } from 'react-native-svg';
+import Svg, { Circle, Defs, G, Line, Path, Pattern, Polyline, Rect } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { Donut } from '@/features/report/donut';
-import { formatAmount, maskAmount } from '@/lib/format';
-import type { CumulativeSeries } from '@/lib/report';
+import { formatAmount, maskAmount, signForNet } from '@/lib/format';
+import type { CumulativeSeries, PeriodFlow } from '@/lib/report';
 
 type Palette = ReturnType<typeof usePalette>;
 type Sym = SymbolViewProps['name'];
@@ -208,6 +209,168 @@ function LegendDot({
     <View style={styles.legendItem}>
       <View style={[styles.legendLine, { backgroundColor: color, opacity: dashed ? 0.7 : 1 }]} />
       <Text style={[styles.legendText, { color: palette.textSecondary }]}>{label}</Text>
+    </View>
+  );
+}
+
+// ── 收支趋势（近 6 期分组双柱 + 结余折线）───────────────────────────────────────
+export function IncomeExpenseCard({
+  series,
+  palette,
+  hidden,
+  currentPeriod,
+}: {
+  series: PeriodFlow[];
+  palette: Palette;
+  hidden?: boolean;
+  /** 当前期进行中时，末位柱形使用斜纹，并补充口径说明。 */
+  currentPeriod?: boolean;
+}) {
+  const W = 320;
+  const H = 150;
+  const padY = 14;
+  const n = series.length;
+  const max = Math.max(1, ...series.flatMap((s) => [s.income, s.expense]));
+  const hasData = series.some((s) => s.income > 0 || s.expense > 0);
+  const groupW = W / n;
+  const barW = Math.min(13, groupW / 3.2);
+  const gap = 4;
+  const chartBottom = H - 16;
+  // 有值的柱至少 2px，避免小额完全不可见。
+  const hOf = (v: number) => (v > 0 ? Math.max(2, ((chartBottom - padY) * v) / max) : 0);
+
+  const cur = series[n - 1];
+  const balance = cur.income - cur.expense;
+  const balances = series.map((s) => s.income - s.expense);
+  const minBalance = Math.min(0, ...balances);
+  const maxBalance = Math.max(0, ...balances);
+  const balanceSpan = Math.max(1, maxBalance - minBalance);
+  const balanceY = (value: number) => padY + ((maxBalance - value) / balanceSpan) * (chartBottom - padY);
+  const balancePoints = balances.map((value, i) => `${groupW * i + groupW / 2},${balanceY(value)}`).join(' ');
+
+  return (
+    <View style={[styles.card, { backgroundColor: palette.card }]}>
+      <View style={styles.legendRow}>
+        <ThemedText style={[styles.title, { color: palette.textPrimary }]}>收支趋势</ThemedText>
+        <View style={styles.flex} />
+        <LegendDot color={palette.income} label="收入" palette={palette} />
+        <LegendDot color={palette.expense} label="支出" palette={palette} />
+        <LegendDot color={palette.warning} label="结余" palette={palette} />
+      </View>
+      {!hasData ? (
+        <View style={styles.empty}>
+          <SymbolView name="chart.bar.xaxis" tintColor={palette.textTertiary} size={36} />
+          <ThemedText style={{ color: palette.textSecondary }}>近 {n} 期还没有收支记录</ThemedText>
+        </View>
+      ) : (
+        <>
+          <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+            <Defs>
+              <Pattern id="current-month-stripe" width="8" height="8" patternUnits="userSpaceOnUse">
+                <Line x1="-2" y1="8" x2="8" y2="-2" stroke="#FFFFFF" strokeWidth="2" opacity="0.28" />
+                <Line x1="2" y1="12" x2="12" y2="2" stroke="#FFFFFF" strokeWidth="2" opacity="0.28" />
+              </Pattern>
+            </Defs>
+            <Line x1="0" y1={chartBottom} x2={W} y2={chartBottom} stroke={palette.separator} strokeWidth="1" />
+            {series.map((s, i) => {
+              const cx = groupW * i + groupW / 2;
+              const ih = hOf(s.income);
+              const eh = hOf(s.expense);
+              const isCurrent = currentPeriod && i === n - 1;
+              return (
+                <G key={i}>
+                  {isCurrent ? (
+                    <Rect
+                      x={groupW * i + 4}
+                      y={0}
+                      width={groupW - 8}
+                      height={chartBottom + 5}
+                      rx={10}
+                      fill={palette.info}
+                      opacity={0.18}
+                    />
+                  ) : null}
+                  {ih > 0 ? (
+                    <>
+                      <Rect
+                        x={cx - gap / 2 - barW}
+                        y={chartBottom - ih}
+                        width={barW}
+                        height={ih}
+                        rx={2.5}
+                        fill={palette.income}
+                      />
+                      {isCurrent ? (
+                        <Rect
+                          x={cx - gap / 2 - barW}
+                          y={chartBottom - ih}
+                          width={barW}
+                          height={ih}
+                          rx={2.5}
+                          fill="url(#current-month-stripe)"
+                        />
+                      ) : null}
+                    </>
+                  ) : null}
+                  {eh > 0 ? (
+                    <>
+                      <Rect
+                        x={cx + gap / 2}
+                        y={chartBottom - eh}
+                        width={barW}
+                        height={eh}
+                        rx={2.5}
+                        fill={palette.expense}
+                      />
+                      {isCurrent ? (
+                        <Rect
+                          x={cx + gap / 2}
+                          y={chartBottom - eh}
+                          width={barW}
+                          height={eh}
+                          rx={2.5}
+                          fill="url(#current-month-stripe)"
+                        />
+                      ) : null}
+                    </>
+                  ) : null}
+                </G>
+              );
+            })}
+            <Polyline
+              points={balancePoints}
+              fill="none"
+              stroke={palette.warning}
+              strokeWidth={2.5}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+            {balances.map((value, i) => (
+              <Circle key={i} cx={groupW * i + groupW / 2} cy={balanceY(value)} r={3} fill={palette.warning} />
+            ))}
+          </Svg>
+          <View style={styles.trendLabels}>
+            {series.map((s, i) => (
+              <Text
+                key={i}
+                style={[
+                  styles.trendLabel,
+                  { color: i === n - 1 && currentPeriod ? palette.info : palette.textTertiary },
+                ]}
+              >
+                {s.label}
+              </Text>
+            ))}
+          </View>
+          <ThemedText style={[styles.cumCaption, { color: palette.textSecondary }]}>
+            {currentPeriod ? '斜纹为当月，数据为月度累计（进行中）' : '本期结余'}
+            {!currentPeriod ? ' ' : null}
+            <Text style={{ color: balance < 0 ? palette.danger : palette.textPrimary, fontWeight: '600' }}>
+              {!currentPeriod ? maskAmount(formatAmount(balance, signForNet(balance)), !!hidden) : ''}
+            </Text>
+          </ThemedText>
+        </>
+      )}
     </View>
   );
 }

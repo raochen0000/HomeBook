@@ -162,3 +162,41 @@ export function balanceRate(income: number, balance: number): number | null {
   if (income <= 0) return null;
   return balance / income;
 }
+
+export type PeriodFlow = { label: string; income: number; expense: number };
+
+/** 收支对比 x 轴短标签：周=起始 M/D，月=M月，年=YYYY。 */
+function flowLabel(dim: Dimension, start: Date): string {
+  if (dim === 'week') return `${start.getMonth() + 1}/${start.getDate()}`;
+  if (dim === 'year') return `${start.getFullYear()}`;
+  return `${start.getMonth() + 1}月`;
+}
+
+/**
+ * 收支对比（PRD §11.5.1）：近 N 期各期收入 / 支出发生额，末位为锚点所在期。
+ * 对账口径：含储蓄类流水（source != normal），与概览 / 结余率一致，调用方传全量流水即可。
+ */
+export function incomeExpenseSeries(
+  dim: Dimension,
+  anchor: Date,
+  txns: { occurred_at: string; type: string; amount: number }[],
+  count = 6,
+): PeriodFlow[] {
+  // 先归一到周期起点再平移：月维度下从 29/30/31 号直接 setMonth 会溢出串月。
+  const base = periodRange(dim, anchor).start;
+  const periods = Array.from({ length: count }, (_, i) => {
+    const r = periodRange(dim, shiftAnchor(dim, base, i - (count - 1)));
+    return { start: r.start.getTime(), end: r.end.getTime(), label: flowLabel(dim, r.start), income: 0, expense: 0 };
+  });
+  const first = periods[0].start;
+  const last = periods[count - 1].end;
+  for (const t of txns) {
+    const time = new Date(t.occurred_at).getTime();
+    if (time < first || time >= last) continue;
+    const p = periods.find((x) => time >= x.start && time < x.end);
+    if (!p) continue;
+    if (t.type === 'income') p.income += t.amount;
+    else p.expense += t.amount;
+  }
+  return periods.map(({ label, income, expense }) => ({ label, income, expense }));
+}
