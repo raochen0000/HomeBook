@@ -1,4 +1,4 @@
-export const NICKNAME_MIN_LENGTH = 2;
+export const NICKNAME_MIN_LENGTH = 1;
 export const NICKNAME_MAX_LENGTH = 10;
 
 export function nicknameLength(value: string): number {
