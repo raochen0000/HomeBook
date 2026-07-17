@@ -1,4 +1,4 @@
-import { incomeExpenseSeries } from './report';
+import { equalPeriodIncomeExpenseSeries, incomeExpenseSeries } from './report';
 
 function expectEqual(actual: unknown, expected: unknown, msg: string) {
   const a = JSON.stringify(actual);
@@ -77,4 +77,30 @@ const iso = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).toISO
     '年维度标签',
   );
   expectEqual(s[0].income, 7, '年维度归桶');
+}
+
+// 自定义维度：按用户选择区间长度生成上一等长周期
+{
+  const s = equalPeriodIncomeExpenseSeries(
+    { start: new Date(2026, 6, 11), end: new Date(2026, 6, 16) }, // 7/11–7/15，5 天
+    [
+      { occurred_at: iso(2026, 7, 6), type: 'expense', amount: 10 }, // 前一等长周期
+      { occurred_at: iso(2026, 7, 11), type: 'income', amount: 20 }, // 当前自定义周期
+      { occurred_at: iso(2026, 7, 16), type: 'income', amount: 999 }, // 期末边界，丢弃
+    ],
+    2,
+  );
+  expectEqual(
+    s.map((x) => x.label),
+    ['7/6', '7/11'],
+    '自定义维度按等长周期生成标签',
+  );
+  expectEqual(
+    s.map((x) => ({ income: x.income, expense: x.expense })),
+    [
+      { income: 0, expense: 10 },
+      { income: 20, expense: 0 },
+    ],
+    '自定义维度按等长周期归桶',
+  );
 }

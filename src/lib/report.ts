@@ -5,12 +5,16 @@
  */
 import { monthLabel } from './format';
 
-export type Dimension = 'week' | 'month' | 'year';
+export type Dimension = 'week' | 'month' | 'year' | 'custom';
 
 function startOfDay(d: Date): Date {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
   return x;
+}
+
+function shortDateLabel(d: Date): string {
+  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 /** 维度 + 锚点 → [start, end) 区间与标题。 */
@@ -33,6 +37,14 @@ export function periodRange(dim: Dimension, anchor: Date): { start: Date; end: D
       label: `${anchor.getFullYear()}年`,
     };
   }
+  if (dim === 'custom') {
+    const endInclusive = startOfDay(anchor);
+    const start = new Date(endInclusive);
+    start.setDate(endInclusive.getDate() - 29);
+    const end = new Date(endInclusive);
+    end.setDate(endInclusive.getDate() + 1);
+    return { start, end, label: `${shortDateLabel(start)}–${shortDateLabel(endInclusive)}` };
+  }
   // JS Date 构造器会把月份溢出（12）自动进位到下一年 1 月。
   return {
     start: new Date(anchor.getFullYear(), anchor.getMonth(), 1),
@@ -45,6 +57,7 @@ export function periodRange(dim: Dimension, anchor: Date): { start: Date; end: D
 export function shiftAnchor(dim: Dimension, anchor: Date, delta: number): Date {
   const x = new Date(anchor);
   if (dim === 'week') x.setDate(x.getDate() + delta * 7);
+  else if (dim === 'custom') x.setDate(x.getDate() + delta * 30);
   else if (dim === 'year') x.setFullYear(x.getFullYear() + delta);
   else x.setMonth(x.getMonth() + delta);
   return x;
@@ -65,7 +78,7 @@ export type Bucket = { label: string; value: number };
 /** 趋势分桶（传入「已按区间过滤的日常支出」）：周=7 天，月=按天，年=12 月。 */
 export function trendBuckets(
   dim: Dimension,
-  range: { start: Date },
+  range: { start: Date; end?: Date },
   expenses: { occurred_at: string; amount: number }[],
 ): Bucket[] {
   let buckets: Bucket[];
@@ -74,6 +87,17 @@ export function trendBuckets(
   if (dim === 'week') {
     const names = ['一', '二', '三', '四', '五', '六', '日'];
     buckets = names.map((n) => ({ label: n, value: 0 }));
+    indexer = (d) => Math.floor((startOfDay(d).getTime() - range.start.getTime()) / 86400000);
+  } else if (dim === 'custom') {
+    const days = Math.max(
+      1,
+      Math.ceil(((range.end ?? periodRange('custom', range.start).end).getTime() - range.start.getTime()) / 86400000),
+    );
+    buckets = Array.from({ length: days }, (_, i) => {
+      const d = new Date(range.start);
+      d.setDate(range.start.getDate() + i);
+      return { label: shortDateLabel(d), value: 0 };
+    });
     indexer = (d) => Math.floor((startOfDay(d).getTime() - range.start.getTime()) / 86400000);
   } else if (dim === 'year') {
     buckets = Array.from({ length: 12 }, (_, i) => ({ label: `${i + 1}`, value: 0 }));
@@ -96,6 +120,8 @@ export function trendBuckets(
 /** 维度 + 区间起点 → bucket 索引函数（与 trendBuckets 内部口径一致）。 */
 function bucketIndexer(dim: Dimension, rangeStart: Date): (d: Date) => number {
   if (dim === 'week') return (d) => Math.floor((startOfDay(d).getTime() - startOfDay(rangeStart).getTime()) / 86400000);
+  if (dim === 'custom')
+    return (d) => Math.floor((startOfDay(d).getTime() - startOfDay(rangeStart).getTime()) / 86400000);
   if (dim === 'year') return (d) => d.getMonth();
   return (d) => d.getDate() - 1;
 }
@@ -167,7 +193,7 @@ export type PeriodFlow = { label: string; income: number; expense: number };
 
 /** 收支对比 x 轴短标签：周=起始 M/D，月=M月，年=YYYY。 */
 function flowLabel(dim: Dimension, start: Date): string {
-  if (dim === 'week') return `${start.getMonth() + 1}/${start.getDate()}`;
+  if (dim === 'week' || dim === 'custom') return `${start.getMonth() + 1}/${start.getDate()}`;
   if (dim === 'year') return `${start.getFullYear()}`;
   return `${start.getMonth() + 1}月`;
 }
@@ -187,6 +213,35 @@ export function incomeExpenseSeries(
   const periods = Array.from({ length: count }, (_, i) => {
     const r = periodRange(dim, shiftAnchor(dim, base, i - (count - 1)));
     return { start: r.start.getTime(), end: r.end.getTime(), label: flowLabel(dim, r.start), income: 0, expense: 0 };
+  });
+  const first = periods[0].start;
+  const last = periods[count - 1].end;
+  for (const t of txns) {
+    const time = new Date(t.occurred_at).getTime();
+    if (time < first || time >= last) continue;
+    const p = periods.find((x) => time >= x.start && time < x.end);
+    if (!p) continue;
+    if (t.type === 'income') p.income += t.amount;
+    else p.expense += t.amount;
+  }
+  return periods.map(({ label, income, expense }) => ({ label, income, expense }));
+}
+
+/**
+ * 自定义周期的近 N 期收支：每期长度与用户选择区间一致，末位为当前自定义区间。
+ * 用于自定义报表的“上一等长周期”口径，避免用自然周/月/年误分桶。
+ */
+export function equalPeriodIncomeExpenseSeries(
+  range: { start: Date; end: Date },
+  txns: { occurred_at: string; type: string; amount: number }[],
+  count = 6,
+): PeriodFlow[] {
+  const lengthMs = Math.max(86400000, range.end.getTime() - range.start.getTime());
+  const periods = Array.from({ length: count }, (_, i) => {
+    const offset = count - 1 - i;
+    const start = new Date(range.start.getTime() - offset * lengthMs);
+    const end = new Date(start.getTime() + lengthMs);
+    return { start: start.getTime(), end: end.getTime(), label: flowLabel('custom', start), income: 0, expense: 0 };
   });
   const first = periods[0].start;
   const last = periods[count - 1].end;
