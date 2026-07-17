@@ -10,8 +10,12 @@
  * 「获取验证码」带 60s 倒计时。以全屏覆盖层渲染于 Tab 之上（无 session 时显示），
  * 登录成功后随 session 变化自动卸载（见 _layout.tsx）。
  *
- * 设计取舍（2026-06-26 与用户确认）：纯品牌头无插画；协议默认勾选仅告知（不拦截登录）；
- * 协议页 / 忘记密码先占位（toast）；走设计令牌、适配 Light/Night。
+ * 设计取舍（2026-06-26 与用户确认）：纯品牌头无插画；协议页 / 忘记密码先占位（toast）；
+ * 走设计令牌、适配 Light/Night。
+ *
+ * 协议勾选（2026-07-17 改）：默认不勾选，且是硬闸门——未勾选时全部登录入口（手机验证码 /
+ * 邮箱 / Apple / 获取验证码）均被 ensureAgreed 拦下并 toast 提示。原为默认勾选且仅告知，
+ * 不符合《个人信息保护法》明示同意与工信部对「默认勾选隐私政策」的认定。
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
@@ -115,7 +119,7 @@ export function LoginScreen() {
   const [mode, setMode] = useState<Mode>(PHONE_OTP_ENABLED ? 'phone' : 'email');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [agreed, setAgreed] = useState(true);
+  const [agreed, setAgreed] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [phoneInput, setPhoneInput] = useState('');
   const [emailInput, setEmailInput] = useState('');
@@ -166,6 +170,13 @@ export function LoginScreen() {
     },
     [persistRememberChoice],
   );
+
+  // 协议闸门：未勾选时拦截所有登录入口并提示。返回 false 表示调用方应中止。
+  const ensureAgreed = useCallback(() => {
+    if (agreed) return true;
+    setToast('请先阅读并同意《用户协议》与《隐私政策》');
+    return false;
+  }, [agreed]);
 
   const handleApple = async () => {
     setBusy(true);
@@ -221,6 +232,7 @@ export function LoginScreen() {
                     setPhone={setPhoneInput}
                     setBusy={setBusy}
                     onToast={setToast}
+                    ensureAgreed={ensureAgreed}
                     onRememberLogin={(payload) => void persistRememberChoice(rememberMe, payload)}
                   />
                 ) : (
@@ -233,6 +245,7 @@ export function LoginScreen() {
                     setEmail={setEmailInput}
                     setBusy={setBusy}
                     onToast={setToast}
+                    ensureAgreed={ensureAgreed}
                     onRememberLogin={(payload) => void persistRememberChoice(rememberMe, payload)}
                     onForgot={() => setForgotOpen(true)}
                   />
@@ -273,12 +286,15 @@ export function LoginScreen() {
                     icon="apple.logo"
                     label="通过 Apple 登录"
                     disabled={busy}
-                    onPress={() => setAppleSheetOpen(true)}
+                    onPress={() => {
+                      if (!ensureAgreed()) return;
+                      setAppleSheetOpen(true);
+                    }}
                   />
                 ) : null}
               </View>
 
-              {/* 协议（默认勾选、仅告知，不拦截登录） */}
+              {/* 协议：未勾选时拦截全部登录入口（含获取验证码），点击时 toast 提示 */}
               <Pressable style={styles.agreeRow} hitSlop={6} onPress={() => setAgreed((v) => !v)}>
                 <SymbolView
                   name={agreed ? 'checkmark.circle.fill' : 'circle'}
@@ -323,6 +339,8 @@ type FormProps = {
   setRememberMe: (b: boolean) => void;
   setBusy: (b: boolean) => void;
   onToast: (t: string) => void;
+  /** 协议未勾选时返回 false（并已提示），调用方须中止。 */
+  ensureAgreed: () => boolean;
   onRememberLogin: (payload: Omit<RememberedLogin, 'rememberMe'>) => void;
 };
 
@@ -334,6 +352,7 @@ function PhoneForm({
   setRememberMe,
   setBusy,
   onToast,
+  ensureAgreed,
   onRememberLogin,
   phone,
   setPhone,
@@ -353,6 +372,7 @@ function PhoneForm({
   }, [cooldown]);
 
   const onSend = async () => {
+    if (!ensureAgreed()) return;
     if (!canSend) {
       if (!e164) onToast('请输入有效的中国大陆手机号');
       return;
@@ -370,6 +390,7 @@ function PhoneForm({
   };
 
   const onLogin = async () => {
+    if (!ensureAgreed()) return;
     if (!canLogin) return;
     setBusy(true);
     try {
@@ -440,6 +461,7 @@ function EmailForm({
   setRememberMe,
   setBusy,
   onToast,
+  ensureAgreed,
   onRememberLogin,
   email,
   setEmail,
@@ -452,6 +474,7 @@ function EmailForm({
   const canLogin = emailValid && password.length >= 6 && !busy;
 
   const onLogin = async () => {
+    if (!ensureAgreed()) return;
     if (!canLogin) {
       onToast(emailValid ? '密码至少 6 位' : '请输入有效邮箱');
       return;
