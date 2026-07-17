@@ -185,8 +185,6 @@ export default function PhoneScreen() {
               textContentType="oneTimeCode"
               maxLength={OTP_LEN}
               editable={!busy}
-              onSubmitEditing={onSubmit}
-              returnKeyType="done"
             />
             <View style={[styles.ccDivider, { backgroundColor: palette.separator }]} />
             <Pressable hitSlop={6} onPress={onSend} disabled={!canSend} accessibilityLabel="获取验证码">

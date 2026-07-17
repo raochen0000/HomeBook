@@ -411,8 +411,6 @@ function PhoneForm({
           keyboardType="number-pad"
           maxLength={OTP_LEN}
           editable={!busy}
-          onSubmitEditing={onLogin}
-          returnKeyType="go"
         />
         <View style={[styles.ccDivider, { backgroundColor: palette.separator }]} />
         <Pressable hitSlop={6} onPress={onSend} disabled={!canSend}>
