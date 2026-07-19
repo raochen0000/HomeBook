@@ -29,10 +29,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type FamilyPreview, type JoinImpact, usePreviewFamily, useJoinFamily } from '@/api';
-import { Radius, Space, usePalette } from '@/constants/design';
-
-/** 成员头像兜底底色（无头像时），按位轮转，与 family.tsx 一致。 */
-const AVATAR_TINTS = ['#5AA7F0', '#46C98A', '#F5A623', '#9B6DD6'] as const;
+import { Radius, Space, useAvatarTints, usePalette } from '@/constants/design';
 
 /** 邀请码异常态 → 人话提示（status=ok 不在此列）。 */
 const STATUS_MESSAGE: Record<Exclude<FamilyPreview['status'], 'ok'>, string> = {
@@ -241,6 +238,7 @@ function PreviewCard({
   onJoin: () => void;
 }) {
   const palette = usePalette();
+  const avatarTints = useAvatarTints();
   const family = preview.family!;
   const banner = impactBanner(preview.impact);
   const blocked = preview.impact === 'blocked_owner';
@@ -263,7 +261,7 @@ function PreviewCard({
         <Avatar
           url={family.owner.avatar_url}
           label={family.owner.nickname.slice(0, 1)}
-          tint={AVATAR_TINTS[0]}
+          tint={avatarTints[0]}
           size={28}
         />
         <Text style={[styles.ownerText, { color: palette.textSecondary }]}>户主 · {family.owner.nickname}</Text>
@@ -274,7 +272,7 @@ function PreviewCard({
         <View style={styles.stack}>
           {family.member_avatars.slice(0, 8).map((url, i) => (
             <View key={i} style={[styles.stackItem, { marginLeft: i === 0 ? 0 : -10, borderColor: palette.base }]}>
-              <Avatar url={url} label="" tint={AVATAR_TINTS[i % AVATAR_TINTS.length]} size={32} />
+              <Avatar url={url} label="" tint={avatarTints[i % avatarTints.length]} size={32} />
             </View>
           ))}
         </View>

@@ -13,10 +13,17 @@ export type TestAccount = {
   nickname: string;
 };
 
-/** 预置测试账号：A、B 两个，便于测试多用户 / 跨家庭隔离场景。 */
-export const TEST_ACCOUNTS: Record<'a' | 'b', TestAccount> = {
-  a: { email: 'dev.a@homebook.test', password: 'devtest123456', nickname: '开发测试A' },
-  b: { email: 'dev.b@homebook.test', password: 'devtest123456', nickname: '开发测试B' },
+/**
+ * 预置测试账号：同一个家庭「示例之家」里的 5 名成员（户主 a + 成员 b~e），
+ * 便于测试多用户 / 家庭协作场景。数据由 supabase/dev_seed.sql 灌入，密码统一 test123。
+ * 注：nickname 仅在账号不存在、走 signUp 兜底时使用；跑过种子后账号已存在，以库里为准。
+ */
+export const TEST_ACCOUNTS: Record<'a' | 'b' | 'c' | 'd' | 'e', TestAccount> = {
+  a: { email: 'dev.a@homebook.test', password: 'test123', nickname: '大伟' },
+  b: { email: 'dev.b@homebook.test', password: 'test123', nickname: '小美' },
+  c: { email: 'dev.c@homebook.test', password: 'test123', nickname: '阿强' },
+  d: { email: 'dev.d@homebook.test', password: 'test123', nickname: '婷婷' },
+  e: { email: 'dev.e@homebook.test', password: 'test123', nickname: '老王' },
 };
 
 /** 登录；账号不存在时自动注册（autoconfirm 已开，注册后直接拿到 session）。 */

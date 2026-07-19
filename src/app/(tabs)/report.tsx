@@ -9,9 +9,12 @@
  */
 import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { type Href, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Polyline, Rect } from 'react-native-svg';
@@ -28,6 +31,7 @@ import {
   type Category,
   type SavingsGoal,
   type Transaction,
+  type TxnRange,
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, TabBarInset, useCategoryColors, usePalette } from '@/constants/design';
@@ -58,10 +62,14 @@ import {
   shiftAnchor,
   type Dimension,
 } from '@/lib/report';
+import { resolveCardLayout, type ReportCardId } from '@/lib/report-cards';
 
 type CatSlice = { id: string; name: string; amount: number; color: string; symbol: string };
 type Member = { id: string; name: string; amount: number; count: number };
 type ReportScope = 'expense' | 'income' | 'balance';
+type ReportFilters = { memberIds: string[]; categoryIds: string[] };
+type IncomeTargets = { annual: number; custom: number; activeRatio: number };
+type FinancialInsight = { title: string; body: string; action: string; tone: 'ok' | 'warn' | 'danger' };
 
 const REPORT_SCOPES: { key: ReportScope; label: string }[] = [
   { key: 'expense', label: '支出' },
@@ -75,6 +83,50 @@ const DIMENSIONS: { key: Dimension; label: string }[] = [
   { key: 'year', label: '年' },
   { key: 'custom', label: '自定义' },
 ];
+
+const EMPTY_FILTERS: ReportFilters = { memberIds: [], categoryIds: [] };
+const DEFAULT_INCOME_TARGETS: IncomeTargets = { annual: 0, custom: 0, activeRatio: 70 };
+const INCOME_TARGETS_KEY = 'homebook:report-income-targets:v1';
+
+function arrayToggle(list: string[], id: string): string[] {
+  return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+}
+
+function filterTransactions(txns: Transaction[], filters: ReportFilters): Transaction[] {
+  return txns.filter((t) => {
+    if (filters.memberIds.length > 0 && !filters.memberIds.includes(t.recorder_user_id)) return false;
+    if (filters.categoryIds.length > 0 && !filters.categoryIds.includes(t.category_id)) return false;
+    return true;
+  });
+}
+
+function filterCountInRange(txns: Transaction[], filters: ReportFilters, range: { start: Date; end: Date }): number {
+  return filterTransactions(txns, filters).filter((t) => inRange(t.occurred_at, range.start, range.end)).length;
+}
+
+function activeFilterCount(filters: ReportFilters): number {
+  return filters.memberIds.length + filters.categoryIds.length;
+}
+
+function isPassiveIncomeName(name: string): boolean {
+  return /利息|理财|投资|股息|分红|租金|被动/.test(name);
+}
+
+function targetForDimension(targets: IncomeTargets, dimension: Dimension): number {
+  return dimension === 'year' ? targets.annual : targets.custom;
+}
+
+function projectionForRange(amount: number, range: { start: Date; end: Date }, isCurrent: boolean): number | null {
+  if (!isCurrent) return null;
+  const today = startOfLocalDay(new Date());
+  const elapsed = Math.max(1, Math.floor((today.getTime() - range.start.getTime()) / 86400000) + 1);
+  const total = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
+  return Math.round((amount / elapsed) * total);
+}
+
+function renderOrderedCards(nodes: Partial<Record<ReportCardId, ReactNode>>, order: ReportCardId[]): ReactNode[] {
+  return order.map((id) => (nodes[id] ? <View key={id}>{nodes[id]}</View> : null)).filter(Boolean);
+}
 
 function startOfLocalDay(date: Date): Date {
   const d = new Date(date);
@@ -106,6 +158,10 @@ function rangeLabel(start: Date, endInclusive: Date): string {
   return `${startText}–${endText}`;
 }
 
+function localDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 function customRange(startInput: Date, endInput: Date): { start: Date; end: Date; label: string } {
   const a = startOfLocalDay(startInput);
   const b = startOfLocalDay(endInput);
@@ -122,13 +178,13 @@ function previousEqualRange(start: Date, end: Date): { start: Date; end: Date; l
 }
 
 export default function ReportScreen() {
+  const router = useRouter();
   const palette = usePalette();
   const catColors = useCategoryColors();
   const insets = useSafeAreaInsets();
   // estimate 必须等于实测头高（paddingTop 8 + 标题 41 + paddingBottom 12），否则裁切框（overflow:hidden）
   // 偏小会在首帧切掉标题底部。
   const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 61);
-  const txnsQ = useTransactions();
   const catsQ = useCategories();
   const membersQ = useFamilyMembers();
   const profileQ = useMyProfile();
@@ -138,10 +194,15 @@ export default function ReportScreen() {
   // 卡片显隐 / 排序 + 金额隐私（记账设置，个人级偏好）；行不存在回落默认。
   const prefs = prefsQ.data ?? DEFAULT_ACCOUNTING_PREFS;
   const privacy = prefs.amount_privacy;
+  const cardLayout = resolveCardLayout(prefs.report_card_order, prefs.report_card_hidden);
 
   const [dimension, setDimension] = useState<Dimension>('month');
   const [scope, setScope] = useState<ReportScope>('expense');
   const [anchor, setAnchor] = useState(() => new Date());
+  const [filters, setFilters] = useState<ReportFilters>(EMPTY_FILTERS);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [incomeTargets, setIncomeTargets] = useState<IncomeTargets>(DEFAULT_INCOME_TARGETS);
+  const [incomeTargetOpen, setIncomeTargetOpen] = useState(false);
   const [customStart, setCustomStart] = useState(() => {
     const d = startOfLocalDay(new Date());
     d.setDate(d.getDate() - 29);
@@ -170,6 +231,44 @@ export default function ReportScreen() {
   const budgetPeriod = useMemo(() => currentPeriod(range.start), [range.start]);
   const budgetQ = useBudget(budgetPeriod);
 
+  // 流水拉取窗：覆盖「锚点期往前 6 期」——「收支对比」最多回看 6 期（incomeExpenseSeries /
+  // equalPeriodIncomeExpenseSeries 的默认 count），是所有卡片里最宽的回看跨度。半开区间 [from, to)
+  // 与前端 inRange 口径一致；切维度 / 翻期时窗口变化，useTransactions 会按 key 自动重取。
+  const fetchRange = useMemo<TxnRange>(() => {
+    const HISTORY_PERIODS = 6;
+    let from: Date;
+    if (dimension === 'custom') {
+      const length = Math.max(86400000, range.end.getTime() - range.start.getTime());
+      from = new Date(range.start.getTime() - (HISTORY_PERIODS - 1) * length);
+    } else {
+      from = periodRange(dimension, shiftAnchor(dimension, anchor, -(HISTORY_PERIODS - 1))).start;
+    }
+    return { from: from.toISOString(), to: range.end.toISOString() };
+  }, [dimension, anchor, range]);
+  const txnsQ = useTransactions(fetchRange);
+  const rawTxns = useMemo(() => txnsQ.data ?? [], [txnsQ.data]);
+  const filteredTxns = useMemo(() => filterTransactions(rawTxns, filters), [rawTxns, filters]);
+  const filteredCount = useMemo(() => filterCountInRange(rawTxns, filters, range), [rawTxns, filters, range]);
+  const activeFilters = activeFilterCount(filters);
+
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(INCOME_TARGETS_KEY)
+      .then((raw) => {
+        if (!raw || !alive) return;
+        setIncomeTargets({ ...DEFAULT_INCOME_TARGETS, ...JSON.parse(raw) });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const saveIncomeTargets = (next: IncomeTargets) => {
+    setIncomeTargets(next);
+    AsyncStorage.setItem(INCOME_TARGETS_KEY, JSON.stringify(next)).catch(() => {});
+  };
+
   const {
     income,
     expense,
@@ -182,8 +281,9 @@ export default function ReportScreen() {
     momItems,
     topItems,
     incomeSlices,
+    passiveIncome,
   } = useMemo(() => {
-    const txns = txnsQ.data ?? [];
+    const txns = filteredTxns;
     const cats = catsQ.data ?? [];
     const mem = membersQ.data ?? [];
     const catById = new Map(cats.map((c) => [c.id, c]));
@@ -208,6 +308,7 @@ export default function ReportScreen() {
     const incomeMap = new Map<string, IncomeSlice>();
     const prevCatMap = new Map<string, number>(); // 上期分类消费额（环比基数）
     const bigExpenses: TopItem[] = [];
+    let passiveInc = 0;
 
     for (const t of txns) {
       const inCur = inRange(t.occurred_at, range.start, range.end);
@@ -233,6 +334,7 @@ export default function ReportScreen() {
         const entry = incomeMap.get(t.category_id) ?? { id: t.category_id, ...d, amount: 0 };
         entry.amount += t.amount;
         incomeMap.set(t.category_id, entry);
+        if (isPassiveIncomeName(d.name)) passiveInc += t.amount;
       }
 
       // 分类占比 / 成员贡献 / 趋势 / 大额 Top N：仅支出 + 普通流水（排除储蓄类）
@@ -296,8 +398,9 @@ export default function ReportScreen() {
       momItems: mom,
       topItems: bigExpenses.sort((a, b) => b.amount - a.amount).slice(0, 5),
       incomeSlices: Array.from(incomeMap.values()).sort((a, b) => b.amount - a.amount),
+      passiveIncome: passiveInc,
     };
-  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, range, prevRange, dimension, catColors]);
+  }, [filteredTxns, catsQ.data, membersQ.data, profileQ.data, range, prevRange, dimension, catColors]);
 
   const loading = txnsQ.isLoading || catsQ.isLoading;
   const memberCountMax = Math.max(1, ...members.map((m) => m.count));
@@ -311,9 +414,15 @@ export default function ReportScreen() {
     dimension === 'month' ? Math.max(1, Math.round((range.end.getTime() - range.start.getTime()) / 86400000)) : 0;
   const projectedExpense =
     selectedMonthIsCurrent && monthElapsedDays ? Math.round((expenseTotal / monthElapsedDays) * monthTotalDays) : null;
+  const projectedIncome = projectionForRange(income, range, isCurrent);
+  const incomeTarget = targetForDimension(incomeTargets, dimension);
+  const activeIncome = Math.max(0, income - passiveIncome);
   const periodText =
     dimension === 'week' ? '本周' : dimension === 'year' ? '全年' : dimension === 'month' ? '本月' : '本期';
   const customToolbarEnd = dimension === 'custom' ? addDays(range.end, -1) : range.start;
+  const visibleCards = cardLayout.visible;
+  const hiddenCards = cardLayout.hidden;
+  const openCardSettings = () => router.push('/settings/report-cards' as Href);
   const shiftPeriod = (delta: number) => {
     if (dimension !== 'custom') {
       setAnchor((a) => shiftAnchor(dimension, a, delta));
@@ -331,6 +440,161 @@ export default function ReportScreen() {
       return next;
     });
   };
+
+  const commonInsightCard = (
+    <FinancialInsightsCard
+      income={income}
+      expense={expense}
+      expenseTotal={expenseTotal}
+      projectedExpense={projectedExpense}
+      projectedIncome={projectedIncome}
+      budgetTotal={budgetQ.data?.budget?.total_amount ?? null}
+      topCategory={byCat[0] ?? null}
+      topExpense={topItems[0] ?? null}
+      goals={savingsQ.data ?? []}
+      incomeTarget={incomeTarget}
+      palette={palette}
+      hidden={privacy}
+    />
+  );
+  const commonStatsCard = (
+    <MoreStatsCard transactions={filteredTxns} range={range} palette={palette} hidden={privacy} />
+  );
+  const addCardEntry =
+    hiddenCards.length > 0 ? (
+      <AddReportCardButton hiddenCount={hiddenCards.length} palette={palette} onPress={openCardSettings} />
+    ) : null;
+
+  const expenseCards: Partial<Record<ReportCardId, ReactNode>> = {
+    overview: (
+      <MonthlyOverviewCard income={income} expense={expense} balance={balance} palette={palette} hidden={privacy} />
+    ),
+    ...(isMonthlyView
+      ? {
+          budget: (
+            <MonthlyBudgetCard
+              total={budgetQ.data?.budget?.total_amount ?? null}
+              used={expenseTotal}
+              topCategory={byCat[0] ?? null}
+              daysLeft={selectedMonthIsCurrent ? daysToMonthEnd() : null}
+              projected={projectedExpense}
+              palette={palette}
+              hidden={privacy}
+              onOpen={() => setBudgetOpen(true)}
+            />
+          ),
+        }
+      : {}),
+    insights: commonInsightCard,
+    income_expense: (
+      <IncomeExpenseCard series={incomeExpense} palette={palette} hidden={privacy} currentPeriod={isCurrent} />
+    ),
+    expense_category: (
+      <MonthlyExpenseCategoryCard
+        categories={byCat}
+        total={expenseTotal}
+        palette={palette}
+        hidden={privacy}
+        onOpenDetail={setDetail}
+        emptyText={isMonthlyView ? '这个月还没有支出记录' : '这个周期还没有支出记录'}
+      />
+    ),
+    category_mom: <CategoryMomCard items={momItems.slice(0, 5)} palette={palette} hidden={privacy} />,
+    top_expenses: <TopExpensesCard items={topItems} palette={palette} hidden={privacy} />,
+    member: (
+      <MonthlyMemberCard
+        members={members}
+        maxCount={memberCountMax}
+        periodText={periodText}
+        palette={palette}
+        hidden={privacy}
+        onOpenMember={setMemberDetail}
+      />
+    ),
+    ...(isMonthlyView
+      ? {
+          savings_goals: (
+            <SavingsGoalsCard
+              goals={savingsQ.data ?? []}
+              loading={savingsQ.isLoading}
+              palette={palette}
+              hidden={privacy}
+              onOpen={() => setSavingsOpen(true)}
+            />
+          ),
+        }
+      : {}),
+    more_stats: commonStatsCard,
+  };
+
+  const incomeCards: Partial<Record<ReportCardId, ReactNode>> = {
+    overview: (
+      <MonthlyIncomeOverviewCard
+        income={income}
+        slices={incomeSlices}
+        periodText={periodText}
+        palette={palette}
+        hidden={privacy}
+      />
+    ),
+    income_target: (
+      <IncomeTargetCard
+        income={income}
+        activeIncome={activeIncome}
+        passiveIncome={passiveIncome}
+        target={incomeTarget}
+        targets={incomeTargets}
+        dimension={dimension}
+        projected={projectedIncome}
+        palette={palette}
+        hidden={privacy}
+        onOpen={() => setIncomeTargetOpen(true)}
+      />
+    ),
+    insights: commonInsightCard,
+    income_trend: <MonthlyIncomeTrendCard series={incomeExpense} palette={palette} hidden={privacy} />,
+    income_structure: <IncomeStructureCard slices={incomeSlices} palette={palette} hidden={privacy} />,
+    more_stats: commonStatsCard,
+  };
+
+  const balanceCards: Partial<Record<ReportCardId, ReactNode>> = {
+    overview: (
+      <MonthlyBalanceOverviewCard
+        expense={expense}
+        balance={balance}
+        rate={balRate}
+        periodText={periodText}
+        palette={palette}
+        hidden={privacy}
+      />
+    ),
+    insights: commonInsightCard,
+    income_expense: (
+      <IncomeExpenseCard series={incomeExpense} palette={palette} hidden={privacy} currentPeriod={isCurrent} />
+    ),
+    balance_waterfall: (
+      <BalanceWaterfallCard
+        income={income}
+        expense={expense}
+        balance={balance}
+        categories={byCat}
+        palette={palette}
+        hidden={privacy}
+      />
+    ),
+    savings_rate: <SavingsRateTrendCard series={incomeExpense} palette={palette} />,
+    savings_goals: (
+      <SavingsGoalsCard
+        goals={savingsQ.data ?? []}
+        loading={savingsQ.isLoading}
+        palette={palette}
+        hidden={privacy}
+        onOpen={() => setSavingsOpen(true)}
+      />
+    ),
+    more_stats: commonStatsCard,
+  };
+  const scopeCards = scope === 'expense' ? expenseCards : scope === 'income' ? incomeCards : balanceCards;
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
@@ -433,186 +697,15 @@ export default function ReportScreen() {
               </View>
             </View>
 
-            {isMonthlyView && scope === 'expense' ? (
-              <>
-                <MonthlyOverviewCard
-                  income={income}
-                  expense={expense}
-                  balance={balance}
-                  palette={palette}
-                  hidden={privacy}
-                />
-                <MonthlyBudgetCard
-                  total={budgetQ.data?.budget?.total_amount ?? null}
-                  used={expenseTotal}
-                  topCategory={byCat[0] ?? null}
-                  daysLeft={selectedMonthIsCurrent ? daysToMonthEnd() : null}
-                  projected={projectedExpense}
-                  palette={palette}
-                  hidden={privacy}
-                  onOpen={() => setBudgetOpen(true)}
-                />
-                <IncomeExpenseCard
-                  series={incomeExpense}
-                  palette={palette}
-                  hidden={privacy}
-                  currentPeriod={isCurrent}
-                />
-                <MonthlyExpenseCategoryCard
-                  categories={byCat}
-                  total={expenseTotal}
-                  palette={palette}
-                  hidden={privacy}
-                  onOpenDetail={setDetail}
-                  emptyText="这个月还没有支出记录"
-                />
-                <CategoryMomCard items={momItems.slice(0, 5)} palette={palette} hidden={privacy} />
-                <TopExpensesCard items={topItems} palette={palette} hidden={privacy} />
-                <MonthlyMemberCard
-                  members={members}
-                  maxCount={memberCountMax}
-                  periodText="本月"
-                  palette={palette}
-                  hidden={privacy}
-                  onOpenMember={setMemberDetail}
-                />
-                <SavingsGoalsCard
-                  goals={savingsQ.data ?? []}
-                  loading={savingsQ.isLoading}
-                  palette={palette}
-                  hidden={privacy}
-                  onOpen={() => setSavingsOpen(true)}
-                />
-              </>
-            ) : isMonthlyView && scope === 'income' ? (
-              <>
-                <MonthlyIncomeOverviewCard
-                  income={income}
-                  slices={incomeSlices}
-                  periodText="本月"
-                  palette={palette}
-                  hidden={privacy}
-                />
-                <MonthlyIncomeTrendCard series={incomeExpense} palette={palette} hidden={privacy} />
-                <IncomeStructureCard slices={incomeSlices} palette={palette} hidden={privacy} />
-              </>
-            ) : isMonthlyView && scope === 'balance' ? (
-              <>
-                <MonthlyBalanceOverviewCard
-                  expense={expense}
-                  balance={balance}
-                  rate={balRate}
-                  periodText="本月"
-                  palette={palette}
-                  hidden={privacy}
-                />
-                <IncomeExpenseCard
-                  series={incomeExpense}
-                  palette={palette}
-                  hidden={privacy}
-                  currentPeriod={isCurrent}
-                />
-                <BalanceWaterfallCard
-                  income={income}
-                  expense={expense}
-                  balance={balance}
-                  categories={byCat}
-                  palette={palette}
-                  hidden={privacy}
-                />
-                <SavingsRateTrendCard series={incomeExpense} palette={palette} />
-                <SavingsGoalsCard
-                  goals={savingsQ.data ?? []}
-                  loading={savingsQ.isLoading}
-                  palette={palette}
-                  hidden={privacy}
-                  onOpen={() => setSavingsOpen(true)}
-                />
-              </>
-            ) : (
-              <>
-                {scope === 'expense' ? (
-                  <>
-                    <MonthlyOverviewCard
-                      income={income}
-                      expense={expense}
-                      balance={balance}
-                      palette={palette}
-                      hidden={privacy}
-                    />
-                    <IncomeExpenseCard
-                      series={incomeExpense}
-                      palette={palette}
-                      hidden={privacy}
-                      currentPeriod={isCurrent}
-                    />
-                    <MonthlyExpenseCategoryCard
-                      categories={byCat}
-                      total={expenseTotal}
-                      palette={palette}
-                      hidden={privacy}
-                      onOpenDetail={setDetail}
-                      emptyText="这个周期还没有支出记录"
-                    />
-                    <CategoryMomCard items={momItems.slice(0, 5)} palette={palette} hidden={privacy} />
-                    <TopExpensesCard items={topItems} palette={palette} hidden={privacy} />
-                    <MonthlyMemberCard
-                      members={members}
-                      maxCount={memberCountMax}
-                      periodText={periodText}
-                      palette={palette}
-                      hidden={privacy}
-                      onOpenMember={setMemberDetail}
-                    />
-                  </>
-                ) : scope === 'income' ? (
-                  <>
-                    <MonthlyIncomeOverviewCard
-                      income={income}
-                      slices={incomeSlices}
-                      periodText={periodText}
-                      palette={palette}
-                      hidden={privacy}
-                    />
-                    <MonthlyIncomeTrendCard series={incomeExpense} palette={palette} hidden={privacy} />
-                    <IncomeStructureCard slices={incomeSlices} palette={palette} hidden={privacy} />
-                  </>
-                ) : (
-                  <>
-                    <MonthlyBalanceOverviewCard
-                      expense={expense}
-                      balance={balance}
-                      rate={balRate}
-                      periodText={periodText}
-                      palette={palette}
-                      hidden={privacy}
-                    />
-                    <IncomeExpenseCard
-                      series={incomeExpense}
-                      palette={palette}
-                      hidden={privacy}
-                      currentPeriod={isCurrent}
-                    />
-                    <BalanceWaterfallCard
-                      income={income}
-                      expense={expense}
-                      balance={balance}
-                      categories={byCat}
-                      palette={palette}
-                      hidden={privacy}
-                    />
-                    <SavingsRateTrendCard series={incomeExpense} palette={palette} />
-                    <SavingsGoalsCard
-                      goals={savingsQ.data ?? []}
-                      loading={savingsQ.isLoading}
-                      palette={palette}
-                      hidden={privacy}
-                      onOpen={() => setSavingsOpen(true)}
-                    />
-                  </>
-                )}
-              </>
-            )}
+            <ReportFilterBar
+              activeCount={activeFilters}
+              matchedCount={filteredCount}
+              palette={palette}
+              onPress={() => setFilterOpen(true)}
+            />
+
+            {renderOrderedCards(scopeCards, visibleCards)}
+            {addCardEntry}
           </Animated.ScrollView>
         )}
 
@@ -633,7 +726,7 @@ export default function ReportScreen() {
         detail={detail}
         range={range}
         dimension={dimension}
-        transactions={txnsQ.data ?? []}
+        transactions={filteredTxns}
         hidden={privacy}
         onClose={() => setDetail(null)}
       />
@@ -641,7 +734,7 @@ export default function ReportScreen() {
         member={memberDetail}
         range={range}
         dimension={dimension}
-        transactions={txnsQ.data ?? []}
+        transactions={filteredTxns}
         categories={catsQ.data ?? []}
         hidden={privacy}
         onClose={() => setMemberDetail(null)}
@@ -654,8 +747,752 @@ export default function ReportScreen() {
         onChangeEnd={setCustomEnd}
         onClose={() => setCustomOpen(false)}
       />
+      <ReportFilterSheet
+        visible={filterOpen}
+        filters={filters}
+        members={membersQ.data ?? []}
+        categories={catsQ.data ?? []}
+        matchedCount={filteredCount}
+        onChange={setFilters}
+        onClose={() => setFilterOpen(false)}
+      />
+      <IncomeTargetSheet
+        visible={incomeTargetOpen}
+        targets={incomeTargets}
+        onSave={saveIncomeTargets}
+        onClose={() => setIncomeTargetOpen(false)}
+      />
       <SavingsSheet visible={savingsOpen} onClose={() => setSavingsOpen(false)} />
       <BudgetSheet visible={budgetOpen} onClose={() => setBudgetOpen(false)} />
+    </View>
+  );
+}
+
+function ReportFilterBar({
+  activeCount,
+  matchedCount,
+  palette,
+  onPress,
+}: {
+  activeCount: number;
+  matchedCount: number;
+  palette: ReturnType<typeof usePalette>;
+  onPress: () => void;
+}) {
+  const active = activeCount > 0;
+  return (
+    <Pressable
+      style={[
+        styles.filterBar,
+        {
+          backgroundColor: active ? palette.card : palette.cardPill,
+          borderColor: active ? palette.accent : palette.separator,
+        },
+      ]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`报表筛选，已启用 ${activeCount} 个条件，当前周期命中 ${matchedCount} 笔流水`}
+    >
+      <View style={styles.filterBarLeft}>
+        <View style={[styles.filterIconBadge, { backgroundColor: active ? palette.accent : palette.card }]}>
+          <SymbolView
+            name="line.3.horizontal.decrease"
+            tintColor={active ? palette.onAccent : palette.textSecondary}
+            size={15}
+          />
+        </View>
+        <ThemedText style={[styles.filterBarText, { color: active ? palette.accent : palette.textPrimary }]}>
+          {active ? `筛选 ${activeCount} 项` : '筛选全部数据'}
+        </ThemedText>
+      </View>
+      <View style={styles.filterBarRight}>
+        <ThemedText style={[styles.filterBarMeta, { color: palette.textSecondary }]}>{matchedCount} 笔流水</ThemedText>
+        <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
+      </View>
+    </Pressable>
+  );
+}
+
+function AddReportCardButton({
+  hiddenCount,
+  palette,
+  onPress,
+}: {
+  hiddenCount: number;
+  palette: ReturnType<typeof usePalette>;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={[styles.addCard, { borderColor: palette.separator }]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`添加数据卡片，当前有 ${hiddenCount} 张卡片已隐藏`}
+    >
+      <SymbolView name="plus.circle" tintColor={palette.accent} size={18} />
+      <ThemedText style={[styles.addCardText, { color: palette.accent }]}>添加数据卡片</ThemedText>
+      <ThemedText style={[styles.addCardCount, { color: palette.textSecondary }]}>{hiddenCount}</ThemedText>
+    </Pressable>
+  );
+}
+
+function ReportFilterSheet({
+  visible,
+  filters,
+  members,
+  categories,
+  matchedCount,
+  onChange,
+  onClose,
+}: {
+  visible: boolean;
+  filters: ReportFilters;
+  members: { id: string; nickname: string }[];
+  categories: Category[];
+  matchedCount: number;
+  onChange: (filters: ReportFilters) => void;
+  onClose: () => void;
+}) {
+  const palette = usePalette();
+  const expenseCategories = categories.filter((c) => c.type === 'expense');
+  const incomeCategories = categories.filter((c) => c.type === 'income');
+  const setMember = (id: string) => onChange({ ...filters, memberIds: arrayToggle(filters.memberIds, id) });
+  const setCategory = (id: string) => onChange({ ...filters, categoryIds: arrayToggle(filters.categoryIds, id) });
+  const reset = () => onChange(EMPTY_FILTERS);
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={[styles.root, { backgroundColor: palette.base }]}>
+        <SafeAreaView style={styles.flex}>
+          <View style={styles.sheetBar}>
+            <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>全局筛选</Text>
+            <Pressable hitSlop={8} onPress={onClose}>
+              <Text style={[styles.sheetAction, { color: palette.textSecondary }]}>应用</Text>
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.sheetContent}>
+            <View style={[styles.filterSummaryCard, { backgroundColor: palette.card }]}>
+              <View style={[styles.filterSummaryIcon, { backgroundColor: palette.cardPill }]}>
+                <SymbolView name="line.3.horizontal.decrease" tintColor={palette.accent} size={18} />
+              </View>
+              <View style={styles.flex}>
+                <Text style={[styles.filterSummaryTitle, { color: palette.textPrimary }]}>统一筛选报表数据</Text>
+                <Text style={[styles.filterSummaryText, { color: palette.textSecondary }]}>
+                  摘要、趋势、构成、下钻与洞察会使用同一套条件。
+                </Text>
+              </View>
+            </View>
+            <FilterSection title="成员" palette={palette}>
+              {members.map((member) => (
+                <FilterChip
+                  key={member.id}
+                  label={member.nickname}
+                  selected={filters.memberIds.includes(member.id)}
+                  palette={palette}
+                  onPress={() => setMember(member.id)}
+                />
+              ))}
+            </FilterSection>
+            <FilterSection title="支出分类" palette={palette}>
+              {expenseCategories.map((category) => (
+                <FilterChip
+                  key={category.id}
+                  label={category.name}
+                  selected={filters.categoryIds.includes(category.id)}
+                  palette={palette}
+                  onPress={() => setCategory(category.id)}
+                />
+              ))}
+            </FilterSection>
+            <FilterSection title="收入分类" palette={palette}>
+              {incomeCategories.map((category) => (
+                <FilterChip
+                  key={category.id}
+                  label={category.name}
+                  selected={filters.categoryIds.includes(category.id)}
+                  palette={palette}
+                  onPress={() => setCategory(category.id)}
+                />
+              ))}
+            </FilterSection>
+            <View style={[styles.pendingFilterCard, { backgroundColor: palette.card }]}>
+              <SymbolView name="tray" tintColor={palette.textTertiary} size={20} />
+              <View style={styles.flex}>
+                <Text style={[styles.pendingFilterTitle, { color: palette.textPrimary }]}>账户 / 标签</Text>
+                <Text style={[styles.pendingFilterText, { color: palette.textSecondary }]}>
+                  当前流水模型还没有账户与标签字段，后续补模型和记账入口后可接入同一套筛选。
+                </Text>
+              </View>
+            </View>
+          </ScrollView>
+          <View style={[styles.filterFooter, { backgroundColor: palette.base, borderTopColor: palette.separator }]}>
+            <Text style={[styles.filterFooterMeta, { color: palette.textSecondary }]}>
+              当前周期命中 {matchedCount} 笔
+            </Text>
+            <Pressable style={[styles.filterReset, { borderColor: palette.separator }]} onPress={reset}>
+              <Text style={[styles.filterResetText, { color: palette.textPrimary }]}>重置</Text>
+            </Pressable>
+          </View>
+        </SafeAreaView>
+      </View>
+    </Modal>
+  );
+}
+
+function FilterSection({
+  title,
+  palette,
+  children,
+}: {
+  title: string;
+  palette: ReturnType<typeof usePalette>;
+  children: ReactNode;
+}) {
+  return (
+    <View style={[styles.filterSection, { backgroundColor: palette.card }]}>
+      <Text style={[styles.filterSectionTitle, { color: palette.textPrimary }]}>{title}</Text>
+      <View style={styles.filterChips}>{children}</View>
+    </View>
+  );
+}
+
+function FilterChip({
+  label,
+  selected,
+  palette,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  palette: ReturnType<typeof usePalette>;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      hitSlop={4}
+      style={[
+        styles.filterChip,
+        {
+          borderColor: selected ? palette.accent : palette.separator,
+          backgroundColor: selected ? palette.accent : 'transparent',
+        },
+      ]}
+      onPress={onPress}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: selected }}
+    >
+      {selected ? <SymbolView name="checkmark" tintColor={palette.onAccent} size={12} /> : null}
+      <Text style={[styles.filterChipText, { color: selected ? palette.onAccent : palette.textPrimary }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function centsToYuanText(value: number): string {
+  return value > 0 ? String(Math.round(value / 100)) : '';
+}
+
+function yuanTextToCents(text: string): number {
+  const n = Number(text.replace(/[^\d.]/g, ''));
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(n * 100);
+}
+
+function IncomeTargetCard({
+  income,
+  activeIncome,
+  passiveIncome,
+  target,
+  targets,
+  dimension,
+  projected,
+  palette,
+  hidden,
+  onOpen,
+}: {
+  income: number;
+  activeIncome: number;
+  passiveIncome: number;
+  target: number;
+  targets: IncomeTargets;
+  dimension: Dimension;
+  projected: number | null;
+  palette: ReturnType<typeof usePalette>;
+  hidden: boolean;
+  onOpen: () => void;
+}) {
+  const progress = target > 0 ? Math.min(1, income / target) : 0;
+  const activeTarget = target > 0 ? Math.round(target * (targets.activeRatio / 100)) : 0;
+  const passiveTarget = Math.max(0, target - activeTarget);
+  const projectedText = projected == null ? '非当前周期不预测' : maskAmount(formatAmount(projected, ''), hidden);
+  const targetLabel = dimension === 'year' ? '年度收入目标' : '自定义收入目标';
+  const progressPct = Math.round(progress * 100);
+  const targetText = maskAmount(formatAmount(target, ''), hidden);
+
+  return (
+    <Pressable
+      style={[styles.card, styles.incomeTargetCard, { backgroundColor: palette.card }]}
+      onPress={onOpen}
+      accessibilityRole="button"
+      accessibilityLabel={`${targetLabel}，当前收入 ${formatAmount(income, '')}`}
+    >
+      <View style={styles.cardHeaderRow}>
+        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
+          {targetLabel}
+        </ThemedText>
+        <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={14} />
+      </View>
+      {target <= 0 ? (
+        <View style={[styles.incomeTargetEmpty, { backgroundColor: palette.base }]}>
+          <View style={[styles.targetEmptyIcon, { backgroundColor: palette.card }]}>
+            <SymbolView name="flag.checkered" tintColor={palette.textTertiary} size={30} />
+          </View>
+          <View style={styles.flex}>
+            <ThemedText style={[styles.targetEmptyTitle, { color: palette.textPrimary }]}>
+              还没有设置收入目标
+            </ThemedText>
+            <ThemedText style={[styles.targetEmptyText, { color: palette.textSecondary }]}>
+              设置后可查看完成率、预计收入与主动 / 被动结构。
+            </ThemedText>
+          </View>
+        </View>
+      ) : (
+        <>
+          <View style={styles.incomeTargetHero}>
+            <Donut
+              size={76}
+              strokeWidth={9}
+              trackColor={palette.base}
+              slices={[
+                { value: progress, color: palette.income },
+                { value: Math.max(0, 1 - progress), color: palette.base },
+              ]}
+              accessibilityLabel={`${targetLabel}完成 ${progressPct}%`}
+            >
+              <ThemedText style={[styles.targetHeroPct, { color: palette.textPrimary }]}>{progressPct}%</ThemedText>
+            </Donut>
+            <View style={styles.flex}>
+              <ThemedText style={[styles.targetHeroAmount, { color: palette.income }]} numberOfLines={1}>
+                {maskAmount(formatAmount(income, '+'), hidden)}
+              </ThemedText>
+              <ThemedText style={[styles.targetHeroMeta, { color: palette.textSecondary }]}>
+                目标 {targetText} · 预计 {projectedText}
+              </ThemedText>
+            </View>
+          </View>
+          <View style={[styles.incomeStructureTrack, { backgroundColor: palette.base }]}>
+            <View
+              style={[
+                styles.incomeStructureActive,
+                { width: `${targets.activeRatio}%`, backgroundColor: palette.income },
+              ]}
+            />
+            <View style={[styles.incomeStructurePassive, { flex: 1, backgroundColor: palette.info }]} />
+          </View>
+          <View style={styles.incomeTargetGrid}>
+            <TargetMetric
+              label="主动收入"
+              value={activeIncome}
+              target={activeTarget}
+              color={palette.income}
+              hidden={hidden}
+            />
+            <TargetMetric
+              label="被动收入"
+              value={passiveIncome}
+              target={passiveTarget}
+              color={palette.info}
+              hidden={hidden}
+            />
+          </View>
+        </>
+      )}
+    </Pressable>
+  );
+}
+
+function TargetMetric({
+  label,
+  value,
+  target,
+  color,
+  hidden,
+}: {
+  label: string;
+  value: number;
+  target: number;
+  color: string;
+  hidden: boolean;
+}) {
+  const pct = target > 0 ? Math.round((value / target) * 100) : 0;
+  return (
+    <View style={styles.targetMetric}>
+      <ThemedText style={[styles.targetMetricLabel, { color }]}>{label}</ThemedText>
+      <ThemedText style={styles.targetMetricValue} numberOfLines={1} adjustsFontSizeToFit>
+        {maskAmount(formatAmount(value, ''), hidden)}
+      </ThemedText>
+      <ThemedText style={styles.targetMetricMeta}>{target > 0 ? `${pct}% / 目标` : '未拆分目标'}</ThemedText>
+    </View>
+  );
+}
+
+function IncomeTargetSheet({
+  visible,
+  targets,
+  onSave,
+  onClose,
+}: {
+  visible: boolean;
+  targets: IncomeTargets;
+  onSave: (targets: IncomeTargets) => void;
+  onClose: () => void;
+}) {
+  const palette = usePalette();
+  const [annual, setAnnual] = useState(() => centsToYuanText(targets.annual));
+  const [custom, setCustom] = useState(() => centsToYuanText(targets.custom));
+  const [activeRatio, setActiveRatio] = useState(() => String(targets.activeRatio));
+
+  const save = () => {
+    const ratio = Math.max(0, Math.min(100, Math.round(Number(activeRatio) || DEFAULT_INCOME_TARGETS.activeRatio)));
+    onSave({ annual: yuanTextToCents(annual), custom: yuanTextToCents(custom), activeRatio: ratio });
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={[styles.root, { backgroundColor: palette.base }]}>
+        <SafeAreaView style={styles.flex}>
+          <View style={styles.sheetBar}>
+            <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>收入目标</Text>
+            <Pressable hitSlop={8} onPress={save}>
+              <Text style={[styles.sheetAction, { color: palette.accent }]}>保存</Text>
+            </Pressable>
+          </View>
+          <View style={styles.customRangeContent}>
+            <TargetInputCard label="年度目标" value={annual} onChangeText={setAnnual} palette={palette} />
+            <TargetInputCard label="自定义周期目标" value={custom} onChangeText={setCustom} palette={palette} />
+            <TargetInputCard
+              label="主动收入占比（%）"
+              value={activeRatio}
+              onChangeText={setActiveRatio}
+              palette={palette}
+            />
+            <Text style={[styles.customHint, { color: palette.textSecondary }]}>
+              被动收入暂按分类名中的利息、理财、投资、分红、租金识别；未来可接入独立收入类型。
+            </Text>
+          </View>
+        </SafeAreaView>
+      </View>
+    </Modal>
+  );
+}
+
+function TargetInputCard({
+  label,
+  value,
+  onChangeText,
+  palette,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (text: string) => void;
+  palette: ReturnType<typeof usePalette>;
+}) {
+  return (
+    <View style={[styles.targetInputCard, { backgroundColor: palette.card }]}>
+      <Text style={[styles.customDateLabel, { color: palette.textSecondary }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType="decimal-pad"
+        placeholder="0"
+        placeholderTextColor={palette.textTertiary}
+        style={[styles.targetInput, { color: palette.textPrimary }]}
+      />
+    </View>
+  );
+}
+
+function FinancialInsightsCard({
+  income,
+  expense,
+  expenseTotal,
+  projectedExpense,
+  projectedIncome,
+  budgetTotal,
+  topCategory,
+  topExpense,
+  goals,
+  incomeTarget,
+  palette,
+  hidden,
+}: {
+  income: number;
+  expense: number;
+  expenseTotal: number;
+  projectedExpense: number | null;
+  projectedIncome: number | null;
+  budgetTotal: number | null;
+  topCategory: CatSlice | null;
+  topExpense: TopItem | null;
+  goals: SavingsGoal[];
+  incomeTarget: number;
+  palette: ReturnType<typeof usePalette>;
+  hidden: boolean;
+}) {
+  const [nowMs] = useState(() => Date.now());
+  const insights: FinancialInsight[] = [];
+  if (budgetTotal && budgetTotal > 0 && projectedExpense != null && projectedExpense > budgetTotal) {
+    insights.push({
+      title: '预算风险',
+      body: `按当前节奏，月末支出预计到 ${maskAmount(formatAmount(projectedExpense, ''), hidden)}。`,
+      action: topCategory ? `先看 ${topCategory.name}，它是当前主要压力项。` : '先检查最近几笔大额支出。',
+      tone: 'warn',
+    });
+  }
+  if (topExpense && expenseTotal > 0 && topExpense.amount / expenseTotal >= 0.25) {
+    insights.push({
+      title: '异常支出',
+      body: `${topExpense.category} 单笔占本期普通支出 ${Math.round((topExpense.amount / expenseTotal) * 100)}%。`,
+      action: '建议点开大额支出明细，确认是否为一次性消费。',
+      tone: 'danger',
+    });
+  }
+  if (projectedIncome != null && incomeTarget > 0) {
+    const gap = projectedIncome - incomeTarget;
+    insights.push({
+      title: '收入目标预测',
+      body:
+        gap >= 0
+          ? `按当前节奏，预计超过目标 ${maskAmount(formatAmount(gap, ''), hidden)}。`
+          : `按当前节奏，距目标还差 ${maskAmount(formatAmount(Math.abs(gap), ''), hidden)}。`,
+      action: gap >= 0 ? '可以把超出部分转入存钱目标。' : '优先补齐稳定收入或调低本期目标。',
+      tone: gap >= 0 ? 'ok' : 'warn',
+    });
+  }
+  const urgentGoal = goals
+    .filter((g) => g.deadline && g.target_amount > g.saved_amount)
+    .map((g) => ({
+      goal: g,
+      days: Math.ceil((new Date(g.deadline as string).getTime() - nowMs) / 86400000),
+    }))
+    .filter((x) => x.days >= 0)
+    .sort((a, b) => a.days - b.days)[0];
+  if (urgentGoal) {
+    const gap = urgentGoal.goal.target_amount - urgentGoal.goal.saved_amount;
+    insights.push({
+      title: '目标进度预测',
+      body: `${urgentGoal.goal.name} 距截止还有 ${urgentGoal.days} 天，差 ${maskAmount(formatAmount(gap, ''), hidden)}。`,
+      action: '建议拆成本周可执行的小额转入。',
+      tone: urgentGoal.days <= 30 ? 'warn' : 'ok',
+    });
+  }
+  if (insights.length === 0) {
+    insights.push({
+      title: '本期状态平稳',
+      body: `收入 ${maskAmount(formatAmount(income, '+'), hidden)}，支出 ${maskAmount(formatAmount(expense, '-'), hidden)}。`,
+      action: '继续保持记录，数据越完整预测越准。',
+      tone: 'ok',
+    });
+  }
+  const lead = insights[0];
+  const rest = insights.slice(1, 3);
+  const leadColor = insightToneColor(lead.tone, palette);
+
+  return (
+    <View style={[styles.card, styles.insightsCard, { backgroundColor: palette.card }]}>
+      <View style={styles.cardHeaderRow}>
+        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>财务洞察</ThemedText>
+        <ThemedText style={[styles.chartMeta, { color: palette.textSecondary }]}>{insights.length} 条</ThemedText>
+      </View>
+      <View style={[styles.insightLead, { backgroundColor: palette.base }]}>
+        <View style={[styles.insightLeadIcon, { backgroundColor: leadColor }]}>
+          <SymbolView name={insightToneIcon(lead.tone)} tintColor={palette.onAccent} size={18} />
+        </View>
+        <View style={styles.flex}>
+          <ThemedText style={[styles.insightLeadTitle, { color: palette.textPrimary }]}>{lead.title}</ThemedText>
+          <ThemedText style={[styles.insightLeadBody, { color: palette.textSecondary }]}>{lead.body}</ThemedText>
+          <View style={[styles.insightActionPill, { borderColor: leadColor }]}>
+            <ThemedText style={[styles.insightActionText, { color: leadColor }]}>{lead.action}</ThemedText>
+          </View>
+        </View>
+      </View>
+      {rest.length > 0 ? (
+        <View style={styles.insightMinorList}>
+          {rest.map((item) => {
+            const color = insightToneColor(item.tone, palette);
+            return (
+              <View key={item.title} style={styles.insightMinorRow}>
+                <View style={[styles.insightDot, { backgroundColor: color }]} />
+                <ThemedText style={[styles.insightMinorTitle, { color: palette.textPrimary }]} numberOfLines={1}>
+                  {item.title}
+                </ThemedText>
+                <ThemedText style={[styles.insightMinorBody, { color: palette.textSecondary }]} numberOfLines={1}>
+                  {item.body}
+                </ThemedText>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function insightToneColor(tone: FinancialInsight['tone'], palette: ReturnType<typeof usePalette>): string {
+  if (tone === 'danger') return palette.danger;
+  if (tone === 'warn') return palette.warning;
+  return palette.info;
+}
+
+function insightToneIcon(tone: FinancialInsight['tone']): string {
+  if (tone === 'danger' || tone === 'warn') return 'exclamationmark.triangle.fill';
+  return 'checkmark.circle.fill';
+}
+
+function MoreStatsCard({
+  transactions,
+  range,
+  palette,
+  hidden,
+}: {
+  transactions: Transaction[];
+  range: { start: Date; end: Date };
+  palette: ReturnType<typeof usePalette>;
+  hidden: boolean;
+}) {
+  const stats = useMemo(() => {
+    const rows = transactions.filter(
+      (t) => t.type === 'expense' && t.source === 'normal' && inRange(t.occurred_at, range.start, range.end),
+    );
+    const weekday = new Array<number>(7).fill(0);
+    const byDate = new Map<string, number>();
+    let weekend = 0;
+    let workday = 0;
+    let total = 0;
+    for (const t of rows) {
+      const d = new Date(t.occurred_at);
+      const day = d.getDay();
+      weekday[day] += t.amount;
+      const key = localDateKey(d);
+      byDate.set(key, (byDate.get(key) ?? 0) + t.amount);
+      total += t.amount;
+      if (day === 0 || day === 6) weekend += t.amount;
+      else workday += t.amount;
+    }
+    const days = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
+    const visibleDays = Math.min(42, days);
+    const heatDays = Array.from({ length: visibleDays }, (_, index) => {
+      const date = addDays(range.start, index);
+      const key = localDateKey(date);
+      return { key, amount: byDate.get(key) ?? 0 };
+    });
+    return {
+      rows,
+      weekday,
+      byDate,
+      heatDays,
+      weekend,
+      workday,
+      total,
+      dailyAvg: Math.round(total / Math.max(1, byDate.size)),
+      completeness: Math.round((byDate.size / days) * 100),
+    };
+  }, [transactions, range]);
+  const max = Math.max(1, ...stats.weekday);
+  const heatMax = Math.max(1, ...stats.heatDays.map((item) => item.amount));
+  const weekdayLabels = ['日', '一', '二', '三', '四', '五', '六'];
+  const topWeekdayIndex = stats.weekday.reduce(
+    (maxIndex, amount, index) => (amount > stats.weekday[maxIndex] ? index : maxIndex),
+    0,
+  );
+  const heatRows = Array.from({ length: Math.ceil(stats.heatDays.length / 7) }, (_, rowIndex) =>
+    Array.from({ length: 7 }, (_, colIndex) => stats.heatDays[rowIndex * 7 + colIndex] ?? null),
+  );
+
+  return (
+    <View style={[styles.card, styles.moreStatsCard, { backgroundColor: palette.card }]}>
+      <View style={styles.cardHeaderRow}>
+        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>更多统计</ThemedText>
+        <ThemedText style={[styles.chartMeta, { color: palette.textSecondary }]}>
+          完整度 {stats.completeness}%
+        </ThemedText>
+      </View>
+      <View style={styles.statsMetricRow}>
+        <StatsMetric label="记录天数" value={`${stats.byDate.size} 天`} palette={palette} />
+        <StatsMetric label="日均支出" value={maskAmount(formatAmount(stats.dailyAvg, ''), hidden)} palette={palette} />
+        <StatsMetric label="高峰星期" value={weekdayLabels[topWeekdayIndex]} palette={palette} />
+      </View>
+      <View style={[styles.heatPanel, { backgroundColor: palette.base }]}>
+        <View style={styles.heatPanelHeader}>
+          <Text style={[styles.heatTitle, { color: palette.textPrimary }]}>消费热力</Text>
+          <View style={styles.heatLegend}>
+            <Text style={[styles.heatLegendText, { color: palette.textSecondary }]}>少</Text>
+            {[0.25, 0.5, 0.75, 1].map((opacity) => (
+              <View key={opacity} style={[styles.heatLegendCell, { backgroundColor: palette.expense, opacity }]} />
+            ))}
+            <Text style={[styles.heatLegendText, { color: palette.textSecondary }]}>多</Text>
+          </View>
+        </View>
+        <View accessibilityLabel="消费热力图，颜色越深代表当日支出越高" style={styles.heatRows}>
+          {heatRows.map((row, rowIndex) => (
+            <View key={rowIndex} style={styles.heatWeekRow}>
+              {row.map((item) => (
+                <View
+                  key={item?.key ?? `empty-${rowIndex}-${row.indexOf(item)}`}
+                  style={[
+                    styles.heatCell,
+                    {
+                      backgroundColor: item && item.amount > 0 ? palette.expense : palette.card,
+                      opacity: item == null ? 0 : item.amount > 0 ? 0.25 + (item.amount / heatMax) * 0.75 : 1,
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+          ))}
+        </View>
+      </View>
+      <View style={styles.weekdayRows}>
+        {weekdayLabels.map((label, index) => (
+          <View key={label} style={styles.weekdayRow}>
+            <Text style={[styles.weekdayLabel, { color: palette.textSecondary }]}>{label}</Text>
+            <View style={[styles.weekdayTrack, { backgroundColor: palette.base }]}>
+              <View
+                style={[
+                  styles.weekdayFill,
+                  { width: `${(stats.weekday[index] / max) * 100}%`, backgroundColor: palette.expense },
+                ]}
+              />
+            </View>
+            <Text style={[styles.weekdayAmount, { color: palette.textPrimary }]}>
+              {maskAmount(formatAmount(stats.weekday[index], ''), hidden)}
+            </Text>
+          </View>
+        ))}
+      </View>
+      <Text style={[styles.moreStatsMeta, { color: palette.textSecondary }]}>
+        工作日 {maskAmount(formatAmount(stats.workday, ''), hidden)} · 周末{' '}
+        {maskAmount(formatAmount(stats.weekend, ''), hidden)} · 普通支出 {stats.rows.length} 笔
+      </Text>
+    </View>
+  );
+}
+
+function StatsMetric({
+  label,
+  value,
+  palette,
+}: {
+  label: string;
+  value: string;
+  palette: ReturnType<typeof usePalette>;
+}) {
+  return (
+    <View style={[styles.statsMetric, { backgroundColor: palette.base }]}>
+      <Text style={[styles.statsMetricLabel, { color: palette.textSecondary }]}>{label}</Text>
+      <Text style={[styles.statsMetricValue, { color: palette.textPrimary }]} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
     </View>
   );
 }
@@ -800,6 +1637,7 @@ function MonthlyIncomeTrendCard({
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
 }) {
+  const [selected, setSelected] = useState<{ label: string; income: number } | null>(null);
   const W = 320;
   const H = 142;
   const chartBottom = H - 18;
@@ -841,7 +1679,17 @@ function MonthlyIncomeTrendCard({
               const h = item.income > 0 ? Math.max(3, chartBottom - yOf(item.income)) : 0;
               const x = groupW * index + (groupW - barW) / 2;
               return h > 0 ? (
-                <Rect key={item.label} x={x} y={chartBottom - h} width={barW} height={h} rx={4} fill={palette.income} />
+                <Rect
+                  key={item.label}
+                  x={x}
+                  y={chartBottom - h}
+                  width={barW}
+                  height={h}
+                  rx={4}
+                  fill={selected?.label === item.label ? palette.accent : palette.income}
+                  onPress={() => setSelected({ label: item.label, income: item.income })}
+                  accessibilityLabel={`${item.label}收入 ${formatAmount(item.income, '')}`}
+                />
               ) : null;
             })}
           </Svg>
@@ -852,6 +1700,11 @@ function MonthlyIncomeTrendCard({
               </Text>
             ))}
           </View>
+          <ThemedText style={[styles.chartSelection, { color: palette.textSecondary }]}>
+            {selected
+              ? `${selected.label}收入 ${maskAmount(formatAmount(selected.income, '+'), hidden)}`
+              : `图表摘要：近 ${series.length} 期平均收入 ${maskAmount(formatAmount(avg, ''), hidden)}`}
+          </ThemedText>
         </>
       )}
     </View>
@@ -933,6 +1786,7 @@ function SavingsRateTrendCard({
   series: { label: string; income: number; expense: number }[];
   palette: ReturnType<typeof usePalette>;
 }) {
+  const [selected, setSelected] = useState<{ label: string; rate: number } | null>(null);
   const rates = series.map((item) => ({
     label: item.label,
     rate: item.income > 0 ? (item.income - item.expense) / item.income : null,
@@ -984,7 +1838,15 @@ function SavingsRateTrendCard({
             />
             {rates.map((item, index) =>
               item.rate == null ? null : (
-                <Circle key={item.label} cx={xOf(index)} cy={yOf(item.rate)} r={3} fill={palette.info} />
+                <Circle
+                  key={item.label}
+                  cx={xOf(index)}
+                  cy={yOf(item.rate)}
+                  r={selected?.label === item.label ? 5 : 3}
+                  fill={selected?.label === item.label ? palette.accent : palette.info}
+                  onPress={() => setSelected({ label: item.label, rate: item.rate ?? 0 })}
+                  accessibilityLabel={`${item.label}储蓄率 ${Math.round((item.rate ?? 0) * 100)}%`}
+                />
               ),
             )}
           </Svg>
@@ -995,6 +1857,11 @@ function SavingsRateTrendCard({
               </Text>
             ))}
           </View>
+          <ThemedText style={[styles.chartSelection, { color: palette.textSecondary }]}>
+            {selected
+              ? `${selected.label}储蓄率 ${Math.round(selected.rate * 100)}%`
+              : `图表摘要：最新储蓄率 ${latest == null ? '暂无' : `${Math.round(latest * 100)}%`}`}
+          </ThemedText>
         </>
       )}
     </View>
@@ -1108,8 +1975,14 @@ function MonthlyExpenseCategoryCard({
   onOpenDetail: (detail: { id: string; name: string }) => void;
   emptyText?: string;
 }) {
+  const [selected, setSelected] = useState<CatSlice | null>(null);
+  const selectedPercent = selected && total > 0 ? Math.round((selected.amount / total) * 100) : 0;
   return (
-    <View style={[styles.card, { backgroundColor: palette.card }]}>
+    <View
+      style={[styles.card, { backgroundColor: palette.card }]}
+      accessible
+      accessibilityLabel={`支出构成，合计 ${formatAmount(total, '')}，共 ${categories.length} 个分类`}
+    >
       <View style={styles.cardHeaderRow}>
         <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>支出构成</ThemedText>
         {categories.length > 0 ? (
@@ -1128,6 +2001,8 @@ function MonthlyExpenseCategoryCard({
             size={150}
             strokeWidth={24}
             trackColor={palette.base}
+            accessibilityLabel={`支出构成环形图，最大分类 ${categories[0]?.name ?? '暂无'}`}
+            onSlicePress={(index) => setSelected(categories[index] ?? null)}
           >
             <ThemedText style={[styles.donutCaption, { color: palette.textSecondary }]}>总支出</ThemedText>
             <ThemedText style={[styles.monthlyDonutTotal, { color: palette.textPrimary }]}>
@@ -1155,6 +2030,11 @@ function MonthlyExpenseCategoryCard({
           </View>
         </View>
       )}
+      {selected ? (
+        <ThemedText style={[styles.chartSelection, { color: palette.textSecondary }]}>
+          {selected.name} {selectedPercent}% · {maskAmount(formatAmount(selected.amount, '-'), hidden)}
+        </ThemedText>
+      ) : null}
     </View>
   );
 }
@@ -1581,6 +2461,7 @@ function CategoryDetailTrendChart({
   series: { label: string; expense: number }[];
   palette: ReturnType<typeof usePalette>;
 }) {
+  const [selected, setSelected] = useState<{ label: string; expense: number } | null>(null);
   const W = 320;
   const H = 126;
   const chartBottom = H - 18;
@@ -1614,7 +2495,9 @@ function CategoryDetailTrendChart({
               width={barW}
               height={height}
               rx={5}
-              fill={palette.expense}
+              fill={selected?.label === item.label ? palette.accent : palette.expense}
+              onPress={() => setSelected({ label: item.label, expense: item.expense })}
+              accessibilityLabel={`${item.label}支出 ${formatAmount(item.expense, '')}`}
             />
           ) : null;
         })}
@@ -1626,6 +2509,9 @@ function CategoryDetailTrendChart({
           </Text>
         ))}
       </View>
+      <Text style={[styles.chartSelection, { color: palette.textSecondary }]}>
+        {selected ? `${selected.label}支出 ${formatAmount(selected.expense, '-')}` : '点按柱形可查看精确金额'}
+      </Text>
     </>
   );
 }
@@ -1862,6 +2748,72 @@ const styles = StyleSheet.create({
   card: { borderRadius: Radius.lg, padding: Space[4] },
   noMargin: { marginBottom: 0 },
   cardHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space[3] },
+  filterBar: {
+    minHeight: 46,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Space[4],
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Space[3],
+  },
+  filterBarLeft: { flexDirection: 'row', alignItems: 'center', gap: Space[2], flex: 1, minWidth: 0 },
+  filterBarRight: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
+  filterBarText: { fontSize: 15, fontWeight: '600' },
+  filterBarMeta: { fontSize: 13, fontVariant: ['tabular-nums'] },
+  filterIconBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterSummaryCard: { borderRadius: Radius.lg, padding: Space[4], flexDirection: 'row', gap: Space[3] },
+  filterSummaryIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterSummaryTitle: { fontSize: 16, fontWeight: '700', marginBottom: 2 },
+  filterSummaryText: { fontSize: 13, lineHeight: 18 },
+  filterSection: { borderRadius: Radius.lg, padding: Space[4], gap: Space[3] },
+  filterSectionTitle: { fontSize: 16, fontWeight: '700' },
+  filterChips: { flexDirection: 'row', flexWrap: 'wrap', gap: Space[2] },
+  filterChip: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[1],
+    borderRadius: Radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Space[3],
+    paddingVertical: Space[2],
+  },
+  filterChipText: { fontSize: 14, fontWeight: '600' },
+  pendingFilterCard: { borderRadius: Radius.lg, padding: Space[4], flexDirection: 'row', gap: Space[3] },
+  pendingFilterTitle: { fontSize: 16, fontWeight: '700', marginBottom: Space[1] },
+  pendingFilterText: { fontSize: 13, lineHeight: 18 },
+  filterFooter: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Space[4],
+    paddingTop: Space[3],
+    paddingBottom: Space[4],
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Space[3],
+  },
+  filterFooterMeta: { fontSize: 14, fontVariant: ['tabular-nums'] },
+  filterReset: {
+    borderRadius: Radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Space[4],
+    paddingVertical: Space[2],
+  },
+  filterResetText: { fontSize: 15, fontWeight: '600' },
   monthlyOverview: { flexDirection: 'row', gap: Space[3], borderRadius: Radius.lg, padding: Space[4] },
   monthlyOverviewCell: { flex: 1, minWidth: 0, gap: Space[1] },
   monthlyOverviewLabel: { fontSize: 13 },
@@ -1917,6 +2869,90 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
   },
   addCardText: { fontSize: 15, fontWeight: '600' },
+  addCardCount: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  chartSelection: { marginTop: Space[2], fontSize: 13, lineHeight: 18, fontVariant: ['tabular-nums'] },
+  incomeTargetCard: { gap: Space[3] },
+  incomeTargetHero: { flexDirection: 'row', alignItems: 'center', gap: Space[4] },
+  targetHeroPct: { fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  targetHeroAmount: { fontSize: 28, lineHeight: 34, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  targetHeroMeta: { fontSize: 13, lineHeight: 18, fontVariant: ['tabular-nums'] },
+  incomeTargetEmpty: { minHeight: 96, borderRadius: Radius.md, padding: Space[3], flexDirection: 'row', gap: Space[3] },
+  targetEmptyIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  targetEmptyTitle: { fontSize: 16, fontWeight: '700', marginBottom: 2 },
+  targetEmptyText: { fontSize: 13, lineHeight: 18 },
+  incomeStructureTrack: {
+    height: 10,
+    borderRadius: Radius.full,
+    overflow: 'hidden',
+    flexDirection: 'row',
+  },
+  incomeStructureActive: { height: '100%', borderTopLeftRadius: Radius.full, borderBottomLeftRadius: Radius.full },
+  incomeStructurePassive: { height: '100%', borderTopRightRadius: Radius.full, borderBottomRightRadius: Radius.full },
+  incomeTargetGrid: { flexDirection: 'row', gap: Space[3] },
+  targetMetric: { flex: 1, minWidth: 0, gap: Space[1] },
+  targetMetricLabel: { fontSize: 13, fontWeight: '700' },
+  targetMetricValue: { fontSize: 18, lineHeight: 24, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  targetMetricMeta: { fontSize: 12, opacity: 0.7 },
+  targetInputCard: { borderRadius: Radius.lg, padding: Space[4], gap: Space[2] },
+  targetInput: { fontSize: 28, lineHeight: 34, fontWeight: '700', fontVariant: ['tabular-nums'], padding: 0 },
+  insightsCard: { gap: Space[3] },
+  insightLead: { flexDirection: 'row', gap: Space[3], borderRadius: Radius.lg, padding: Space[3] },
+  insightLeadIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  insightLeadTitle: { fontSize: 16, fontWeight: '700', marginBottom: 3 },
+  insightLeadBody: { fontSize: 13, lineHeight: 18 },
+  insightActionPill: {
+    alignSelf: 'flex-start',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.full,
+    paddingHorizontal: Space[3],
+    paddingVertical: Space[1],
+    marginTop: Space[2],
+  },
+  insightActionText: { fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  insightMinorList: { gap: Space[2] },
+  insightMinorRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
+  insightDot: { width: 8, height: 8, borderRadius: Radius.full, marginTop: 6 },
+  insightMinorTitle: { width: 82, fontSize: 13, fontWeight: '700' },
+  insightMinorBody: { flex: 1, fontSize: 13 },
+  moreStatsCard: { gap: Space[3] },
+  statsMetricRow: { flexDirection: 'row', gap: Space[2] },
+  statsMetric: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: Radius.md,
+    paddingHorizontal: Space[3],
+    paddingVertical: Space[2],
+  },
+  statsMetricLabel: { fontSize: 11, marginBottom: 2 },
+  statsMetricValue: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  heatPanel: { borderRadius: Radius.md, padding: Space[3], gap: Space[2] },
+  heatPanelHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space[2] },
+  heatTitle: { fontSize: 13, fontWeight: '700' },
+  heatLegend: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  heatLegendText: { fontSize: 11 },
+  heatLegendCell: { width: 8, height: 8, borderRadius: 2 },
+  heatRows: { gap: 4 },
+  heatWeekRow: { flexDirection: 'row', gap: 4 },
+  heatCell: { flex: 1, height: 12, borderRadius: 3 },
+  weekdayRows: { gap: Space[2] },
+  weekdayRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
+  weekdayLabel: { width: 18, fontSize: 12, textAlign: 'center' },
+  weekdayTrack: { flex: 1, height: 9, borderRadius: Radius.full, overflow: 'hidden' },
+  weekdayFill: { height: '100%', borderRadius: Radius.full },
+  weekdayAmount: { width: 82, textAlign: 'right', fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  moreStatsMeta: { fontSize: 13, lineHeight: 18 },
   summary: { flexDirection: 'row', justifyContent: 'space-between' },
   summaryItem: { gap: Space[1] },
   summaryLabel: { fontSize: 13 },

@@ -66,9 +66,19 @@ type Palette = {
   textSecondary: string;
   textTertiary: string;
   separator: string;
-  /** 强调 / 交互色（系统蓝）：主 CTA / FAB / 选中态 / 进度常态（DESIGN §2.5） */
+  /** 强调 / 交互色（系统蓝）：app 内主 CTA / FAB / 选中态 / 进度常态（DESIGN §2.5） */
   accent: string;
   onAccent: string;
+  /**
+   * 墨色：**仅限**品牌 / 登录 surface 上「用户的确认动作」（主 CTA 实底、勾选态）。
+   * app 内 chrome 的主 CTA 一律仍用 accent（蓝），别拿 ink 去替换——见 DESIGN §2.5 例外。
+   *
+   * 随主题反相（浅色近黑 / 深色近白），所以永远和所在表面拉开对比；写死的 hex 做不到这点，
+   * 旧登录页正是写死 #1C1C1E 撞上 dark.card 才整个消失。
+   * 深色取 #F5F5F7 而非纯白：大面积纯白在深色下会光晕（halation）。
+   */
+  ink: string;
+  onInk: string;
   /** 信息条幅 / 徽标底（中性 systemFill，DESIGN v0.5.0 去暖色） */
   bannerTint: string;
   shadow: string;
@@ -95,6 +105,8 @@ const light: Palette = {
   separator: 'rgba(60,60,67,0.18)',
   accent: '#007AFF',
   onAccent: '#FFFFFF',
+  ink: '#1C1C1E',
+  onInk: '#FFFFFF',
   bannerTint: 'rgba(120,120,128,0.12)',
   shadow: 'rgba(0,0,0,0.06)',
   cardPill: 'rgba(120,120,128,0.12)',
@@ -115,6 +127,8 @@ const dark: Palette = {
   separator: 'rgba(84,84,88,0.6)',
   accent: '#0A84FF',
   onAccent: '#FFFFFF',
+  ink: '#F5F5F7',
+  onInk: '#1C1C1E',
   bannerTint: 'rgba(120,120,128,0.24)',
   shadow: 'rgba(0,0,0,0.4)',
   cardPill: 'rgba(255,255,255,0.12)',
@@ -160,4 +174,31 @@ export function usePalette(): Palette {
 export function useCategoryColors() {
   const scheme = useColorScheme();
   return scheme === 'dark' ? CategoryColors.dark : CategoryColors.light;
+}
+
+/**
+ * 成员头像回退色块底色（无头像时的首字母 / person.fill 图标底）。4 色循环，按 id 稳定取色。
+ *
+ * DESIGN §3.0：
+ * - 铁律 4——Light / Night 各自取值，不共用同一 hex。
+ * - 铁律 3 /§1.2「红绿只在收支」——避开红 / 绿 / 琥珀语义色。旧值里 `#46C98A` 恰为
+ *   `dark.expense`、`#F5A623` 恰为 `light.warning`，头像撞成「支出绿 / 预警琥珀」，已换成
+ *   teal / pink（槽位不变，老用户的回退色仍落在同一 hash 槽，只是换了非语义色相）。
+ * 圆底其上的图标 / 文字恒为 `#FFFFFF`（§2.8 豁免，不随主题翻转）。
+ */
+export const AvatarTints = {
+  light: ['#5AA7F0', '#33B0A5', '#E28CAE', '#9B6DD6'],
+  dark: ['#6FB4F2', '#4CC3B7', '#EDA3C0', '#AD85E0'],
+} as const;
+
+export function useAvatarTints(): readonly string[] {
+  const scheme = useColorScheme();
+  return scheme === 'dark' ? AvatarTints.dark : AvatarTints.light;
+}
+
+/** 按 id 稳定映射到一个头像回退色。`tints` 传 `useAvatarTints()` 的结果（保证随主题走）。 */
+export function avatarTintFor(id: string, tints: readonly string[]): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return tints[h % tints.length];
 }

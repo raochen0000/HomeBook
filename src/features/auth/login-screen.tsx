@@ -31,6 +31,8 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useColorScheme,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -48,13 +50,40 @@ import {
 
 import { ForgotPasswordSheet } from './forgot-password-sheet';
 
-/** 协议链接蓝（一次性，沿用 iOS 系统蓝）。 */
-const LINK_BLUE = '#0A84FF';
-const CONTROL_SELECTED = '#1C1C1E';
 /** OTP 位数（与 Studio Phone provider 配置一致）。 */
 const OTP_LEN = 6;
 /** 切换手机号 / 邮箱登录时，底部内容区保持同一视觉高度。 */
 const LOGIN_PANEL_MIN_HEIGHT = 382;
+
+/**
+ * 插画区高度的回退值：仅用于卡片高度测出来之前的首帧（见 artHeight）。
+ * 实际高度是按卡片顶边算的，不要指望改这里能挪动插画。
+ */
+const ART_HEIGHT_FALLBACK = 360;
+/** 插画底边压进卡片的重叠量，保证渐隐收尾被卡片圆角盖住、不留缝。 */
+const ART_CARD_OVERLAP = 10;
+/**
+ * 插画底部渐隐带高度（仅深色模式）。login-background.png 是索引色、无 alpha，
+ * 是一块实心矩形，底边会硬切在插画区底部；这里用纯 alpha 蒙版
+ * background-fade.png（smoothstep 0→1）染成 palette.base 盖住底部，让插画溶进页面。
+ * 蒙版在插画区底部恰好完全不透明，故那条实心底边被彻底盖掉。
+ *
+ * 渐隐带底部永远贴着插画区底部（否则硬边会重新露出来），所以只有「长度」可调：
+ * 调小 → 化得更晚、更贴卡片；调大 → 提前化完、和卡片之间空出一段纯黑。
+ */
+const ART_FADE_HEIGHT = 95;
+/**
+ * 插画整幅亮度只落在 215–254（29 色索引图，26 色挤在 234–254），本质是「一张纸」，
+ * 形体全靠极细微的明暗差撑起来——放在浅色页面上才读得出来。
+ *
+ * 浅色：插画底色 ≈#F4F3F6 与 light base #F2F1F5 几乎同色，0.72 叠上去毫无痕迹，
+ *       底边那 1.4 级色差看不见，故浅色不需要渐隐带（挂上反而会把房子下半身一起化掉）。
+ * 深色：base 是纯黑，同样的 0.72 会算出 155–183 的亮板 —— 割裂感的来源。
+ *       但压暗只能减眩光、消不掉「平板感」（任何 opacity 都只是等比缩放这 215–254），
+ *       真正解决靠渐隐带。0.3 是平衡点：再低房子就糊没了。
+ */
+const ART_OPACITY_LIGHT = 0.72;
+const ART_OPACITY_DARK = 0.3;
 
 /**
  * 手机号 OTP 总开关。当前为开：手机号为主、显示「手机号 / 邮箱」互跳入口。
@@ -116,6 +145,10 @@ function parseRememberedLogin(raw: string | null): RememberedLogin | null {
 
 export function LoginScreen() {
   const palette = usePalette();
+  const isDark = useColorScheme() === 'dark';
+  const { height: screenHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const [panelHeight, setPanelHeight] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>(PHONE_OTP_ENABLED ? 'phone' : 'email');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -178,6 +211,19 @@ export function LoginScreen() {
     return false;
   }, [agreed]);
 
+  /**
+   * 插画区高度跟着登录卡片走，而不是钉死一个「距屏顶」的常数。
+   *
+   * 卡片是 flex-end 贴底的，所以它静止时的顶边只由屏高、底部安全区、卡片自身高度决定：
+   * 卡片顶边 = screenHeight - insets.bottom - panelHeight。而插画/渐隐是绝对定位、从屏顶起算，
+   * 两套坐标系会随屏高线性漂移——6.7" 机型上标题正好掉进渐隐带里。让插画底边跟到卡片上即可对齐。
+   *
+   * 只测卡片「高度」、不测它的 y：键盘弹出时 KeyboardAvoidingView 会改变 y，
+   * 那样插画会跟着键盘缩放抖动；高度不受键盘影响，故取到的始终是静止位置。
+   */
+  const artHeight =
+    panelHeight == null ? ART_HEIGHT_FALLBACK : screenHeight - insets.bottom - panelHeight + ART_CARD_OVERLAP;
+
   const handleApple = async () => {
     setBusy(true);
     try {
@@ -193,10 +239,20 @@ export function LoginScreen() {
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <Image
         source={require('@/assets/images/login/login-background.png')}
-        style={styles.backgroundArt}
+        style={[styles.backgroundArt, { height: artHeight, opacity: isDark ? ART_OPACITY_DARK : ART_OPACITY_LIGHT }]}
         contentFit="cover"
         pointerEvents="none"
       />
+      {/* 渐隐带盖在插画之上、内容之下：只化开底边，不会连带压暗品牌文字。 */}
+      {isDark ? (
+        <Image
+          source={require('@/assets/images/login/background-fade.png')}
+          style={[styles.backgroundFade, { top: artHeight - ART_FADE_HEIGHT }]}
+          tintColor={palette.base}
+          contentFit="fill"
+          pointerEvents="none"
+        />
+      ) : null}
       <SafeAreaView style={styles.flex}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.content}>
@@ -213,6 +269,7 @@ export function LoginScreen() {
             </View>
 
             <View
+              onLayout={(e) => setPanelHeight(e.nativeEvent.layout.height)}
               style={[
                 styles.loginPanel,
                 {
@@ -298,16 +355,16 @@ export function LoginScreen() {
               <Pressable style={styles.agreeRow} hitSlop={6} onPress={() => setAgreed((v) => !v)}>
                 <SymbolView
                   name={agreed ? 'checkmark.circle.fill' : 'circle'}
-                  tintColor={agreed ? CONTROL_SELECTED : palette.textTertiary}
+                  tintColor={agreed ? palette.ink : palette.textTertiary}
                   size={16}
                 />
                 <Text style={[styles.agreeText, { color: palette.textTertiary }]}>
                   登录即表示你已阅读并同意
-                  <Text style={{ color: LINK_BLUE }} onPress={() => setToast('用户协议 · 敬请期待')}>
+                  <Text style={{ color: palette.accent }} onPress={() => setToast('用户协议 · 敬请期待')}>
                     《用户协议》
                   </Text>
                   与
-                  <Text style={{ color: LINK_BLUE }} onPress={() => setToast('隐私政策 · 敬请期待')}>
+                  <Text style={{ color: palette.accent }} onPress={() => setToast('隐私政策 · 敬请期待')}>
                     《隐私政策》
                   </Text>
                 </Text>
@@ -443,7 +500,7 @@ function PhoneForm({
 
       <LoginOptionsRow palette={palette} rememberMe={rememberMe} setRememberMe={setRememberMe} />
 
-      <PrimaryButton busy={busy} enabled={canLogin} label="登录" onPress={onLogin} />
+      <PrimaryButton palette={palette} busy={busy} enabled={canLogin} label="登录" onPress={onLogin} />
 
       <View style={styles.hintRow}>
         <SymbolView name="checkmark.shield" tintColor={palette.textTertiary} size={13} />
@@ -541,7 +598,7 @@ function EmailForm({
 
       <LoginOptionsRow palette={palette} rememberMe={rememberMe} setRememberMe={setRememberMe} onForgot={onForgot} />
 
-      <PrimaryButton busy={busy} enabled={canLogin} label="登录" onPress={onLogin} />
+      <PrimaryButton palette={palette} busy={busy} enabled={canLogin} label="登录" onPress={onLogin} />
 
       <View style={styles.hintRow}>
         <SymbolView name="checkmark.shield" tintColor={palette.textTertiary} size={13} />
@@ -568,7 +625,7 @@ function LoginOptionsRow({
       <Pressable style={styles.remember} hitSlop={6} onPress={() => setRememberMe(!rememberMe)}>
         <SymbolView
           name={rememberMe ? 'checkmark.square.fill' : 'square'}
-          tintColor={rememberMe ? CONTROL_SELECTED : palette.textTertiary}
+          tintColor={rememberMe ? palette.ink : palette.textTertiary}
           size={15}
         />
         <Text style={[styles.rememberText, { color: palette.textTertiary }]}>记住我</Text>
@@ -674,7 +731,7 @@ function AppleLoginSheet({
             <View style={[styles.sheetGrabber, { backgroundColor: palette.separator }]} />
           </View>
           <Pressable style={styles.sheetCancel} hitSlop={8} onPress={onClose} disabled={busy}>
-            <Text style={[styles.sheetCancelText, { color: LINK_BLUE }]}>取消</Text>
+            <Text style={[styles.sheetCancelText, { color: palette.accent }]}>取消</Text>
           </Pressable>
 
           <SymbolView name="apple.logo" tintColor={palette.textPrimary} size={38} />
@@ -702,7 +759,7 @@ function AppleLoginSheet({
           </View>
 
           <View style={[styles.sheetRule, { backgroundColor: palette.separator }]} />
-          <PrimaryButton busy={busy} enabled={!busy} label="通过 Apple 继续" onPress={onContinue} />
+          <PrimaryButton palette={palette} busy={busy} enabled={!busy} label="通过 Apple 继续" onPress={onContinue} />
           <Text style={[styles.sheetBottomNote, { color: palette.textTertiary }]}>
             Apple 账号只用于登录家账，不会用于 Apple 服务以外的其他用途。
           </Text>
@@ -737,11 +794,13 @@ function AppleBenefit({
 }
 
 function PrimaryButton({
+  palette,
   busy,
   enabled,
   label,
   onPress,
 }: {
+  palette: ReturnType<typeof usePalette>;
   busy: boolean;
   enabled: boolean;
   label: string;
@@ -751,9 +810,13 @@ function PrimaryButton({
     <Pressable
       onPress={onPress}
       disabled={!enabled}
-      style={[styles.primary, { backgroundColor: '#1C1C1E', opacity: enabled ? 1 : 0.35 }]}
+      style={[styles.primary, { backgroundColor: palette.ink, opacity: enabled ? 1 : 0.35 }]}
     >
-      {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryText}>{label}</Text>}
+      {busy ? (
+        <ActivityIndicator color={palette.onInk} />
+      ) : (
+        <Text style={[styles.primaryText, { color: palette.onInk }]}>{label}</Text>
+      )}
     </Pressable>
   );
 }
@@ -794,13 +857,19 @@ function SecondaryButton({
 const styles = StyleSheet.create({
   root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10 },
   flex: { flex: 1 },
+  // height 由 artHeight 动态给（跟随卡片顶边）。
   backgroundArt: {
     position: 'absolute',
     top: 0,
     left: -70,
     right: 0,
-    height: 360,
-    opacity: 0.72,
+  },
+  // top 同样动态给；只覆盖屏宽即可：插画左溢出的 70pt 在屏外，不需要化开。
+  backgroundFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: ART_FADE_HEIGHT,
   },
   content: {
     flex: 1,
@@ -855,7 +924,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: Space[3],
   },
-  primaryText: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' },
+  primaryText: { fontSize: 17, fontWeight: '600' },
 
   hintRow: {
     flexDirection: 'row',

@@ -1,5 +1,6 @@
 /**
- * 月度总结（流程 9 / PRD §11.5.2）：全屏、可翻月的单一视图。
+ * 月度总结（流程 9 / PRD §11.5.2）：独立 push 页（`/summary`）、可翻月的单一视图。
+ * 用户会久留、来回翻月查看数据，故为带返回头的独立页面，而非 Modal（DESIGN §9.9 规则 3）。
  * 入口＝首页 hero「本月脉搏卡」整卡点击，默认落地「本月至今」实例（实时计算，
  * 进行中语气、不提供保存图片）；左右翻月（chevron / 横滑）看历史，上月及更早为
  * 「已结算」仪式实例（保留全部字段 + 暖心文案，保存图片发布前补齐）。
@@ -8,7 +9,7 @@
  */
 import { SymbolView } from 'expo-symbols';
 import { useMemo, useState } from 'react';
-import { Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useCategories, useFamilyMembers, useMyProfile, useTransactions, type Transaction } from '@/api';
@@ -148,20 +149,8 @@ function computeSummary(
   };
 }
 
-export function MonthlySummaryScreen({
-  visible,
-  initialPeriod,
-  onClose,
-}: {
-  visible: boolean;
-  initialPeriod?: string;
-  onClose: () => void;
-}) {
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      {visible ? <Screen initialPeriod={initialPeriod} onClose={onClose} /> : null}
-    </Modal>
-  );
+export function MonthlySummaryScreen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: () => void }) {
+  return <Screen initialPeriod={initialPeriod} onClose={onClose} />;
 }
 
 function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: () => void }) {
@@ -225,7 +214,7 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         <View style={styles.topBar}>
           <Pressable hitSlop={8} onPress={onClose} style={[styles.navBack, { backgroundColor: palette.cardPill }]}>
             <SymbolView name="chevron.left" tintColor={palette.textPrimary} size={17} weight="semibold" />

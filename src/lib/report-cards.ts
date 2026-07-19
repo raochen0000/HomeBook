@@ -10,15 +10,20 @@
 
 export type ReportCardId =
   | 'overview'
-  | 'balance_rate'
-  | 'trend'
-  | 'cumulative'
+  | 'budget'
+  | 'insights'
+  | 'income_target'
   | 'income_expense'
+  | 'income_trend'
   | 'expense_category'
   | 'category_mom'
   | 'member'
   | 'top_expenses'
-  | 'income_structure';
+  | 'income_structure'
+  | 'balance_waterfall'
+  | 'savings_rate'
+  | 'savings_goals'
+  | 'more_stats';
 
 export type ReportCardMeta = {
   id: ReportCardId;
@@ -32,15 +37,20 @@ export type ReportCardMeta = {
 /** 默认顺序 = 报表页现渲染序。 */
 export const REPORT_CARDS: ReportCardMeta[] = [
   { id: 'overview', title: '收支概览', icon: 'square.split.2x2.fill', locked: true },
-  { id: 'balance_rate', title: '结余率', icon: 'gauge.medium' },
-  { id: 'trend', title: '消费趋势', icon: 'chart.xyaxis.line' },
-  { id: 'cumulative', title: '累计同期对比', icon: 'chart.line.uptrend.xyaxis' },
+  { id: 'budget', title: '本月预算', icon: 'target' },
+  { id: 'insights', title: '财务洞察', icon: 'sparkles' },
+  { id: 'income_target', title: '收入目标', icon: 'flag.checkered' },
   { id: 'income_expense', title: '收支对比', icon: 'chart.bar.xaxis' },
+  { id: 'income_trend', title: '收入趋势', icon: 'chart.bar.fill' },
   { id: 'expense_category', title: '支出分类占比', icon: 'chart.pie.fill' },
   { id: 'category_mom', title: '分类环比', icon: 'arrow.up.arrow.down' },
   { id: 'member', title: '成员贡献', icon: 'person.2.fill' },
   { id: 'top_expenses', title: '大额支出 Top 5', icon: 'flame.fill' },
   { id: 'income_structure', title: '收入结构', icon: 'arrow.down.circle.fill' },
+  { id: 'balance_waterfall', title: '结余拆解', icon: 'waterfall' },
+  { id: 'savings_rate', title: '储蓄率趋势', icon: 'percent' },
+  { id: 'savings_goals', title: '存钱目标', icon: 'scope' },
+  { id: 'more_stats', title: '更多统计', icon: 'chart.xyaxis.line' },
 ];
 
 /** 全局至少展示的卡片数（含锁定卡）。 */

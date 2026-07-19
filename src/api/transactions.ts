@@ -32,20 +32,43 @@ export type EditTransaction = {
  */
 export const TXN_FETCH_LIMIT = 200;
 
-/** 当前家庭未删除流水，按记账时间倒序，最多 TXN_FETCH_LIMIT 条（RLS 已隔离家庭）。 */
-export async function fetchTransactions(): Promise<Transaction[]> {
-  const { data, error } = await supabase
+/**
+ * 按周期范围拉取时的上限（报表页跨多期分析用）。报表的「收支对比」最多回看 6 期，
+ * 年维度即 6 年，故上限放宽到覆盖多年历史；仍受 RLS 家庭隔离。
+ */
+export const TXN_RANGE_FETCH_LIMIT = 5000;
+
+/** 报表按周期拉取用的时间窗（ISO，半开区间 [from, to)，与前端 inRange 口径一致）。 */
+export type TxnRange = { from: string; to: string };
+
+/**
+ * 当前家庭未删除流水，按记账时间倒序（RLS 已隔离家庭）。
+ * 不传 range：沿用「最近 TXN_FETCH_LIMIT 条」（首页 / 搜索 / 记账等既有口径，行为不变）。
+ * 传 range：按 occurred_at ∈ [from, to) 过滤，上限放宽到 TXN_RANGE_FETCH_LIMIT（报表跨期分析用）。
+ */
+export async function fetchTransactions(range?: TxnRange): Promise<Transaction[]> {
+  let query = supabase
     .from('transactions')
     .select('*')
     .eq('is_deleted', false)
-    .order('occurred_at', { ascending: false })
-    .limit(TXN_FETCH_LIMIT);
+    .order('occurred_at', { ascending: false });
+  query = range
+    ? query.gte('occurred_at', range.from).lt('occurred_at', range.to).limit(TXN_RANGE_FETCH_LIMIT)
+    : query.limit(TXN_FETCH_LIMIT);
+  const { data, error } = await query;
   if (error) throw error;
   return data;
 }
 
-export function useTransactions() {
-  return useQuery({ queryKey: queryKeys.transactions, queryFn: fetchTransactions });
+/**
+ * 传 range 时按时间窗拉取（key 含 from/to，切维度/翻期自动重取）；不传维持既有默认。
+ * 失效仍走 queryKeys.transactions 前缀，能一并命中带 range 的变体。
+ */
+export function useTransactions(range?: TxnRange) {
+  return useQuery({
+    queryKey: range ? [...queryKeys.transactions, range.from, range.to] : queryKeys.transactions,
+    queryFn: () => fetchTransactions(range),
+  });
 }
 
 export async function createTransaction(input: NewTransaction): Promise<Transaction> {

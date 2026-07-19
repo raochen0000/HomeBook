@@ -1,11 +1,11 @@
 /**
- * 忘记密码找回（登录页覆盖层）。单屏三段：邮箱 → 获取验证码（60s 倒计时）→ 输 6 位码 + 设新密码。
+ * 忘记密码找回（登录页之上的 pageSheet）。单屏三段：邮箱 → 获取验证码（60s 倒计时）→ 输 6 位码 + 设新密码。
  * 流程：sendPasswordResetOtp(email) 发码 → 「重置密码」时 verifyPasswordResetOtp(email,code)
  * 拿到 session → updatePassword(newPassword) 设新密码 → session 变化使登录覆盖层自动卸载，直接进 App。
  *
  * 邮件通道：自托管无 SMTP 出口，recovery 邮件经 Send Email Hook → 阿里云 FC → 邮件推送下发
  * （见 services/email-hook-fc/）。与账号页换绑邮箱（app/account/email.tsx）同构，共用一套 field/OTP 语言。
- * 以全屏 Modal 呈现于登录页之上，键盘避让、走设计令牌、适配 Light/Night。
+ * 以 pageSheet 呈现于登录页之上（专注小任务，完成即回登录页），键盘避让、走设计令牌、适配 Light/Night。
  */
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useState } from 'react';
@@ -134,7 +134,7 @@ export function ForgotPasswordSheet({
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="overFullScreen"
+      presentationStyle="pageSheet"
       onRequestClose={onClose}
       onShow={() => {
         // 每次打开用登录页已填的邮箱预填，并清掉上次的验证码/密码/倒计时残留。

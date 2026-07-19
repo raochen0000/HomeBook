@@ -6,7 +6,7 @@
  */
 import { Image } from 'expo-image';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,7 +23,7 @@ import {
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Toast } from '@/components/toast';
-import { Radius, Space, TabBarInset, usePalette } from '@/constants/design';
+import { Radius, Space, TabBarInset, useAvatarTints, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import { CategoryManageSheet } from '@/features/category/manage-sheet';
 import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
@@ -40,9 +40,6 @@ import { amountParts, currentPeriod, formatPercent, percentDelta, previousPeriod
 /** 家庭成员人数上限（暂为常量，后端未提供该配置）。 */
 const MAX_MEMBERS = 8;
 
-/** 成员头像兜底底色，按列表序号轮转。 */
-const AVATAR_TINTS = ['#5AA7F0', '#46C98A', '#F5A623', '#9B6DD6'] as const;
-
 /** 本地「年-月-日」key（用于连续记账判断，须与游标同构造）。 */
 function localDayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
@@ -50,6 +47,7 @@ function localDayKey(d: Date): string {
 
 export default function FamilyScreen() {
   const palette = usePalette();
+  const avatarTints = useAvatarTints();
   const insets = useSafeAreaInsets();
   const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 69);
   const profileQ = useMyProfile();
@@ -71,6 +69,8 @@ export default function FamilyScreen() {
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [dissolveOpen, setDissolveOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // 成员管理页请求打开邀请页的待办标记（先关成员管理，其 dismiss 后再开邀请页）。
+  const pendingInviteRef = useRef(false);
 
   const myId = profileQ.data?.id;
   const family = familyQ.data;
@@ -337,7 +337,7 @@ export default function FamilyScreen() {
                   const monthN = stats.byMemberMonth.get(m.userId) ?? 0;
                   const todayN = stats.byMemberToday.get(m.userId) ?? 0;
                   const ratio = Math.min(1, monthN / stats.maxMemberMonth);
-                  const tint = AVATAR_TINTS[i % AVATAR_TINTS.length];
+                  const tint = avatarTints[i % avatarTints.length];
                   return (
                     <View key={m.id}>
                       {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
@@ -470,7 +470,21 @@ export default function FamilyScreen() {
 
       <InviteSheet visible={inviteOpen} onClose={() => setInviteOpen(false)} />
       <ScanSheet visible={scanOpen} onClose={() => setScanOpen(false)} />
-      <MemberManageSheet visible={memberManageOpen} onClose={() => setMemberManageOpen(false)} />
+      {/* 成员管理里的「邀请家人」先关本页、待其 dismiss 动画结束再开邀请页，避免 pageSheet 叠加。 */}
+      <MemberManageSheet
+        visible={memberManageOpen}
+        onClose={() => setMemberManageOpen(false)}
+        onRequestInvite={() => {
+          pendingInviteRef.current = true;
+          setMemberManageOpen(false);
+        }}
+        onDismiss={() => {
+          if (pendingInviteRef.current) {
+            pendingInviteRef.current = false;
+            setInviteOpen(true);
+          }
+        }}
+      />
       <DangerConfirmSheet
         visible={dissolveOpen}
         title="解散家庭"

@@ -1,11 +1,11 @@
 /**
  * 用户协议 / 隐私政策 内容 Sheet（B2，PRD §3.6 / §18.3.8；DESIGN §9.9「内容型 Sheet」）。
- * 从底部弹出、内置静态内容（不外链）；顶部右上角有 X 关闭按钮，同时保留抓手下滑关闭。
+ * 系统 pageSheet（下滑关 + 系统抓手）承载纯阅读内容（不外链）；顶部右上角保留 X 关闭按钮。
  * 登录页与「关于家账」共用本组件（单一信源）。当前正文为占位文案，上架前替换为正式法务文本。
  */
 import { SymbolView } from 'expo-symbols';
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, usePalette } from '@/constants/design';
@@ -33,61 +33,55 @@ const SECTIONS: Record<LegalKind, { h: string; p: string }[]> = {
 };
 
 export function LegalSheet({ kind, onClose }: { kind: LegalKind | null; onClose: () => void }) {
-  const palette = usePalette();
-  const insets = useSafeAreaInsets();
-  const visible = kind !== null;
-
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        {/* 上方遮罩区：点击关闭（背景消隐语义，DESIGN §9.9） */}
-        <Pressable style={styles.scrim} onPress={onClose} />
-        <View style={[styles.sheet, { backgroundColor: palette.base, paddingBottom: insets.bottom + Space[4] }]}>
-          <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
-          <View style={styles.header}>
-            <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{kind ? TITLES[kind] : ''}</ThemedText>
-            {/* 右上角 X 关闭按钮（DESIGN §9.9 内容型 Sheet） */}
-            <Pressable hitSlop={10} onPress={onClose} style={[styles.close, { backgroundColor: CHIP_FILL }]}>
-              <SymbolView name="xmark" tintColor={palette.textSecondary} size={14} />
-            </Pressable>
-          </View>
-          <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator>
-            {(kind ? SECTIONS[kind] : []).map((s) => (
-              <View key={s.h} style={styles.section}>
-                <ThemedText style={[styles.h, { color: palette.textPrimary }]}>{s.h}</ThemedText>
-                <ThemedText style={[styles.p, { color: palette.textSecondary }]}>{s.p}</ThemedText>
-              </View>
-            ))}
-            <ThemedText style={[styles.note, { color: palette.textTertiary }]}>
-              以上为占位条款示例，正式版本以上架前发布的法务文本为准。
-            </ThemedText>
-          </ScrollView>
-        </View>
-      </View>
+    <Modal visible={kind !== null} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      {kind !== null ? <Body kind={kind} onClose={onClose} /> : null}
     </Modal>
   );
 }
 
+function Body({ kind, onClose }: { kind: LegalKind; onClose: () => void }) {
+  const palette = usePalette();
+  return (
+    <View style={[styles.root, { backgroundColor: palette.base }]}>
+      <SafeAreaView style={styles.flex}>
+        <View style={styles.header}>
+          <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{TITLES[kind]}</ThemedText>
+          {/* 右上角 X 关闭按钮（DESIGN §9.9 内容型 Sheet） */}
+          <Pressable hitSlop={10} onPress={onClose} style={[styles.close, { backgroundColor: CHIP_FILL }]}>
+            <SymbolView name="xmark" tintColor={palette.textSecondary} size={14} />
+          </Pressable>
+        </View>
+        <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator>
+          {SECTIONS[kind].map((s) => (
+            <View key={s.h} style={styles.section}>
+              <ThemedText style={[styles.h, { color: palette.textPrimary }]}>{s.h}</ThemedText>
+              <ThemedText style={[styles.p, { color: palette.textSecondary }]}>{s.p}</ThemedText>
+            </View>
+          ))}
+          <ThemedText style={[styles.note, { color: palette.textTertiary }]}>
+            以上为占位条款示例，正式版本以上架前发布的法务文本为准。
+          </ThemedText>
+        </ScrollView>
+      </SafeAreaView>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  scrim: { flex: 1 },
-  sheet: {
-    height: '82%',
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
-    paddingHorizontal: Space[5],
-  },
-  grabber: { width: 38, height: 5, borderRadius: Radius.full, alignSelf: 'center', marginTop: Space[2] },
+  root: { flex: 1 },
+  flex: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: Space[5],
     paddingVertical: Space[3],
   },
   title: { fontSize: 18, fontWeight: '600' },
   close: { width: 30, height: 30, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
   body: { flex: 1 },
-  bodyContent: { paddingBottom: Space[4] },
+  bodyContent: { paddingHorizontal: Space[5], paddingBottom: Space[6] },
   section: { marginBottom: Space[5] },
   h: { fontSize: 16, fontWeight: '600', marginBottom: Space[2] },
   p: { fontSize: 15, lineHeight: 22 },

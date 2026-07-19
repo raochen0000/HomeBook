@@ -14,6 +14,8 @@ export function Donut({
   strokeWidth = 28,
   trackColor,
   children,
+  onSlicePress,
+  accessibilityLabel,
 }: {
   slices: DonutSlice[];
   size?: number;
@@ -22,6 +24,9 @@ export function Donut({
   trackColor: string;
   /** 圆心内容（总额等）。 */
   children?: ReactNode;
+  /** 点击某个扇区，用于报表显示精确值。 */
+  onSlicePress?: (index: number) => void;
+  accessibilityLabel?: string;
 }) {
   const r = (size - strokeWidth) / 2;
   const circ = 2 * Math.PI * r;
@@ -30,7 +35,12 @@ export function Donut({
 
   let acc = 0;
   return (
-    <View style={{ width: size, height: size }}>
+    <View
+      style={{ width: size, height: size }}
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={accessibilityLabel}
+    >
       <Svg width={size} height={size}>
         <G rotation={-90} origin={`${cx}, ${cx}`}>
           {total <= 0 ? (
@@ -50,6 +60,7 @@ export function Donut({
                   strokeDasharray={[len, circ - len]}
                   strokeDashoffset={-acc}
                   strokeLinecap="butt"
+                  onPress={onSlicePress ? () => onSlicePress(i) : undefined}
                 />
               );
               acc += len;

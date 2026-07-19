@@ -36,14 +36,14 @@ const FADE_RATIO = 0.45;
 function useHeaderStyle(offset: SharedValue<number>, estimatedHeight: number, topInset = 0) {
   // headerHeight（state）既供内容 paddingTop / 裁切容器高度，也被 useAnimatedStyle 闭包捕获，
   // 量到真实高度后（仅一次）触发 worklet 重建；per-frame 由 offset 驱动。
-  const [headerHeight, setHeaderHeight] = useState(estimatedHeight);
+  const [measuredHeight, setMeasuredHeight] = useState(0);
+  const headerHeight = Math.max(measuredHeight, estimatedHeight);
 
   const headerStyle = useAnimatedStyle(() => {
     const h = headerHeight || estimatedHeight;
-    // SwiftUI ScrollView 会自动按安全区下移内容，其 contentOffsetY 停靠顶部时为 -topInset。
-    // 加回 topInset 归一化，使「停靠顶部」对应 progress=0，标题随滚动即时折叠，消除起始约
-    // 一个安全区高度的「死区」（卡片都滚走了标题还没动）。RN 页 topInset=0，无影响。
-    const progress = offset.value + topInset;
+    // SwiftUI List/ScrollView 在不同内容态下顶部 offset 可能是 -topInset，也可能是 0。
+    // 只在负 offset 时加回安全区，保证「停靠顶部」稳定归一化为 0，避免首帧把标题推到状态栏下。
+    const progress = Math.max(0, offset.value < 0 ? offset.value + topInset : offset.value);
     return {
       transform: [{ translateY: interpolate(progress, [0, h], [0, -h], Extrapolation.CLAMP) }],
       opacity: interpolate(progress, [0, h * FADE_RATIO], [1, 0], Extrapolation.CLAMP),
@@ -52,7 +52,7 @@ function useHeaderStyle(offset: SharedValue<number>, estimatedHeight: number, to
 
   const onHeaderLayout = (e: LayoutChangeEvent) => {
     const h = e.nativeEvent.layout.height;
-    if (h > 0 && Math.abs(h - headerHeight) > 0.5) setHeaderHeight(h);
+    if (h > 0 && Math.abs(h - measuredHeight) > 0.5) setMeasuredHeight(h);
   };
 
   return { headerHeight, headerStyle, onHeaderLayout };

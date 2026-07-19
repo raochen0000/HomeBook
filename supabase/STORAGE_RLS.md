@@ -1,4 +1,4 @@
-# Storage 上传踩坑总结（自托管 Supabase）
+# Storage 上传踩坑总结（自托管 / 阿里云托管 RDS Supabase）
 
 > 头像/封面上传到 Supabase Storage 反复报 `new row violates row-level security policy`（HTTP 400）的完整排查与定论。下次再遇到 Storage 上传问题，先看本文的「快速排查清单」。
 
@@ -8,7 +8,7 @@
 
 ## 一、最终定论（结论先行）
 
-本项目自托管实例（`spb-…opentrust.net`）上，Storage 上传能跑通需要同时满足三点：
+本项目实例上（旧自托管 `spb-…opentrust.net` → 现阿里云托管 RDS Supabase `http://112.124.220.11`，两者 storage 行为一致），Storage 上传能跑通需要同时满足三点：
 
 1. **路径落桶根目录、不建子文件夹**（`{id}.jpg`，不是 `{id}/avatar.jpg`）。
    子文件夹会触发 `storage.objects` 的 BEFORE INSERT 触发器向 `storage.prefixes` 写前缀行；而 `storage.prefixes` 开了 RLS 却归 `supabase_storage_admin` 独占、`postgres`（含 Studio SQL Editor）无权加策略，导致整笔上传在 objects 策略被检查**之前**就被拒。根对象不触发 prefixes 写入，从根上规避。

@@ -12,7 +12,7 @@ import {
   listStyle,
 } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Link, type Href } from 'expo-router';
+import { Link, useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
@@ -35,10 +35,9 @@ import {
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { Toast } from '@/components/toast';
-import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
+import { avatarTintFor, Radius, Space, useAvatarTints, useCategoryColors, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import {
-  avatarTint,
   DayGroup,
   EndOfListHint,
   InsightBanner,
@@ -51,7 +50,6 @@ import { TransactionDetailSheet } from '@/features/home/transaction-detail-sheet
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { FirstRecordCelebration } from '@/features/record/first-record-celebration';
 import { RecordSheet } from '@/features/record/record-sheet';
-import { MonthlySummaryScreen } from '@/features/report/monthly-summary';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { useSession } from '@/lib/auth';
@@ -69,6 +67,7 @@ const LAST_MONTH_REMINDER_DISMISSED_KEY = 'home.lastMonthReminderDismissedPeriod
 export default function HomeScreen() {
   const palette = usePalette();
   const catColors = useCategoryColors();
+  const avatarTints = useAvatarTints();
   const insets = useSafeAreaInsets();
   const { scrollGeometry, headerHeight, headerStyle, onHeaderLayout } = useManualCollapsibleHeader(
     insets.top + 84,
@@ -111,11 +110,9 @@ export default function HomeScreen() {
     prevMonthHasData &&
     !lastMonthReminderDismissed;
 
-  // 月度总结全屏视图（card 点击落本月至今；月初提醒落上月）。
-  const [summary, setSummary] = useState<{ open: boolean; period: string }>({
-    open: false,
-    period: currentPeriod(),
-  });
+  // 月度总结为独立 push 页（/summary）；card 点击落本月至今、月初提醒落上月，靠 period 参数区分。
+  const router = useRouter();
+  const openSummary = (period: string) => router.push({ pathname: '/summary', params: { period } });
   // 预算设置（降级态户主 CTA）。
   const [budgetOpen, setBudgetOpen] = useState(false);
 
@@ -184,7 +181,7 @@ export default function HomeScreen() {
     const avatarOf = (userId: string): AvatarInfo => {
       const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? '成员';
       const initial = [...nick.trim()][0]?.toUpperCase() ?? '?';
-      return { uri: avatarFiles.get(userId) ?? null, initial, tint: avatarTint(userId) };
+      return { uri: avatarFiles.get(userId) ?? null, initial, tint: avatarTintFor(userId, avatarTints) };
     };
 
     const map = new Map<string, Group>();
@@ -232,7 +229,16 @@ export default function HomeScreen() {
       income: inc,
       monthCount: cnt,
     };
-  }, [transactionsQ.data, categoriesQ.data, membersQ.data, profileQ.data, avatarFiles, catColors, palette]);
+  }, [
+    transactionsQ.data,
+    categoriesQ.data,
+    membersQ.data,
+    profileQ.data,
+    avatarFiles,
+    catColors,
+    palette,
+    avatarTints,
+  ]);
 
   // 记一笔：若当前用户还没有家庭，先自动建「单人家庭」（M1：登录 + 单人家庭自动创建）。
   const openCreate = async () => {
@@ -331,7 +337,7 @@ export default function HomeScreen() {
                   isOwner={isOwner}
                   hidden={amountsHidden}
                   onToggleHidden={toggleAmounts}
-                  onPress={() => setSummary({ open: true, period: currentPeriod() })}
+                  onPress={() => openSummary(currentPeriod())}
                   onSetBudget={() => setBudgetOpen(true)}
                 />
               </Section>
@@ -340,7 +346,7 @@ export default function HomeScreen() {
                   <InsightBanner
                     title="上月总结来啦 🎉"
                     subtitle="看看上个月家里的开销与变化"
-                    onPress={() => setSummary({ open: true, period: prevPeriodStr })}
+                    onPress={() => openSummary(prevPeriodStr)}
                     onDismiss={dismissLastMonthReminder}
                   />
                 </Section>
@@ -429,12 +435,7 @@ export default function HomeScreen() {
       {/* 首次记账庆祝（PRD §4.3 S1）：面板关闭后弹出 */}
       <FirstRecordCelebration visible={celebrate} onClose={() => setCelebrate(false)} />
 
-      {/* 月度总结全屏视图（流程 9）：脉搏卡点击落本月至今；月初提醒落上月 */}
-      <MonthlySummaryScreen
-        visible={summary.open}
-        initialPeriod={summary.period}
-        onClose={() => setSummary((s) => ({ ...s, open: false }))}
-      />
+      {/* 月度总结为独立 push 页（/summary），入口在脉搏卡与月初提醒，见 openSummary。 */}
 
       {/* 预算设置（降级态户主 CTA → 流程 8） */}
       <BudgetSheet visible={budgetOpen} onClose={() => setBudgetOpen(false)} />

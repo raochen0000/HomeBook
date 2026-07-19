@@ -2,6 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
+import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { LoginScreen } from '@/features/auth/login-screen';
@@ -30,7 +31,9 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AppShell />
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+        <AppShell />
+      </SafeAreaProvider>
     </QueryClientProvider>
   );
 }
@@ -58,6 +61,7 @@ function AppShell() {
         <Stack screenOptions={{ headerShown: false, headerBackButtonDisplayMode: 'minimal' }}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="search" />
+          <Stack.Screen name="summary" />
         </Stack>
       </SearchProvider>
       {/* 已登录：关键通知兜底（被移除/解散/转让，流程 13）。 */}

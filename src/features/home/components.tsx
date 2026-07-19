@@ -72,15 +72,8 @@ export function CategoryAvatar({ symbol, color, size = 44 }: { symbol: string; c
 }
 
 // ── 成员头像（真实照片 + 首字母色块回退）────────────────────────────────────────
-/** 头像回退色块底色（与家庭页一致的 4 色循环）。 */
-export const AVATAR_TINTS = ['#5AA7F0', '#46C98A', '#F5A623', '#9B6DD6'] as const;
-
-/** 按用户 id 稳定取一个回退底色（无头像时用）。 */
-export function avatarTint(id: string): string {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return AVATAR_TINTS[h % AVATAR_TINTS.length];
-}
+// 回退色块底色改由 `@/constants/design` 的 useAvatarTints()/avatarTintFor() 统一供给
+// （DESIGN §3.0 铁律 1、4：禁裸 hex + Light/Night 各自取值）。
 
 export type AvatarInfo = {
   /** 本地缓存的头像文件路径（file://…）；无则走首字母回退。 */

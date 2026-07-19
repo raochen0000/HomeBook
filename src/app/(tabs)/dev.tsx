@@ -82,9 +82,14 @@ export default function DevScreen() {
             登录
           </ThemedText>
           <ThemedView type="background" style={styles.row}>
-            {button('登录为 测试A', () => run('登录 A', () => devSignIn(TEST_ACCOUNTS.a)))}
-            {button('登录为 测试B', () => run('登录 B', () => devSignIn(TEST_ACCOUNTS.b)))}
+            {button('登录为 大伟(户主)', () => run('登录 A', () => devSignIn(TEST_ACCOUNTS.a)))}
+            {button('登录为 小美', () => run('登录 B', () => devSignIn(TEST_ACCOUNTS.b)))}
             {button('登出', () => run('登出', devSignOut))}
+          </ThemedView>
+          <ThemedView type="background" style={styles.row}>
+            {button('登录为 阿强', () => run('登录 C', () => devSignIn(TEST_ACCOUNTS.c)))}
+            {button('登录为 婷婷', () => run('登录 D', () => devSignIn(TEST_ACCOUNTS.d)))}
+            {button('登录为 老王', () => run('登录 E', () => devSignIn(TEST_ACCOUNTS.e)))}
           </ThemedView>
 
           <ThemedText type="smallBold" style={styles.sectionTitle}>

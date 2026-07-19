@@ -267,21 +267,12 @@ export function CategoryManageSheet({ visible, onClose }: { visible: boolean; on
 function Body({ onClose }: { onClose: () => void }) {
   const palette = usePalette();
   const [view, setView] = useState<ViewState>({ mode: 'list' });
-  const editorView = view.mode === 'list' ? null : view;
 
-  return (
-    <>
-      <List palette={palette} onClose={onClose} setView={setView} />
-      <Modal
-        visible={!!editorView}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setView({ mode: 'list' })}
-      >
-        {editorView ? <Editor view={editorView} onBack={() => setView({ mode: 'list' })} /> : null}
-      </Modal>
-    </>
-  );
+  // 单壳内切换「列表 / 编辑器」，不再嵌套第二层 pageSheet（DESIGN §9.9：pageSheet 不叠加）。
+  if (view.mode !== 'list') {
+    return <Editor view={view} onBack={() => setView({ mode: 'list' })} />;
+  }
+  return <List palette={palette} onClose={onClose} setView={setView} />;
 }
 
 // ── 列表 ─────────────────────────────────────────────────────────────────────
