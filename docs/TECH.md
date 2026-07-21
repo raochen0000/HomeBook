@@ -1,7 +1,7 @@
 # 家账 · 技术选型与开发方案（TECH）
 
-> 文档版本：v0.2.2（家庭协作：邀请码改为 6 位大写字母数字（排除易混 `0/O/1/I`），新增只读 `preview_family_by_code` 凭码换家庭预览（限频防枚举）；OSS 增「家庭封面」；对应 PRD 流程 3/4、§3.5）
-> 最后更新：2026-06-21
+> 文档版本：v0.2.3（**报表图表选型对齐**：§3 由 Victory Native XL / Skia 订正为 `react-native-svg` 自绘，关闭与 DESIGN 的既有分歧；历史：v0.2.2 家庭协作邀请码改 6 位大写字母数字 + `preview_family_by_code` 凭码预览）
+> 最后更新：2026-07-20
 > 关联文档：PRD.md（§23；流程 3/4、§3.5）、DESIGN.md（§5.6）、IA.md、MVP.md、DATAMODEL.md（§3.2、§5.1）、AGENTS.md（AI 编码业务铁律，根目录）
 > 负责人：产品组 / 研发
 > 用途：作为「家账」客户端与后端技术实现的单一事实来源（Single Source of Truth），记录技术选型、后端架构、开发环境、调试流程、里程碑排期与上架盈利路径。后续可基于本文档持续补充。
@@ -33,7 +33,7 @@
 | 网络            | **fetch + TanStack Query** + **Supabase JS SDK**               | 客户端用 anon key 直连 Supabase，安全由 RLS 兜底                                                                                                                                                                  |
 | 二维码          | 扫码 **expo-camera**；生成 **react-native-qrcode-svg**         | 流程 3 / 4                                                                                                                                                                                                        |
 | 动画 / 手势     | **react-native-reanimated** + **react-native-gesture-handler** | 滑动确认控件、庆祝动效                                                                                                                                                                                            |
-| 图表            | **Victory Native (XL)**（见 §3）                               | 报表环形 / 条形 / 折线 / 双柱图                                                                                                                                                                                   |
+| 图表            | **react-native-svg 自绘**（见 §3）                             | 报表环形 / 条形 / 折线 / 双柱 / 瀑布 / 热力图，全部手绘覆盖                                                                                                                                                       |
 | 安全存储        | **expo-secure-store**                                          | Token / 登录态                                                                                                                                                                                                    |
 | 推送            | **阿里云移动推送 EMAS**（厂商通道 + APNs）                     | **国内 FCM/Expo Push 不可用**，安卓走华为/小米/OPPO/vivo/魅族厂商通道，iOS 走 APNs（见 §7.5）                                                                                                                     |
 | OTA 热更新      | **EAS Update（expo-updates）**                                 | JS 层 bug 免审核直推                                                                                                                                                                                              |
@@ -46,22 +46,21 @@
 
 ## 3. 报表图表方案
 
-报表需求见 PRD §11.5、DESIGN §5.7：环形图（P0）、横向条形图 / 折线图 / 双柱图（P1）。
+报表需求见 PRD §11.5、DESIGN §5.7 / 附录 A.5：环形、横向条形、折线、面积、双柱（双轴）、结余瀑布、记账热力图，且当前未结束周期须有「进行中」斜纹语义。设计稿远超标准单序列图表，需要逐像素可控的自绘能力。
 
-| 库                            | 渲染        | 优点                                                      | 代价                          | 适合                                      |
-| ----------------------------- | ----------- | --------------------------------------------------------- | ----------------------------- | ----------------------------------------- |
-| **Victory Native (XL, v40+)** | Skia（GPU） | 性能强、组合式 API 像 React、TS 优先、饼/环/柱/折线全覆盖 | 需 Dev Build（Skia 原生模块） | 一套库覆盖现在 + 将来全部图表（**推荐**） |
-| react-native-gifted-charts    | SVG         | props 式、上手快、可在 Expo Go 跑、含环形/柱/折线         | 大数据量性能一般              | 仅 MVP 环形图、想最快出活                 |
+**决策（2026-07-20 定稿）**：报表图表统一用 **`react-native-svg` 手绘**，不引入任何新原生图表库。`react-native-svg` 已因二维码（`react-native-qrcode-svg`）在依赖里，**零新增原生模块、零额外 Dev Build 触发**，且能 100% 还原设计稿的所有样式与交互。
 
-**决策**：选 **Victory Native (XL)**，一步到位覆盖 P0 + P1，避免后期换库。
+被评估但放弃的方案：
 
-安装（一次装齐 peer 依赖）：
+| 方案                              | 渲染        | 为何不选 / 选用                                                                             |
+| --------------------------------- | ----------- | ------------------------------------------------------------------------------------------ |
+| **react-native-svg 自绘（选用）** | SVG         | 已装（qrcode 依赖）、零新原生模块、逐像素可控，双轴 / 堆叠 / 瀑布 / 热力 / 斜纹预计柱全能画  |
+| Victory Native (XL, v40+)         | Skia（GPU） | 需引入 Skia 原生模块 → 又一次 Dev Build 重编（本项目刻意规避）；瀑布 / 热力仍要自拼，收益不抵成本 |
+| react-native-gifted-charts        | SVG         | 覆盖标准柱 / 线 / 饼，但瀑布 / 热力 / 双轴 / 斜纹 / 自定义标注仍得落回 svg，多养一个依赖只换部分覆盖 |
+| `@expo/ui` `Chart`（Swift Charts） | 原生        | SDK 56 已内置，但仅单序列、无分组 / 堆叠 / 双轴 / 瀑布 / 热力 / 扇区回调，表达不了报表设计   |
 
-```bash
-npx expo install victory-native @shopify/react-native-skia react-native-reanimated react-native-gesture-handler
-```
+**落地现状**：环形图（`donut.tsx`：`Circle`+`strokeDasharray`、点按扇区取值）、收支双柱 + 结余折线、结余瀑布、斜纹「进行中」预计柱（`Defs`+`Pattern`）、记账热力图、储蓄率面积趋势均已用 `react-native-svg` 落地（见 `src/features/report/`、`src/app/(tabs)/report.tsx`）。手势 / 动效复用已装的 `react-native-reanimated` + `react-native-gesture-handler`，不新增依赖。原「待解分歧」（TECH §3 Victory/Skia ↔ DESIGN 自绘）**至此对齐关闭**。
 
-> 待解分歧（既有）：TECH §3（Victory Native / Skia）与 DESIGN §5.7（Skia 自绘）口径需对齐，单独处理，与本次后端更新无关。
 > 口径提醒：储蓄类流水（`source != normal`）计入收支/结余，但**不进**分类占比与消费趋势图（见 PRD §11.6、DATAMODEL §3.4）。
 
 ---
@@ -117,7 +116,7 @@ git --version
    npx create-expo-app@latest jiazhang
    cd jiazhang
 
-② 安装开发客户端（使用 Skia / 相机等原生模块需要）
+② 安装开发客户端（使用相机等原生模块需要）
    npx expo install expo-dev-client
 
 ③ 首次构建 Dev Build（二选一）
@@ -341,7 +340,7 @@ supabase/                 # 后端工程（与客户端同仓或独立仓）
 | **M0 地基**        | 脚手架 + 设计令牌主题 + 本地 DB + API 层骨架                                                                       | TS 主题（Light/Night）、NativeTabs 四 Tab（首页 / 报表 / 家庭 / 我的）+ 记一笔悬浮钮 + 顶栏搜索图标、搜索占位页、`<Money/>`、空状态                                                                                                                     | 阿里云 Supabase 基座搭起（A1/A2 定夺）、迁移骨架 + 核心表 + RLS、CI 跑 pgTAP                                                                                            |
 | **M1 账号 + 记账** | 流程 1 登录（MVP = 邮箱 / Apple；**手机 OTP 移至发布前**，见 §7.9 / MVP §2.4）、流程 2 记一笔、流程 10 编辑 / 删除 | 记账 Sheet（大金额输入）、流水列表（按日分组 + 左滑）、离线同步队列                                                                                                                                                                                     | Supabase Auth（MVP 邮箱 + Apple）、流水 RPC、WatermelonDB 同步函数（pull/push）；**阿里云短信 OTP 发布前接入**                                                          |
 | **M2 家庭协作**    | 流程 3 邀请二维码、流程 4 扫码加入、流程 5 转让 / 退出 / 解散、流程 13 关键通知                                    | expo-camera 扫码、qrcode-svg 生成、滑动确认控件、被移除全屏兜底                                                                                                                                                                                         | 家庭/成员流转 RPC（在线）、邀请码校验、NOTIFICATION + Realtime                                                                                                          |
-| **M3 基础报表**    | 流程 9 基础版（本月收支结余 + 分类占比环形图）                                                                     | Victory Native XL 环形图 + 概览环比角标 + 结余率（值）+ 分类明细下钻                                                                                                                                                                                    | 报表聚合视图 / RPC（排除储蓄类流水口径；输出本期 + 上期对比值供环比）                                                                                                   |
+| **M3 基础报表**    | 流程 9 基础版（本月收支结余 + 分类占比环形图）                                                                     | react-native-svg 环形图 + 概览环比角标 + 结余率（值）+ 分类明细下钻                                                                                                                                                                                    | 报表聚合视图 / RPC（排除储蓄类流水口径；输出本期 + 上期对比值供环比）                                                                                                   |
 | **M4 增值（P1）**  | 分类管理 → 预算 → 储蓄目标 → 完整报表 / 月度总结 → 移除成员 → 通知体系                                             | 进度条 / 目标卡 / 庆祝动效、Banner；报表完整版：成员参与度（原生横向条）/ 发生额折线 / 累计同期双线 / 收支双柱 / 分类环比 / 大额 Top N 列表 / 结余率仪表 / 月度总结卡（**报表图表实现为 react-native-svg 自绘，非 Victory**；月度总结为客户端实时计算） | 储蓄存取 RPC、pg_cron（预算重置/继任判定）、报表聚合扩展（分类环比 / 同期累计 / Top N 聚合）；**系统推送（阿里云 EMAS）、月度总结服务端快照 移至发布前（见 MVP §2.4）** |
 
 每批结束应可独立验收（与 MVP §4 一致）。
@@ -373,7 +372,7 @@ supabase/                 # 后端工程（与客户端同仓或独立仓）
 7. **账期时区**：归月 / 归日按 `FAMILY.timezone` 计算（PRD §2.5），不随成员所在地变化。
 8. **数据备份**：记账数据务必开启 RDS 自动备份 + PITR；自建则自管备份策略。
 9. **可访问性**：Dynamic Type、VoiceOver、减弱动态、Light/Night 两套对比度（DESIGN §13），组件层内建。
-10. **图表性能**：Victory Native（Skia）需 Dev Build；大数据量时注意 Reanimated 共享值更新频率。
+10. **图表性能**：报表图表为 `react-native-svg` 自绘（无 Skia / Victory）；热力图约 365 个 `Rect`、趋势多序列时用 `useMemo` 缓存序列，避免每帧重算。
 11. **OTA 边界**：EAS Update 仅能热更新 JS 层；改动原生模块仍需重新提审。
 12. **改原生配置须 prebuild，纯 xcodebuild 不应用 config 插件**：`app.json` 的 `plugins` / 权限 / 原生配置改动只在 **`npx expo prebuild`** 阶段写进 `ios/`（如 Info.plist 的权限说明键）。本项目重编命令 `npm run ios:sim` 是**纯 `xcodebuild`，不会跑 config 插件**，单独重编会出现「JS 代码对、原生没生效」。正确顺序：**先 `npx expo prebuild -p ios`（**不要带 `--clean`**，否则会冲掉 `ios/Podfile.properties.json` 的 `EXPO_USE_PRECOMPILED_MODULES=false`，导致启动 dyld 崩溃，详见 README「重要约束」），再 `npm run ios:sim`**。典型事故：接入 `expo-image-picker` 后仅 `ios:sim`，`Info.plist` 缺 `NSPhotoLibraryUsageDescription`，一选图即被 iOS 按隐私违规 `SIGABRT` 闪退（`Namespace TCC`）。亦不可用 `npm run ios`（`expo run:ios`）——当前 Xcode 26 / iOS 26 模拟器会被误判成真机索要签名（见 README「重要约束」）。
 13. **@expo/ui（SwiftUI）ScrollView 自动避让安全区**：SwiftUI `ScrollView` 会**自动**按安全区内缩内容（顶部 `insets.top`、底部含悬浮 Tab Bar）。若在其上再手动叠加 `insets.top` / `TabBarInset`，会**双重计入**，表现为三类症状：①标题与主体间多出约一个安全区高度的空隙；②列表末尾留出约一个 Tab Bar 高度的大片空白；③滚动折叠头部出现起始「死区」——`useScrollGeometryChange` 上报的 `contentOffsetY` 在停靠顶部时为 `-insets.top`，需 `+insets.top` 归一化后再驱动折叠。首页已据此处理（[src/app/index.tsx](../src/app/index.tsx)：顶部 padding 减 `insets.top`、底部只留小间距 `Space[6]`；[src/features/shared/use-collapsible-header.ts](../src/features/shared/use-collapsible-header.ts)：折叠偏移量 `+topInset` 归一化）。**RN 的 `ScrollView` 不会自动避让**（报表/家庭页仍需手动 `TabBarInset` 底部 padding 才能让内容滚到悬浮 Tab Bar 上方）——SwiftUI 与 RN 两条滚动链路非对称，勿照搬彼此的留白处理。
