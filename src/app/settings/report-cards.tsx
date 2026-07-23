@@ -12,11 +12,10 @@ import { HStack, Image, List, Section, Spacer, Text } from '@expo/ui/swift-ui';
 import { contentShape, font, foregroundColor, moveDisabled, onTapGesture, shapes } from '@expo/ui/swift-ui/modifiers';
 import { Stack } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { useState } from 'react';
 import { View } from 'react-native';
 
 import { DEFAULT_ACCOUNTING_PREFS, useAccountingPrefs, useSaveAccountingPrefs } from '@/api';
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { Space, usePalette } from '@/constants/design';
 import { Caption, SettingsList } from '@/features/settings/native-list';
 import {
@@ -43,7 +42,6 @@ export default function ReportCardsScreen() {
   const palette = usePalette();
   const { data } = useAccountingPrefs();
   const save = useSaveAccountingPrefs();
-  const [toast, setToast] = useState<string | null>(null);
 
   const prefs = data ?? DEFAULT_ACCOUNTING_PREFS;
   const { visible, hidden } = resolveCardLayout(prefs.report_card_order, prefs.report_card_hidden);
@@ -59,7 +57,7 @@ export default function ReportCardsScreen() {
   const hideCard = (id: ReportCardId) => {
     if (isLockedCard(id)) return;
     if (visible.length <= MIN_VISIBLE_CARDS) {
-      setToast(`至少展示 ${MIN_VISIBLE_CARDS} 个卡片`);
+      toast.warning(`至少展示 ${MIN_VISIBLE_CARDS} 个卡片`);
       return;
     }
     persist(
@@ -128,8 +126,6 @@ export default function ReportCardsScreen() {
 
         <Caption text="「收支概览」为核心卡，常驻不可隐藏。隐藏的卡片可随时添加回来。" />
       </SettingsList>
-
-      <Toast visible={toast !== null} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
 }

@@ -11,13 +11,13 @@ import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { type Href, useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
-import type { ReactNode } from 'react';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { Fragment, type ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Line, Polyline, Rect } from 'react-native-svg';
+import Svg, { Circle, Line, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 
 import {
   DEFAULT_ACCOUNTING_PREFS,
@@ -34,6 +34,7 @@ import {
   type TxnRange,
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
+import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, TabBarInset, useCategoryColors, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import {
@@ -70,6 +71,12 @@ type ReportScope = 'expense' | 'income' | 'balance';
 type ReportFilters = { memberIds: string[]; categoryIds: string[] };
 type IncomeTargets = { annual: number; custom: number; activeRatio: number };
 type FinancialInsight = { title: string; body: string; action: string; tone: 'ok' | 'warn' | 'danger' };
+type HeatmapScope = ReportScope;
+
+const HEATMAP_COLUMN_GAP = 1;
+const HEATMAP_ROW_GAP = 2;
+const HEATMAP_MIN_CELL_SIZE = 3;
+const HEATMAP_FALLBACK_CELL_SIZE = 5;
 
 const REPORT_SCOPES: { key: ReportScope; label: string }[] = [
   { key: 'expense', label: '支出' },
@@ -126,6 +133,45 @@ function projectionForRange(amount: number, range: { start: Date; end: Date }, i
 
 function renderOrderedCards(nodes: Partial<Record<ReportCardId, ReactNode>>, order: ReportCardId[]): ReactNode[] {
   return order.map((id) => (nodes[id] ? <View key={id}>{nodes[id]}</View> : null)).filter(Boolean);
+}
+
+/**
+ * 首次进入报表时按 PRD 的视角推荐顺序呈现；用户在「报表卡片」页手动排序后，
+ * 则完整尊重个人顺序。这样不会把同一数据在顶部重复解释，也保留自定义能力。
+ */
+const DEFAULT_SCOPE_CARD_ORDER: Record<ReportScope, ReportCardId[]> = {
+  expense: [
+    'overview',
+    'budget',
+    'expense_trend',
+    'expense_category',
+    'category_mom',
+    'member',
+    'savings_goals',
+    'more_stats',
+    'insights',
+    'top_expenses',
+  ],
+  income: ['overview', 'income_trend', 'income_structure', 'income_target', 'more_stats', 'insights'],
+  balance: [
+    'overview',
+    'income_expense',
+    'balance_waterfall',
+    'savings_rate',
+    'savings_goals',
+    'more_stats',
+    'insights',
+  ],
+};
+
+function recommendedCardOrder(scope: ReportScope, visible: ReportCardId[], hasCustomOrder: boolean): ReportCardId[] {
+  const source = hasCustomOrder ? visible : DEFAULT_SCOPE_CARD_ORDER[scope];
+  const scoped = source.filter((id) => visible.includes(id));
+  const withMissing = [...scoped, ...visible.filter((id) => !scoped.includes(id))];
+  const overview = withMissing.includes('overview') ? ['overview' as const] : [];
+  const middle = withMissing.filter((id) => id !== 'overview' && id !== 'insights');
+  const insights = withMissing.includes('insights') ? ['insights' as const] : [];
+  return [...overview, ...middle, ...insights];
 }
 
 function startOfLocalDay(date: Date): Date {
@@ -211,7 +257,9 @@ export default function ReportScreen() {
   const [customEnd, setCustomEnd] = useState(() => startOfLocalDay(new Date()));
   const [customOpen, setCustomOpen] = useState(false);
   const [detail, setDetail] = useState<{ id: string; name: string } | null>(null);
-  const [memberDetail, setMemberDetail] = useState<Member | null>(null);
+  const [memberAnalysisOpen, setMemberAnalysisOpen] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState(false);
+  const [moreStatsOpen, setMoreStatsOpen] = useState(false);
   const [savingsOpen, setSavingsOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
 
@@ -223,6 +271,7 @@ export default function ReportScreen() {
     if (dimension !== 'custom') return periodRange(dimension, shiftAnchor(dimension, anchor, -1));
     return previousEqualRange(range.start, range.end);
   }, [dimension, anchor, range]);
+  const statsYearRange = useMemo(() => periodRange('year', range.start), [range.start]);
   const isCurrent = useMemo(() => {
     if (dimension !== 'custom') return isCurrentPeriod(dimension, anchor);
     const today = startOfLocalDay(new Date());
@@ -243,8 +292,12 @@ export default function ReportScreen() {
     } else {
       from = periodRange(dimension, shiftAnchor(dimension, anchor, -(HISTORY_PERIODS - 1))).start;
     }
-    return { from: from.toISOString(), to: range.end.toISOString() };
-  }, [dimension, anchor, range]);
+    const statsFrom = statsYearRange.start;
+    return {
+      from: new Date(Math.min(from.getTime(), statsFrom.getTime())).toISOString(),
+      to: new Date(Math.max(range.end.getTime(), statsYearRange.end.getTime())).toISOString(),
+    };
+  }, [dimension, anchor, range, statsYearRange]);
   const txnsQ = useTransactions(fetchRange);
   const rawTxns = useMemo(() => txnsQ.data ?? [], [txnsQ.data]);
   const filteredTxns = useMemo(() => filterTransactions(rawTxns, filters), [rawTxns, filters]);
@@ -422,6 +475,7 @@ export default function ReportScreen() {
   const customToolbarEnd = dimension === 'custom' ? addDays(range.end, -1) : range.start;
   const visibleCards = cardLayout.visible;
   const hiddenCards = cardLayout.hidden;
+  const cardOrder = recommendedCardOrder(scope, visibleCards, prefs.report_card_order.length > 0);
   const openCardSettings = () => router.push('/settings/report-cards' as Href);
   const shiftPeriod = (delta: number) => {
     if (dimension !== 'custom') {
@@ -455,10 +509,18 @@ export default function ReportScreen() {
       incomeTarget={incomeTarget}
       palette={palette}
       hidden={privacy}
+      onPress={() => setInsightsOpen(true)}
     />
   );
   const commonStatsCard = (
-    <MoreStatsCard transactions={filteredTxns} range={range} palette={palette} hidden={privacy} />
+    <MoreStatsEntryCard
+      scope={scope}
+      transactions={filteredTxns}
+      range={statsYearRange}
+      palette={palette}
+      hidden={privacy}
+      onPress={() => setMoreStatsOpen(true)}
+    />
   );
   const addCardEntry =
     hiddenCards.length > 0 ? (
@@ -467,7 +529,15 @@ export default function ReportScreen() {
 
   const expenseCards: Partial<Record<ReportCardId, ReactNode>> = {
     overview: (
-      <MonthlyOverviewCard income={income} expense={expense} balance={balance} palette={palette} hidden={privacy} />
+      <MonthlyOverviewCard
+        income={income}
+        expense={expense}
+        balance={balance}
+        periodText={periodText}
+        currentPeriod={isCurrent}
+        palette={palette}
+        hidden={privacy}
+      />
     ),
     ...(isMonthlyView
       ? {
@@ -486,8 +556,14 @@ export default function ReportScreen() {
         }
       : {}),
     insights: commonInsightCard,
-    income_expense: (
-      <IncomeExpenseCard series={incomeExpense} palette={palette} hidden={privacy} currentPeriod={isCurrent} />
+    expense_trend: (
+      <MonthlyExpenseTrendCard
+        series={incomeExpense}
+        budgetTotal={isMonthlyView ? (budgetQ.data?.budget?.total_amount ?? null) : null}
+        palette={palette}
+        hidden={privacy}
+        currentPeriod={isCurrent}
+      />
     ),
     expense_category: (
       <MonthlyExpenseCategoryCard
@@ -508,7 +584,7 @@ export default function ReportScreen() {
         periodText={periodText}
         palette={palette}
         hidden={privacy}
-        onOpenMember={setMemberDetail}
+        onOpen={() => setMemberAnalysisOpen(true)}
       />
     ),
     ...(isMonthlyView
@@ -531,8 +607,11 @@ export default function ReportScreen() {
     overview: (
       <MonthlyIncomeOverviewCard
         income={income}
-        slices={incomeSlices}
+        expense={expense}
+        balance={balance}
+        rate={balRate}
         periodText={periodText}
+        currentPeriod={isCurrent}
         palette={palette}
         hidden={privacy}
       />
@@ -560,10 +639,12 @@ export default function ReportScreen() {
   const balanceCards: Partial<Record<ReportCardId, ReactNode>> = {
     overview: (
       <MonthlyBalanceOverviewCard
+        income={income}
         expense={expense}
         balance={balance}
         rate={balRate}
         periodText={periodText}
+        currentPeriod={isCurrent}
         palette={palette}
         hidden={privacy}
       />
@@ -700,11 +781,16 @@ export default function ReportScreen() {
             <ReportFilterBar
               activeCount={activeFilters}
               matchedCount={filteredCount}
+              periodLabel={periodText}
+              currentPeriod={isCurrent}
               palette={palette}
               onPress={() => setFilterOpen(true)}
             />
 
-            {renderOrderedCards(scopeCards, visibleCards)}
+            {filteredCount > 0 && filteredCount < 3 ? (
+              <ReportDataReadinessCard count={filteredCount} palette={palette} />
+            ) : null}
+            {renderOrderedCards(scopeCards, cardOrder)}
             {addCardEntry}
           </Animated.ScrollView>
         )}
@@ -731,13 +817,37 @@ export default function ReportScreen() {
         onClose={() => setDetail(null)}
       />
       <MemberAnalysisSheet
-        member={memberDetail}
+        visible={memberAnalysisOpen}
         range={range}
         dimension={dimension}
         transactions={filteredTxns}
+        members={membersQ.data ?? []}
         categories={catsQ.data ?? []}
         hidden={privacy}
-        onClose={() => setMemberDetail(null)}
+        onClose={() => setMemberAnalysisOpen(false)}
+      />
+      <FinancialInsightsDetailSheet
+        visible={insightsOpen}
+        income={income}
+        expense={expense}
+        expenseTotal={expenseTotal}
+        projectedExpense={projectedExpense}
+        projectedIncome={projectedIncome}
+        budgetTotal={budgetQ.data?.budget?.total_amount ?? null}
+        topCategory={byCat[0] ?? null}
+        topExpense={topItems[0] ?? null}
+        goals={savingsQ.data ?? []}
+        incomeTarget={incomeTarget}
+        hidden={privacy}
+        onClose={() => setInsightsOpen(false)}
+      />
+      <MoreStatsSheet
+        visible={moreStatsOpen}
+        scope={scope}
+        range={statsYearRange}
+        transactions={filteredTxns}
+        hidden={privacy}
+        onClose={() => setMoreStatsOpen(false)}
       />
       <CustomRangeSheet
         visible={customOpen}
@@ -771,11 +881,15 @@ export default function ReportScreen() {
 function ReportFilterBar({
   activeCount,
   matchedCount,
+  periodLabel,
+  currentPeriod,
   palette,
   onPress,
 }: {
   activeCount: number;
   matchedCount: number;
+  periodLabel: string;
+  currentPeriod: boolean;
   palette: ReturnType<typeof usePalette>;
   onPress: () => void;
 }) {
@@ -791,7 +905,8 @@ function ReportFilterBar({
       ]}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`报表筛选，已启用 ${activeCount} 个条件，当前周期命中 ${matchedCount} 笔流水`}
+      accessibilityLabel={`报表筛选，${currentPeriod ? '当前周期进行中' : '历史周期已结算'}，已启用 ${activeCount} 个条件，当前周期命中 ${matchedCount} 笔流水`}
+      accessibilityHint="点按可按家庭成员或分类筛选全部报表数据"
     >
       <View style={styles.filterBarLeft}>
         <View style={[styles.filterIconBadge, { backgroundColor: active ? palette.accent : palette.card }]}>
@@ -806,10 +921,41 @@ function ReportFilterBar({
         </ThemedText>
       </View>
       <View style={styles.filterBarRight}>
-        <ThemedText style={[styles.filterBarMeta, { color: palette.textSecondary }]}>{matchedCount} 笔流水</ThemedText>
+        <View style={[styles.periodStatus, { backgroundColor: currentPeriod ? palette.bannerTint : palette.cardPill }]}>
+          <View
+            style={[styles.periodStatusDot, { backgroundColor: currentPeriod ? palette.info : palette.textTertiary }]}
+          />
+          <ThemedText
+            style={[styles.periodStatusText, { color: currentPeriod ? palette.info : palette.textSecondary }]}
+          >
+            {currentPeriod ? `${periodLabel}进行中` : '已结算'}
+          </ThemedText>
+        </View>
+        <ThemedText style={[styles.filterBarMeta, { color: palette.textSecondary }]}>{matchedCount} 笔</ThemedText>
         <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
       </View>
     </Pressable>
+  );
+}
+
+function ReportDataReadinessCard({ count, palette }: { count: number; palette: ReturnType<typeof usePalette> }) {
+  return (
+    <View
+      style={[styles.dataReadinessCard, { backgroundColor: palette.card, borderColor: palette.separator }]}
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={`数据仍在积累中，当前周期已记录 ${count} 笔；继续记账后将显示更可靠的趋势与环比。`}
+    >
+      <View style={[styles.dataReadinessIcon, { backgroundColor: palette.bannerTint }]}>
+        <SymbolView name="chart.line.uptrend.xyaxis" tintColor={palette.info} size={20} />
+      </View>
+      <View style={styles.flex}>
+        <ThemedText style={[styles.dataReadinessTitle, { color: palette.textPrimary }]}>数据仍在积累中</ThemedText>
+        <ThemedText style={[styles.dataReadinessBody, { color: palette.textSecondary }]}>
+          已记录 {count} 笔；继续记账后，趋势与环比会更可靠。
+        </ThemedText>
+      </View>
+    </View>
   );
 }
 
@@ -864,12 +1010,7 @@ function ReportFilterSheet({
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView style={styles.flex}>
-          <View style={styles.sheetBar}>
-            <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>全局筛选</Text>
-            <Pressable hitSlop={8} onPress={onClose}>
-              <Text style={[styles.sheetAction, { color: palette.textSecondary }]}>应用</Text>
-            </Pressable>
-          </View>
+          <SheetHeader title="全局筛选" />
           <ScrollView contentContainerStyle={styles.sheetContent}>
             <View style={[styles.filterSummaryCard, { backgroundColor: palette.card }]}>
               <View style={[styles.filterSummaryIcon, { backgroundColor: palette.cardPill }]}>
@@ -1161,12 +1302,7 @@ function IncomeTargetSheet({
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView style={styles.flex}>
-          <View style={styles.sheetBar}>
-            <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>收入目标</Text>
-            <Pressable hitSlop={8} onPress={save}>
-              <Text style={[styles.sheetAction, { color: palette.accent }]}>保存</Text>
-            </Pressable>
-          </View>
+          <SheetHeader title="收入目标" onClose={onClose} onConfirm={save} />
           <View style={styles.customRangeContent}>
             <TargetInputCard label="年度目标" value={annual} onChangeText={setAnnual} palette={palette} />
             <TargetInputCard label="自定义周期目标" value={custom} onChangeText={setCustom} palette={palette} />
@@ -1212,7 +1348,7 @@ function TargetInputCard({
   );
 }
 
-function FinancialInsightsCard({
+function buildFinancialInsights({
   income,
   expense,
   expenseTotal,
@@ -1223,8 +1359,8 @@ function FinancialInsightsCard({
   topExpense,
   goals,
   incomeTarget,
-  palette,
   hidden,
+  nowMs,
 }: {
   income: number;
   expense: number;
@@ -1236,10 +1372,9 @@ function FinancialInsightsCard({
   topExpense: TopItem | null;
   goals: SavingsGoal[];
   incomeTarget: number;
-  palette: ReturnType<typeof usePalette>;
   hidden: boolean;
-}) {
-  const [nowMs] = useState(() => Date.now());
+  nowMs: number;
+}): FinancialInsight[] {
   const insights: FinancialInsight[] = [];
   if (budgetTotal && budgetTotal > 0 && projectedExpense != null && projectedExpense > budgetTotal) {
     insights.push({
@@ -1294,15 +1429,70 @@ function FinancialInsightsCard({
       tone: 'ok',
     });
   }
+  return insights;
+}
+
+function FinancialInsightsCard({
+  income,
+  expense,
+  expenseTotal,
+  projectedExpense,
+  projectedIncome,
+  budgetTotal,
+  topCategory,
+  topExpense,
+  goals,
+  incomeTarget,
+  palette,
+  hidden,
+  onPress,
+}: {
+  income: number;
+  expense: number;
+  expenseTotal: number;
+  projectedExpense: number | null;
+  projectedIncome: number | null;
+  budgetTotal: number | null;
+  topCategory: CatSlice | null;
+  topExpense: TopItem | null;
+  goals: SavingsGoal[];
+  incomeTarget: number;
+  palette: ReturnType<typeof usePalette>;
+  hidden: boolean;
+  onPress: () => void;
+}) {
+  const [nowMs] = useState(() => Date.now());
+  const insights = buildFinancialInsights({
+    income,
+    expense,
+    expenseTotal,
+    projectedExpense,
+    projectedIncome,
+    budgetTotal,
+    topCategory,
+    topExpense,
+    goals,
+    incomeTarget,
+    hidden,
+    nowMs,
+  });
   const lead = insights[0];
   const rest = insights.slice(1, 3);
   const leadColor = insightToneColor(lead.tone, palette);
 
   return (
-    <View style={[styles.card, styles.insightsCard, { backgroundColor: palette.card }]}>
+    <Pressable
+      style={[styles.card, styles.insightsCard, { backgroundColor: palette.card }]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityHint="点按查看详细洞察数据"
+    >
       <View style={styles.cardHeaderRow}>
         <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>财务洞察</ThemedText>
-        <ThemedText style={[styles.chartMeta, { color: palette.textSecondary }]}>{insights.length} 条</ThemedText>
+        <View style={styles.cardHeaderAction}>
+          <ThemedText style={[styles.chartMeta, { color: palette.textSecondary }]}>{insights.length} 条</ThemedText>
+          <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
+        </View>
       </View>
       <View style={[styles.insightLead, { backgroundColor: palette.base }]}>
         <View style={[styles.insightLeadIcon, { backgroundColor: leadColor }]}>
@@ -1334,7 +1524,7 @@ function FinancialInsightsCard({
           })}
         </View>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
@@ -1344,70 +1534,268 @@ function insightToneColor(tone: FinancialInsight['tone'], palette: ReturnType<ty
   return palette.info;
 }
 
-function insightToneIcon(tone: FinancialInsight['tone']): string {
+function insightToneIcon(tone: FinancialInsight['tone']): SymbolViewProps['name'] {
   if (tone === 'danger' || tone === 'warn') return 'exclamationmark.triangle.fill';
   return 'checkmark.circle.fill';
 }
 
+function FinancialInsightsDetailSheet({
+  visible,
+  income,
+  expense,
+  expenseTotal,
+  projectedExpense,
+  projectedIncome,
+  budgetTotal,
+  topCategory,
+  topExpense,
+  goals,
+  incomeTarget,
+  hidden,
+  onClose,
+}: {
+  visible: boolean;
+  income: number;
+  expense: number;
+  expenseTotal: number;
+  projectedExpense: number | null;
+  projectedIncome: number | null;
+  budgetTotal: number | null;
+  topCategory: CatSlice | null;
+  topExpense: TopItem | null;
+  goals: SavingsGoal[];
+  incomeTarget: number;
+  hidden: boolean;
+  onClose: () => void;
+}) {
+  const palette = usePalette();
+  const [nowMs] = useState(() => Date.now());
+  const insights = buildFinancialInsights({
+    income,
+    expense,
+    expenseTotal,
+    projectedExpense,
+    projectedIncome,
+    budgetTotal,
+    topCategory,
+    topExpense,
+    goals,
+    incomeTarget,
+    hidden,
+    nowMs,
+  });
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={[styles.root, { backgroundColor: palette.base }]}>
+        <SafeAreaView style={styles.flex}>
+          <SheetHeader title="财务洞察" />
+          <ScrollView contentContainerStyle={styles.sheetContent}>
+            <View style={[styles.detailSummaryCard, { backgroundColor: palette.card }]}>
+              <Text style={[styles.detailSummaryLabel, { color: palette.textSecondary }]}>本期综合状态</Text>
+              <Text
+                style={[
+                  styles.detailSummaryAmount,
+                  {
+                    color:
+                      balanceRate(income, income - expense) != null && income >= expense
+                        ? palette.info
+                        : palette.warning,
+                  },
+                ]}
+              >
+                {insights.length} 条洞察
+              </Text>
+              <Text style={[styles.detailSummaryMeta, { color: palette.textSecondary }]}>
+                基于预算、支出结构、收入目标与存钱目标实时生成
+              </Text>
+            </View>
+            {insights.map((item) => {
+              const color = insightToneColor(item.tone, palette);
+              return (
+                <View key={`${item.title}-${item.body}`} style={[styles.detailCard, { backgroundColor: palette.card }]}>
+                  <View style={styles.insightDetailHeader}>
+                    <View style={[styles.insightLeadIcon, { backgroundColor: color }]}>
+                      <SymbolView name={insightToneIcon(item.tone)} tintColor={palette.onAccent} size={18} />
+                    </View>
+                    <View style={styles.flex}>
+                      <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>{item.title}</Text>
+                      <Text style={[styles.insightLeadBody, { color: palette.textSecondary }]}>{item.body}</Text>
+                    </View>
+                  </View>
+                  <View style={[styles.insightActionBlock, { borderColor: color, backgroundColor: palette.base }]}>
+                    <Text style={[styles.insightActionBlockText, { color }]}>{item.action}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </ScrollView>
+        </SafeAreaView>
+      </View>
+    </Modal>
+  );
+}
+
+function MoreStatsSheet({
+  visible,
+  scope,
+  range,
+  transactions,
+  hidden,
+  onClose,
+}: {
+  visible: boolean;
+  scope: HeatmapScope;
+  range: { start: Date; end: Date };
+  transactions: Transaction[];
+  hidden: boolean;
+  onClose: () => void;
+}) {
+  const palette = usePalette();
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={[styles.root, { backgroundColor: palette.base }]}>
+        <SafeAreaView style={styles.flex}>
+          <SheetHeader title="更多统计" />
+          <ScrollView contentContainerStyle={styles.sheetContent}>
+            <MoreStatsCard scope={scope} transactions={transactions} range={range} palette={palette} hidden={hidden} />
+          </ScrollView>
+        </SafeAreaView>
+      </View>
+    </Modal>
+  );
+}
+
+function MoreStatsEntryCard({
+  scope,
+  transactions,
+  range,
+  palette,
+  hidden,
+  onPress,
+}: {
+  scope: HeatmapScope;
+  transactions: Transaction[];
+  range: { start: Date; end: Date };
+  palette: ReturnType<typeof usePalette>;
+  hidden: boolean;
+  onPress: () => void;
+}) {
+  const stats = buildMoreStats(transactions, range, scope);
+  return (
+    <Pressable
+      style={[styles.card, styles.statsEntryCard, { backgroundColor: palette.card }]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`更多统计，${range.start.getFullYear()}年已记录 ${stats.recordDays} 天`}
+    >
+      <View style={[styles.statsEntryIcon, { backgroundColor: palette.cardPill }]}>
+        <SymbolView name="calendar.badge.clock" tintColor={palette.accent} size={22} />
+      </View>
+      <View style={styles.flex}>
+        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>更多统计</ThemedText>
+        <ThemedText style={[styles.statsEntryText, { color: palette.textSecondary }]}>
+          {range.start.getFullYear()} 年热力图、星期节奏与数据完整度
+        </ThemedText>
+        <ThemedText style={[styles.statsEntryMeta, { color: palette.textSecondary }]}>
+          已记录 {stats.recordDays} 天 · 日均 {maskAmount(formatAmount(stats.dailyAvg, ''), hidden)}
+        </ThemedText>
+      </View>
+      <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={16} />
+    </Pressable>
+  );
+}
+
+function buildMoreStats(transactions: Transaction[], range: { start: Date; end: Date }, scope: HeatmapScope) {
+  const weekday = new Array<number>(7).fill(0);
+  const byDate = new Map<string, number>();
+  let weekend = 0;
+  let workday = 0;
+  let total = 0;
+  let rows = 0;
+  for (const t of transactions) {
+    if (!inRange(t.occurred_at, range.start, range.end)) continue;
+    let amount = 0;
+    if (scope === 'expense' && t.type === 'expense' && t.source === 'normal') amount = t.amount;
+    if (scope === 'income' && t.type === 'income' && t.source === 'normal') amount = t.amount;
+    if (scope === 'balance') amount = t.type === 'income' ? t.amount : -t.amount;
+    if (amount === 0) continue;
+    const d = new Date(t.occurred_at);
+    const day = d.getDay();
+    const key = localDateKey(d);
+    const heatAmount = scope === 'balance' ? Math.max(0, amount) : amount;
+    weekday[day] += amount;
+    byDate.set(key, (byDate.get(key) ?? 0) + heatAmount);
+    total += amount;
+    rows += 1;
+    if (day === 0 || day === 6) weekend += amount;
+    else workday += amount;
+  }
+  const days = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
+  return {
+    rows,
+    weekday,
+    byDate,
+    heatDays: buildYearHeatDays(range.start.getFullYear(), byDate),
+    weekend,
+    workday,
+    total,
+    recordDays: byDate.size,
+    dailyAvg: Math.round(total / Math.max(1, byDate.size)),
+    completeness: Math.round((byDate.size / days) * 100),
+  };
+}
+
+function buildYearHeatDays(year: number, byDate: Map<string, number>) {
+  const start = new Date(year, 0, 1);
+  const end = new Date(year + 1, 0, 1);
+  const leading = start.getDay();
+  const totalDays = Math.ceil((end.getTime() - start.getTime()) / 86400000);
+  const totalCells = Math.ceil((leading + totalDays) / 7) * 7;
+  return Array.from({ length: totalCells }, (_, index) => {
+    const dayOffset = index - leading;
+    if (dayOffset < 0 || dayOffset >= totalDays) return null;
+    const date = addDays(start, dayOffset);
+    const key = localDateKey(date);
+    return { key, amount: byDate.get(key) ?? 0 };
+  });
+}
+
 function MoreStatsCard({
+  scope,
   transactions,
   range,
   palette,
   hidden,
 }: {
+  scope: HeatmapScope;
   transactions: Transaction[];
   range: { start: Date; end: Date };
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
 }) {
-  const stats = useMemo(() => {
-    const rows = transactions.filter(
-      (t) => t.type === 'expense' && t.source === 'normal' && inRange(t.occurred_at, range.start, range.end),
-    );
-    const weekday = new Array<number>(7).fill(0);
-    const byDate = new Map<string, number>();
-    let weekend = 0;
-    let workday = 0;
-    let total = 0;
-    for (const t of rows) {
-      const d = new Date(t.occurred_at);
-      const day = d.getDay();
-      weekday[day] += t.amount;
-      const key = localDateKey(d);
-      byDate.set(key, (byDate.get(key) ?? 0) + t.amount);
-      total += t.amount;
-      if (day === 0 || day === 6) weekend += t.amount;
-      else workday += t.amount;
-    }
-    const days = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
-    const visibleDays = Math.min(42, days);
-    const heatDays = Array.from({ length: visibleDays }, (_, index) => {
-      const date = addDays(range.start, index);
-      const key = localDateKey(date);
-      return { key, amount: byDate.get(key) ?? 0 };
-    });
-    return {
-      rows,
-      weekday,
-      byDate,
-      heatDays,
-      weekend,
-      workday,
-      total,
-      dailyAvg: Math.round(total / Math.max(1, byDate.size)),
-      completeness: Math.round((byDate.size / days) * 100),
-    };
-  }, [transactions, range]);
-  const max = Math.max(1, ...stats.weekday);
-  const heatMax = Math.max(1, ...stats.heatDays.map((item) => item.amount));
+  const [heatmapWidth, setHeatmapWidth] = useState(0);
+  const stats = useMemo(() => buildMoreStats(transactions, range, scope), [transactions, range, scope]);
+  const max = Math.max(1, ...stats.weekday.map((value) => Math.abs(value)));
+  const heatMax = Math.max(1, ...stats.heatDays.map((item) => item?.amount ?? 0));
   const weekdayLabels = ['日', '一', '二', '三', '四', '五', '六'];
   const topWeekdayIndex = stats.weekday.reduce(
     (maxIndex, amount, index) => (amount > stats.weekday[maxIndex] ? index : maxIndex),
     0,
   );
-  const heatRows = Array.from({ length: Math.ceil(stats.heatDays.length / 7) }, (_, rowIndex) =>
-    Array.from({ length: 7 }, (_, colIndex) => stats.heatDays[rowIndex * 7 + colIndex] ?? null),
+  const heatRows = Array.from({ length: 7 }, (_, rowIndex) =>
+    Array.from(
+      { length: Math.ceil(stats.heatDays.length / 7) },
+      (_, colIndex) => stats.heatDays[colIndex * 7 + rowIndex] ?? null,
+    ),
   );
+  const heatColumnCount = heatRows[0]?.length ?? 0;
+  const heatCellSize =
+    heatmapWidth > 0 && heatColumnCount > 0
+      ? Math.max(HEATMAP_MIN_CELL_SIZE, (heatmapWidth - HEATMAP_COLUMN_GAP * (heatColumnCount - 1)) / heatColumnCount)
+      : HEATMAP_FALLBACK_CELL_SIZE;
+  const scopeTitle = scope === 'income' ? '收入' : scope === 'balance' ? '结余' : '支出';
+  const heatColor = scope === 'income' ? palette.income : scope === 'balance' ? palette.info : palette.expense;
 
   return (
     <View style={[styles.card, styles.moreStatsCard, { backgroundColor: palette.card }]}>
@@ -1419,30 +1807,43 @@ function MoreStatsCard({
       </View>
       <View style={styles.statsMetricRow}>
         <StatsMetric label="记录天数" value={`${stats.byDate.size} 天`} palette={palette} />
-        <StatsMetric label="日均支出" value={maskAmount(formatAmount(stats.dailyAvg, ''), hidden)} palette={palette} />
+        <StatsMetric
+          label={`日均${scopeTitle}`}
+          value={maskAmount(formatAmount(stats.dailyAvg, ''), hidden)}
+          palette={palette}
+        />
         <StatsMetric label="高峰星期" value={weekdayLabels[topWeekdayIndex]} palette={palette} />
       </View>
       <View style={[styles.heatPanel, { backgroundColor: palette.base }]}>
         <View style={styles.heatPanelHeader}>
-          <Text style={[styles.heatTitle, { color: palette.textPrimary }]}>消费热力</Text>
+          <Text style={[styles.heatTitle, { color: palette.textPrimary }]}>
+            {range.start.getFullYear()} 年{scopeTitle}热力
+          </Text>
           <View style={styles.heatLegend}>
             <Text style={[styles.heatLegendText, { color: palette.textSecondary }]}>少</Text>
             {[0.25, 0.5, 0.75, 1].map((opacity) => (
-              <View key={opacity} style={[styles.heatLegendCell, { backgroundColor: palette.expense, opacity }]} />
+              <View key={opacity} style={[styles.heatLegendCell, { backgroundColor: heatColor, opacity }]} />
             ))}
             <Text style={[styles.heatLegendText, { color: palette.textSecondary }]}>多</Text>
           </View>
         </View>
-        <View accessibilityLabel="消费热力图，颜色越深代表当日支出越高" style={styles.heatRows}>
+        <View
+          accessibilityLabel={`${scopeTitle}热力图，颜色越深代表当日${scopeTitle}越高`}
+          style={styles.heatRows}
+          onLayout={(event) => setHeatmapWidth(event.nativeEvent.layout.width)}
+        >
           {heatRows.map((row, rowIndex) => (
             <View key={rowIndex} style={styles.heatWeekRow}>
-              {row.map((item) => (
+              {row.map((item, colIndex) => (
                 <View
-                  key={item?.key ?? `empty-${rowIndex}-${row.indexOf(item)}`}
+                  key={item?.key ?? `empty-${rowIndex}-${colIndex}`}
                   style={[
                     styles.heatCell,
                     {
-                      backgroundColor: item && item.amount > 0 ? palette.expense : palette.card,
+                      width: heatCellSize,
+                      height: heatCellSize,
+                      borderRadius: Math.max(1, Math.floor(heatCellSize / 4)),
+                      backgroundColor: item && item.amount > 0 ? heatColor : palette.card,
                       opacity: item == null ? 0 : item.amount > 0 ? 0.25 + (item.amount / heatMax) * 0.75 : 1,
                     },
                   ]}
@@ -1460,19 +1861,19 @@ function MoreStatsCard({
               <View
                 style={[
                   styles.weekdayFill,
-                  { width: `${(stats.weekday[index] / max) * 100}%`, backgroundColor: palette.expense },
+                  { width: `${(Math.abs(stats.weekday[index]) / max) * 100}%`, backgroundColor: heatColor },
                 ]}
               />
             </View>
             <Text style={[styles.weekdayAmount, { color: palette.textPrimary }]}>
-              {maskAmount(formatAmount(stats.weekday[index], ''), hidden)}
+              {maskAmount(formatAmount(stats.weekday[index], signForNet(stats.weekday[index])), hidden)}
             </Text>
           </View>
         ))}
       </View>
       <Text style={[styles.moreStatsMeta, { color: palette.textSecondary }]}>
-        工作日 {maskAmount(formatAmount(stats.workday, ''), hidden)} · 周末{' '}
-        {maskAmount(formatAmount(stats.weekend, ''), hidden)} · 普通支出 {stats.rows.length} 笔
+        工作日 {maskAmount(formatAmount(stats.workday, signForNet(stats.workday)), hidden)} · 周末{' '}
+        {maskAmount(formatAmount(stats.weekend, signForNet(stats.weekend)), hidden)} · {scopeTitle}记录 {stats.rows} 笔
       </Text>
     </View>
   );
@@ -1501,129 +1902,398 @@ function MonthlyOverviewCard({
   income,
   expense,
   balance,
+  periodText,
+  currentPeriod,
   palette,
   hidden,
 }: {
   income: number;
   expense: number;
   balance: number;
+  periodText: string;
+  currentPeriod: boolean;
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
 }) {
-  const cells = [
-    { label: '收入', amount: income, sign: '+' as const, color: palette.income },
-    { label: '支出', amount: expense, sign: '-' as const, color: palette.expense },
-    {
-      label: '结余',
-      amount: balance,
-      sign: signForNet(balance),
-      color: balance < 0 ? palette.danger : palette.textPrimary,
-    },
-  ];
   return (
-    <View style={[styles.monthlyOverview, { backgroundColor: palette.card }]}>
-      {cells.map((cell) => (
-        <View key={cell.label} style={styles.monthlyOverviewCell}>
-          <ThemedText style={[styles.monthlyOverviewLabel, { color: palette.textSecondary }]}>{cell.label}</ThemedText>
-          <ThemedText
-            style={[styles.monthlyOverviewAmount, { color: cell.color }]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-          >
-            {maskAmount(formatAmount(cell.amount, cell.sign), hidden)}
-          </ThemedText>
-        </View>
-      ))}
-    </View>
+    <ScopeOverviewCard
+      scope="expense"
+      income={income}
+      expense={expense}
+      balance={balance}
+      rate={balanceRate(income, balance)}
+      periodText={periodText}
+      currentPeriod={currentPeriod}
+      palette={palette}
+      hidden={hidden}
+    />
   );
 }
 
 function MonthlyIncomeOverviewCard({
   income,
-  slices,
-  periodText = '本月',
-  palette,
-  hidden,
-}: {
-  income: number;
-  slices: IncomeSlice[];
-  periodText?: string;
-  palette: ReturnType<typeof usePalette>;
-  hidden: boolean;
-}) {
-  const top = slices[0];
-  const cells = [
-    { label: `${periodText}收入`, value: maskAmount(formatAmount(income, '+'), hidden), color: palette.income },
-    { label: '收入来源', value: `${slices.length} 类`, color: palette.textPrimary },
-    {
-      label: '最高来源',
-      value: top ? top.name : '暂无',
-      color: palette.textPrimary,
-    },
-  ];
-
-  return (
-    <View style={[styles.monthlyOverview, { backgroundColor: palette.card }]}>
-      {cells.map((cell) => (
-        <View key={cell.label} style={styles.monthlyOverviewCell}>
-          <ThemedText style={[styles.monthlyOverviewLabel, { color: palette.textSecondary }]}>{cell.label}</ThemedText>
-          <ThemedText
-            style={[styles.monthlyOverviewAmount, { color: cell.color }]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-          >
-            {cell.value}
-          </ThemedText>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function MonthlyBalanceOverviewCard({
   expense,
   balance,
   rate,
   periodText = '本月',
+  currentPeriod,
   palette,
   hidden,
 }: {
+  income: number;
   expense: number;
   balance: number;
   rate: number | null;
   periodText?: string;
+  currentPeriod: boolean;
+  palette: ReturnType<typeof usePalette>;
+  hidden: boolean;
+}) {
+  return (
+    <ScopeOverviewCard
+      scope="income"
+      income={income}
+      expense={expense}
+      balance={balance}
+      rate={rate}
+      periodText={periodText}
+      currentPeriod={currentPeriod}
+      palette={palette}
+      hidden={hidden}
+    />
+  );
+}
+
+function MonthlyBalanceOverviewCard({
+  income,
+  expense,
+  balance,
+  rate,
+  periodText = '本月',
+  currentPeriod,
+  palette,
+  hidden,
+}: {
+  income: number;
+  expense: number;
+  balance: number;
+  rate: number | null;
+  periodText?: string;
+  currentPeriod: boolean;
+  palette: ReturnType<typeof usePalette>;
+  hidden: boolean;
+}) {
+  return (
+    <ScopeOverviewCard
+      scope="balance"
+      income={income}
+      expense={expense}
+      balance={balance}
+      rate={rate}
+      periodText={periodText}
+      currentPeriod={currentPeriod}
+      palette={palette}
+      hidden={hidden}
+    />
+  );
+}
+
+function ScopeOverviewCard({
+  scope,
+  income,
+  expense,
+  balance,
+  rate,
+  periodText,
+  currentPeriod,
+  palette,
+  hidden,
+}: {
+  scope: ReportScope;
+  income: number;
+  expense: number;
+  balance: number;
+  rate: number | null;
+  periodText: string;
+  currentPeriod: boolean;
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
 }) {
   const rateText = rate == null ? '—' : `${Math.round(rate * 100)}%`;
-  const cells = [
-    {
-      label: `${periodText}结余`,
-      value: maskAmount(formatAmount(balance, signForNet(balance)), hidden),
-      color: balance < 0 ? palette.danger : palette.info,
-    },
-    { label: '储蓄率', value: rateText, color: rate != null && rate < 0 ? palette.danger : palette.textPrimary },
-    {
-      label: `${periodText}支出`,
-      value: maskAmount(formatAmount(expense, '-'), hidden),
-      color: palette.expense,
-    },
-  ];
+  const metrics =
+    scope === 'income'
+      ? [
+          { label: `${periodText}收入`, value: maskAmount(formatAmount(income, '+'), hidden), color: palette.income },
+          {
+            label: '本期结余',
+            value: maskAmount(formatAmount(balance, signForNet(balance)), hidden),
+            color: balance < 0 ? palette.danger : palette.info,
+          },
+          { label: '本期支出', value: maskAmount(formatAmount(expense, '-'), hidden), color: palette.expense },
+        ]
+      : scope === 'balance'
+        ? [
+            {
+              label: `${periodText}结余`,
+              value: maskAmount(formatAmount(balance, signForNet(balance)), hidden),
+              color: balance < 0 ? palette.danger : palette.info,
+            },
+            {
+              label: '储蓄率',
+              value: rateText,
+              color: rate != null && rate < 0 ? palette.danger : palette.textPrimary,
+            },
+            { label: '本期支出', value: maskAmount(formatAmount(expense, '-'), hidden), color: palette.expense },
+          ]
+        : [
+            {
+              label: `${periodText}支出`,
+              value: maskAmount(formatAmount(expense, '-'), hidden),
+              color: palette.expense,
+            },
+            {
+              label: '本期结余',
+              value: maskAmount(formatAmount(balance, signForNet(balance)), hidden),
+              color: balance < 0 ? palette.danger : palette.info,
+            },
+            { label: '本期收入', value: maskAmount(formatAmount(income, '+'), hidden), color: palette.income },
+          ];
 
   return (
-    <View style={[styles.monthlyOverview, { backgroundColor: palette.card }]}>
-      {cells.map((cell) => (
-        <View key={cell.label} style={styles.monthlyOverviewCell}>
-          <ThemedText style={[styles.monthlyOverviewLabel, { color: palette.textSecondary }]}>{cell.label}</ThemedText>
+    <View
+      style={[styles.monthlyOverview, { backgroundColor: palette.card }]}
+      accessible
+      accessibilityRole="summary"
+      accessibilityLabel={`${periodText}收支摘要：收入 ${formatAmount(income, '+')}，支出 ${formatAmount(expense, '-')}，结余 ${formatAmount(balance, signForNet(balance))}${currentPeriod ? '，当前周期进行中' : ''}`}
+    >
+      <View style={styles.overviewHeader}>
+        <ThemedText style={[styles.overviewTitle, { color: palette.textPrimary }]}>周期收支摘要</ThemedText>
+        <View
+          style={[styles.overviewStatus, { backgroundColor: currentPeriod ? palette.bannerTint : palette.cardPill }]}
+        >
+          <View
+            style={[styles.overviewStatusDot, { backgroundColor: currentPeriod ? palette.info : palette.textTertiary }]}
+          />
           <ThemedText
-            style={[styles.monthlyOverviewAmount, { color: cell.color }]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
+            style={[styles.overviewStatusText, { color: currentPeriod ? palette.info : palette.textSecondary }]}
           >
-            {cell.value}
+            {currentPeriod ? '进行中' : '已结算'}
           </ThemedText>
         </View>
-      ))}
+      </View>
+      <View style={styles.overviewMetrics}>
+        {metrics.map((metric, index) => (
+          <View
+            key={metric.label}
+            style={[
+              styles.monthlyOverviewCell,
+              index > 0 && { borderLeftColor: palette.separator, borderLeftWidth: StyleSheet.hairlineWidth },
+            ]}
+          >
+            <ThemedText style={[styles.monthlyOverviewLabel, { color: palette.textSecondary }]}>
+              {metric.label}
+            </ThemedText>
+            <ThemedText
+              style={[
+                styles.monthlyOverviewAmount,
+                index === 0 && styles.monthlyOverviewAmountPrimary,
+                { color: metric.color },
+              ]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {metric.value}
+            </ThemedText>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function chartTicks(max: number, count = 3): number[] {
+  const top = Math.max(1, max);
+  return Array.from({ length: count }, (_, index) => Math.round((top * (count - 1 - index)) / (count - 1)));
+}
+
+function axisAmountLabel(value: number): string {
+  const yuan = Math.round(value / 100);
+  if (yuan >= 10000) return `${Math.round(yuan / 1000) / 10}万`;
+  if (yuan >= 1000) return `${Math.round(yuan / 100) / 10}k`;
+  return String(yuan);
+}
+
+function SvgYAxis({
+  ticks,
+  x,
+  width,
+  yOf,
+  chartRight,
+  color,
+  gridColor,
+  suffix = '',
+  formatter = axisAmountLabel,
+}: {
+  ticks: number[];
+  x: number;
+  width: number;
+  yOf: (value: number) => number;
+  chartRight: number;
+  color: string;
+  gridColor: string;
+  suffix?: string;
+  formatter?: (value: number) => string;
+}) {
+  return (
+    <>
+      {ticks.map((tick) => {
+        const y = yOf(tick);
+        return (
+          <Fragment key={`${tick}-${suffix}`}>
+            <Line x1={x + width + 6} y1={y} x2={chartRight} y2={y} stroke={gridColor} strokeWidth="1" opacity={0.42} />
+            <SvgText x={x + width} y={y + 3} fontSize="9" fill={color} textAnchor="end">
+              {formatter(tick)}
+              {suffix}
+            </SvgText>
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+function MonthlyExpenseTrendCard({
+  series,
+  budgetTotal,
+  palette,
+  hidden,
+  currentPeriod,
+}: {
+  series: { label: string; income: number; expense: number }[];
+  budgetTotal: number | null;
+  palette: ReturnType<typeof usePalette>;
+  hidden: boolean;
+  currentPeriod: boolean;
+}) {
+  const [selected, setSelected] = useState<{ label: string; expense: number; budget: number | null } | null>(null);
+  const W = 320;
+  const H = 146;
+  const axisW = 34;
+  const chartRight = W - 2;
+  const chartBottom = H - 18;
+  const padY = 14;
+  const max = Math.max(1, budgetTotal ?? 0, ...series.map((s) => s.expense));
+  const nonZeroCount = series.filter((s) => s.expense > 0).length;
+  const avg = series.length > 0 ? Math.round(series.reduce((sum, item) => sum + item.expense, 0) / series.length) : 0;
+  const groupW = (chartRight - axisW) / Math.max(1, series.length);
+  const barW = Math.min(22, groupW * 0.42);
+  const hasTrend = nonZeroCount >= 2;
+  const yOf = (value: number) => chartBottom - ((chartBottom - padY) * value) / max;
+  const ticks = chartTicks(max);
+
+  return (
+    <View style={[styles.card, { backgroundColor: palette.card }]}>
+      <View style={styles.cardHeaderRow}>
+        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>支出趋势</ThemedText>
+        <ThemedText style={[styles.chartMeta, { color: palette.textSecondary }]}>
+          均值 {maskAmount(formatAmount(avg, ''), hidden)}
+        </ThemedText>
+      </View>
+      {!hasTrend ? (
+        <TrendFallback count={nonZeroCount} label="支出" icon="chart.line.uptrend.xyaxis" palette={palette} />
+      ) : (
+        <>
+          <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+            <SvgYAxis
+              ticks={ticks}
+              x={0}
+              width={axisW - 8}
+              yOf={yOf}
+              chartRight={chartRight}
+              color={palette.textTertiary}
+              gridColor={palette.separator}
+            />
+            {budgetTotal != null && budgetTotal > 0 ? (
+              <Line
+                x1={axisW}
+                y1={yOf(budgetTotal)}
+                x2={chartRight}
+                y2={yOf(budgetTotal)}
+                stroke={palette.warning}
+                strokeWidth="1.5"
+                strokeDasharray="5 5"
+              />
+            ) : null}
+            <Line
+              x1={axisW}
+              y1={chartBottom}
+              x2={chartRight}
+              y2={chartBottom}
+              stroke={palette.separator}
+              strokeWidth="1"
+            />
+            {series.map((item, index) => {
+              const h = item.expense > 0 ? Math.max(3, chartBottom - yOf(item.expense)) : 0;
+              const x = axisW + groupW * index + (groupW - barW) / 2;
+              const isCurrent = currentPeriod && index === series.length - 1;
+              return (
+                <Rect
+                  key={item.label}
+                  x={x}
+                  y={chartBottom - h}
+                  width={barW}
+                  height={h}
+                  rx={4}
+                  fill={selected?.label === item.label ? palette.accent : palette.expense}
+                  opacity={isCurrent ? 0.82 : 1}
+                  onPress={() => setSelected({ label: item.label, expense: item.expense, budget: budgetTotal })}
+                  accessibilityLabel={`${item.label}支出 ${formatAmount(item.expense, '-')}`}
+                />
+              );
+            })}
+          </Svg>
+          <View style={[styles.trendLabels, { paddingLeft: axisW }]}>
+            {series.map((item, index) => (
+              <Text
+                key={item.label}
+                style={[
+                  styles.trendLabel,
+                  { color: currentPeriod && index === series.length - 1 ? palette.info : palette.textTertiary },
+                ]}
+              >
+                {item.label}
+              </Text>
+            ))}
+          </View>
+          <ThemedText style={[styles.chartSelection, { color: palette.textSecondary }]}>
+            {selected
+              ? `${selected.label}支出 ${maskAmount(formatAmount(selected.expense, '-'), hidden)}`
+              : `图表摘要：近 ${series.length} 期平均支出 ${maskAmount(formatAmount(avg, ''), hidden)}`}
+          </ThemedText>
+        </>
+      )}
+    </View>
+  );
+}
+
+function TrendFallback({
+  count,
+  label,
+  icon,
+  palette,
+}: {
+  count: number;
+  label: string;
+  icon: SymbolViewProps['name'];
+  palette: ReturnType<typeof usePalette>;
+}) {
+  return (
+    <View style={styles.emptyBox}>
+      <SymbolView name={icon} tintColor={palette.textTertiary} size={36} />
+      <ThemedText style={{ color: palette.textPrimary, fontWeight: '700' }}>数据还不够形成趋势</ThemedText>
+      <ThemedText style={{ color: palette.textSecondary, textAlign: 'center' }}>
+        当前只有 {count} 个周期有{label}记录；再积累到 2 个以上周期后展示趋势。
+      </ThemedText>
     </View>
   );
 }
@@ -1640,14 +2310,18 @@ function MonthlyIncomeTrendCard({
   const [selected, setSelected] = useState<{ label: string; income: number } | null>(null);
   const W = 320;
   const H = 142;
+  const axisW = 34;
+  const chartRight = W - 2;
   const chartBottom = H - 18;
   const padY = 14;
   const max = Math.max(1, ...series.map((s) => s.income));
   const avg = series.length > 0 ? Math.round(series.reduce((sum, item) => sum + item.income, 0) / series.length) : 0;
-  const groupW = W / Math.max(1, series.length);
+  const groupW = (chartRight - axisW) / Math.max(1, series.length);
   const barW = Math.min(22, groupW * 0.42);
-  const hasData = series.some((s) => s.income > 0);
+  const nonZeroCount = series.filter((s) => s.income > 0).length;
+  const hasTrend = nonZeroCount >= 2;
   const yOf = (value: number) => chartBottom - ((chartBottom - padY) * value) / max;
+  const ticks = chartTicks(max);
 
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
@@ -1657,27 +2331,40 @@ function MonthlyIncomeTrendCard({
           均线 {maskAmount(formatAmount(avg, ''), hidden)}
         </ThemedText>
       </View>
-      {!hasData ? (
-        <View style={styles.emptyBox}>
-          <SymbolView name="chart.bar.xaxis" tintColor={palette.textTertiary} size={36} />
-          <ThemedText style={{ color: palette.textSecondary }}>近几期还没有收入记录</ThemedText>
-        </View>
+      {!hasTrend ? (
+        <TrendFallback count={nonZeroCount} label="收入" icon="chart.bar.xaxis" palette={palette} />
       ) : (
         <>
           <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+            <SvgYAxis
+              ticks={ticks}
+              x={0}
+              width={axisW - 8}
+              yOf={yOf}
+              chartRight={chartRight}
+              color={palette.textTertiary}
+              gridColor={palette.separator}
+            />
             <Line
-              x1="0"
+              x1={axisW}
               y1={yOf(avg)}
-              x2={W}
+              x2={chartRight}
               y2={yOf(avg)}
               stroke={palette.warning}
               strokeWidth="1.5"
               strokeDasharray="5 5"
             />
-            <Line x1="0" y1={chartBottom} x2={W} y2={chartBottom} stroke={palette.separator} strokeWidth="1" />
+            <Line
+              x1={axisW}
+              y1={chartBottom}
+              x2={chartRight}
+              y2={chartBottom}
+              stroke={palette.separator}
+              strokeWidth="1"
+            />
             {series.map((item, index) => {
               const h = item.income > 0 ? Math.max(3, chartBottom - yOf(item.income)) : 0;
-              const x = groupW * index + (groupW - barW) / 2;
+              const x = axisW + groupW * index + (groupW - barW) / 2;
               return h > 0 ? (
                 <Rect
                   key={item.label}
@@ -1693,7 +2380,7 @@ function MonthlyIncomeTrendCard({
               ) : null;
             })}
           </Svg>
-          <View style={styles.trendLabels}>
+          <View style={[styles.trendLabels, { paddingLeft: axisW }]}>
             {series.map((item) => (
               <Text key={item.label} style={[styles.trendLabel, { color: palette.textTertiary }]}>
                 {item.label}
@@ -1795,13 +2482,14 @@ function SavingsRateTrendCard({
   const hasData = values.length > 0;
   const W = 320;
   const H = 122;
-  const padX = 8;
+  const axisW = 34;
+  const chartRight = W - 2;
   const padY = 12;
   const min = Math.min(0, ...values);
   const max = Math.max(0.5, ...values);
   const span = Math.max(0.1, max - min);
-  const stepX = rates.length > 1 ? (W - padX * 2) / (rates.length - 1) : 0;
-  const xOf = (i: number) => padX + i * stepX;
+  const stepX = rates.length > 1 ? (chartRight - axisW) / (rates.length - 1) : 0;
+  const xOf = (i: number) => axisW + i * stepX;
   const yOf = (rate: number) => padY + (H - padY * 2) * (1 - (rate - min) / span);
   const points = rates
     .map((item, index) => (item.rate == null ? null : `${xOf(index)},${yOf(item.rate)}`))
@@ -1827,7 +2515,17 @@ function SavingsRateTrendCard({
       ) : (
         <>
           <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
-            <Line x1="0" y1={yOf(0)} x2={W} y2={yOf(0)} stroke={palette.separator} strokeWidth="1" />
+            <SvgYAxis
+              ticks={[max, (max + min) / 2, min]}
+              x={0}
+              width={axisW - 8}
+              yOf={yOf}
+              chartRight={chartRight}
+              color={palette.textTertiary}
+              gridColor={palette.separator}
+              formatter={(value) => `${Math.round(value * 100)}%`}
+            />
+            <Line x1={axisW} y1={yOf(0)} x2={chartRight} y2={yOf(0)} stroke={palette.separator} strokeWidth="1" />
             <Polyline
               points={points}
               fill="none"
@@ -1850,7 +2548,7 @@ function SavingsRateTrendCard({
               ),
             )}
           </Svg>
-          <View style={styles.trendLabels}>
+          <View style={[styles.trendLabels, { paddingLeft: axisW }]}>
             {rates.map((item) => (
               <Text key={item.label} style={[styles.trendLabel, { color: palette.textTertiary }]}>
                 {item.label}
@@ -2017,13 +2715,21 @@ function MonthlyExpenseCategoryCard({
                   key={category.id}
                   style={styles.monthlyCategoryRow}
                   onPress={() => onOpenDetail({ id: category.id, name: category.name })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${category.name}，占支出 ${percent}%，${formatAmount(category.amount, '-')}`}
+                  accessibilityHint="点按查看二级分类与流水明细"
                 >
+                  <View style={[styles.categoryColorDot, { backgroundColor: category.color }]} />
                   <ThemedText style={[styles.monthlyCategoryName, { color: palette.textPrimary }]} numberOfLines={1}>
                     {category.name}
                   </ThemedText>
-                  <ThemedText style={[styles.monthlyCategoryPercent, { color: palette.textPrimary }]}>
+                  <ThemedText style={[styles.monthlyCategoryPercent, { color: palette.textSecondary }]}>
                     {percent}%
                   </ThemedText>
+                  <ThemedText style={[styles.monthlyCategoryAmount, { color: palette.textPrimary }]} numberOfLines={1}>
+                    {maskAmount(formatAmount(category.amount, '-'), hidden)}
+                  </ThemedText>
+                  <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={12} />
                 </Pressable>
               );
             })}
@@ -2045,22 +2751,27 @@ function MonthlyMemberCard({
   periodText = '本月',
   palette,
   hidden,
-  onOpenMember,
+  onOpen,
 }: {
   members: Member[];
   maxCount: number;
   periodText?: string;
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
-  onOpenMember: (member: Member) => void;
+  onOpen: () => void;
 }) {
   return (
-    <View style={[styles.card, { backgroundColor: palette.card }]}>
+    <Pressable
+      style={[styles.card, { backgroundColor: palette.card }]}
+      onPress={onOpen}
+      accessibilityRole="button"
+      accessibilityHint="点按查看家庭成员分析"
+    >
       <View style={styles.memberTitleRow}>
         <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-          成员记账参与
+          家庭成员分析
         </ThemedText>
-        <SymbolView name="info.circle" tintColor={palette.textTertiary} size={17} />
+        <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={15} />
       </View>
       {members.length === 0 ? (
         <View style={styles.emptyBox}>
@@ -2070,7 +2781,7 @@ function MonthlyMemberCard({
       ) : (
         <View style={styles.memberList}>
           {members.map((member) => (
-            <Pressable key={member.id} style={styles.memberRow} onPress={() => onOpenMember(member)}>
+            <View key={member.id} style={styles.memberRow}>
               <ThemedText style={[styles.memberName, { color: palette.textPrimary }]} numberOfLines={1}>
                 {member.name}
               </ThemedText>
@@ -2087,12 +2798,11 @@ function MonthlyMemberCard({
               <ThemedText style={[styles.memberCount, { color: palette.textPrimary }]}>
                 {hidden ? '****' : member.count}
               </ThemedText>
-              <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
-            </Pressable>
+            </View>
           ))}
         </View>
       )}
-    </View>
+    </Pressable>
   );
 }
 
@@ -2214,12 +2924,7 @@ function CustomRangeSheet({
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView style={styles.flex}>
-          <View style={styles.sheetBar}>
-            <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>自定义周期</Text>
-            <Pressable hitSlop={8} onPress={onClose}>
-              <Text style={[styles.sheetAction, { color: palette.textSecondary }]}>完成</Text>
-            </Pressable>
-          </View>
+          <SheetHeader title="自定义周期" />
           <View style={styles.customRangeContent}>
             <View style={[styles.customDateCard, { backgroundColor: palette.card }]}>
               <View style={styles.customDateRow}>
@@ -2347,12 +3052,7 @@ function CategoryDetailSheet({
     <Modal visible={!!detail} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView style={styles.flex}>
-          <View style={styles.sheetBar}>
-            <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>{detail?.name ?? ''}</Text>
-            <Pressable hitSlop={8} onPress={onClose}>
-              <Text style={[styles.sheetAction, { color: palette.textSecondary }]}>完成</Text>
-            </Pressable>
-          </View>
+          <SheetHeader title={detail?.name ?? ''} />
           <ScrollView contentContainerStyle={styles.sheetContent}>
             <View style={[styles.detailSummaryCard, { backgroundColor: palette.card }]}>
               <Text style={[styles.detailSummaryLabel, { color: palette.textSecondary }]}>
@@ -2368,8 +3068,8 @@ function CategoryDetailSheet({
 
             <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
               <View style={styles.cardHeaderRow}>
-                <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>常见项目</Text>
-                <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>按备注聚合</Text>
+                <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>二级分类</Text>
+                <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>按备注归类</Text>
               </View>
               {noteGroups.length === 0 ? (
                 <View style={styles.emptyBox}>
@@ -2464,29 +3164,35 @@ function CategoryDetailTrendChart({
   const [selected, setSelected] = useState<{ label: string; expense: number } | null>(null);
   const W = 320;
   const H = 126;
+  const axisW = 34;
+  const chartRight = W - 2;
   const chartBottom = H - 18;
   const padY = 12;
   const max = Math.max(1, ...series.map((item) => item.expense));
-  const groupW = W / Math.max(1, series.length);
+  const groupW = (chartRight - axisW) / Math.max(1, series.length);
   const barW = Math.min(24, groupW * 0.44);
-  const hasData = series.some((item) => item.expense > 0);
+  const nonZeroCount = series.filter((item) => item.expense > 0).length;
+  const hasTrend = nonZeroCount >= 2;
+  const ticks = chartTicks(max);
 
-  if (!hasData) {
-    return (
-      <View style={styles.emptyBox}>
-        <SymbolView name="chart.bar.xaxis" tintColor={palette.textTertiary} size={34} />
-        <Text style={{ color: palette.textSecondary }}>近 6 期还没有该分类支出</Text>
-      </View>
-    );
-  }
+  if (!hasTrend) return <TrendFallback count={nonZeroCount} label="支出" icon="chart.bar.xaxis" palette={palette} />;
 
   return (
     <>
       <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
-        <Line x1="0" y1={chartBottom} x2={W} y2={chartBottom} stroke={palette.separator} strokeWidth="1" />
+        <SvgYAxis
+          ticks={ticks}
+          x={0}
+          width={axisW - 8}
+          yOf={(value) => chartBottom - ((chartBottom - padY) * value) / max}
+          chartRight={chartRight}
+          color={palette.textTertiary}
+          gridColor={palette.separator}
+        />
+        <Line x1={axisW} y1={chartBottom} x2={chartRight} y2={chartBottom} stroke={palette.separator} strokeWidth="1" />
         {series.map((item, index) => {
           const height = item.expense > 0 ? Math.max(4, ((chartBottom - padY) * item.expense) / max) : 0;
-          const x = groupW * index + (groupW - barW) / 2;
+          const x = axisW + groupW * index + (groupW - barW) / 2;
           return height > 0 ? (
             <Rect
               key={item.label}
@@ -2502,7 +3208,7 @@ function CategoryDetailTrendChart({
           ) : null;
         })}
       </Svg>
-      <View style={styles.trendLabels}>
+      <View style={[styles.trendLabels, { paddingLeft: axisW }]}>
         {series.map((item) => (
           <Text key={item.label} style={[styles.trendLabel, { color: palette.textTertiary }]}>
             {item.label}
@@ -2516,120 +3222,130 @@ function CategoryDetailTrendChart({
   );
 }
 
-// ── 成员分析下钻：参与度 + 按记账人聚合的收支分布 ─────────────────────────────
+// ── 家庭成员分析：参与度 + 收支贡献 + 支出偏好 ────────────────────────────────
 function MemberAnalysisSheet({
-  member,
+  visible,
   range,
   dimension,
   transactions,
+  members,
   categories,
   hidden,
   onClose,
 }: {
-  member: Member | null;
+  visible: boolean;
   range: { start: Date; end: Date };
   dimension: Dimension;
   transactions: Transaction[];
+  members: { id: string; nickname: string }[];
   categories: Category[];
   hidden: boolean;
   onClose: () => void;
 }) {
   const palette = usePalette();
   const catColors = useCategoryColors();
-  const { rows, income, expense, categoryRows, trend } = useMemo(() => {
-    const empty = {
-      rows: [] as Transaction[],
-      income: 0,
-      expense: 0,
-      categoryRows: [] as { id: string; name: string; amount: number; color: string }[],
-      trend: [] as { label: string; expense: number }[],
-    };
-    if (!member) return empty;
-
+  const { rows, totalCount, totalIncome, totalExpense } = useMemo(() => {
     const catById = new Map(categories.map((category) => [category.id, category]));
-    const categoryMap = new Map<string, { id: string; name: string; amount: number; color: string }>();
-    const periodRows: Transaction[] = [];
-    let incomeTotal = 0;
-    let expenseTotal = 0;
-
+    const memberMap = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        count: number;
+        income: number;
+        expense: number;
+        categoryMap: Map<string, { name: string; amount: number; color: string }>;
+      }
+    >(
+      members.map((member) => [
+        member.id,
+        { id: member.id, name: member.nickname, count: 0, income: 0, expense: 0, categoryMap: new Map() },
+      ]),
+    );
+    let count = 0;
+    let income = 0;
+    let expense = 0;
     for (const t of transactions) {
-      if (t.recorder_user_id !== member.id || !inRange(t.occurred_at, range.start, range.end)) continue;
-      periodRows.push(t);
-      if (t.type === 'income') incomeTotal += t.amount;
-      else expenseTotal += t.amount;
-
+      if (!inRange(t.occurred_at, range.start, range.end)) continue;
+      const row = memberMap.get(t.recorder_user_id) ?? {
+        id: t.recorder_user_id,
+        name: '成员',
+        count: 0,
+        income: 0,
+        expense: 0,
+        categoryMap: new Map(),
+      };
+      row.count += 1;
+      count += 1;
+      memberMap.set(t.recorder_user_id, row);
+      if (t.type === 'income') {
+        row.income += t.amount;
+        income += t.amount;
+      } else {
+        row.expense += t.amount;
+        expense += t.amount;
+      }
       if (t.type === 'expense' && t.source === 'normal') {
         const cat = catById.get(t.category_id);
         const name = cat?.name ?? '未分类';
-        const entry = categoryMap.get(t.category_id) ?? {
-          id: t.category_id,
+        const entry = row.categoryMap.get(t.category_id) ?? {
           name,
           amount: 0,
           color: catColors[categoryColorKey(name, 'expense')],
         };
         entry.amount += t.amount;
-        categoryMap.set(t.category_id, entry);
+        row.categoryMap.set(t.category_id, entry);
       }
     }
-
-    const memberTxns = transactions.filter(
-      (t) => t.recorder_user_id === member.id && t.type === 'expense' && t.source === 'normal',
-    );
-    const series =
-      dimension === 'custom'
-        ? equalPeriodIncomeExpenseSeries(range, memberTxns)
-        : incomeExpenseSeries(dimension, range.start, memberTxns);
-
     return {
-      rows: periodRows.sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)),
-      income: incomeTotal,
-      expense: expenseTotal,
-      categoryRows: Array.from(categoryMap.values())
-        .sort((a, b) => b.amount - a.amount)
-        .slice(0, 5),
-      trend: series.map((item) => ({ label: item.label, expense: item.expense })),
+      rows: Array.from(memberMap.values())
+        .map((row) => {
+          const topCategory = Array.from(row.categoryMap.values()).sort((a, b) => b.amount - a.amount)[0] ?? null;
+          return { ...row, topCategory };
+        })
+        .sort((a, b) => b.count - a.count || b.expense - a.expense),
+      totalCount: count,
+      totalIncome: income,
+      totalExpense: expense,
     };
-  }, [member, range, dimension, transactions, categories, catColors]);
+  }, [members, range, transactions, categories, catColors]);
 
-  const maxCategoryAmount = Math.max(1, ...categoryRows.map((item) => item.amount));
-  const avg = rows.length > 0 ? Math.round((income + expense) / rows.length) : 0;
+  const maxCount = Math.max(1, ...rows.map((row) => row.count));
+  const maxMoney = Math.max(1, ...rows.flatMap((row) => [row.income, row.expense]));
+  const periodName =
+    dimension === 'week' ? '本周' : dimension === 'year' ? '全年' : dimension === 'custom' ? '本期' : '本月';
 
   return (
-    <Modal visible={!!member} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView style={styles.flex}>
-          <View style={styles.sheetBar}>
-            <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>{member?.name ?? ''}</Text>
-            <Pressable hitSlop={8} onPress={onClose}>
-              <Text style={[styles.sheetAction, { color: palette.textSecondary }]}>完成</Text>
-            </Pressable>
-          </View>
+          <SheetHeader title="家庭成员分析" />
 
           <ScrollView contentContainerStyle={styles.sheetContent}>
             <View style={[styles.detailSummaryCard, { backgroundColor: palette.card }]}>
-              <Text style={[styles.detailSummaryLabel, { color: palette.textSecondary }]}>本期记账参与</Text>
+              <Text style={[styles.detailSummaryLabel, { color: palette.textSecondary }]}>{periodName}记账参与</Text>
               <Text style={[styles.detailSummaryAmount, { color: palette.accent }]}>
-                {hidden ? '****' : rows.length} 笔
+                {hidden ? '****' : `${totalCount} 笔`}
               </Text>
               <Text style={[styles.detailSummaryMeta, { color: palette.textSecondary }]}>
-                收入 {maskAmount(formatAmount(income, '+'), hidden)} · 支出{' '}
-                {maskAmount(formatAmount(expense, '-'), hidden)} · 笔均 {maskAmount(formatAmount(avg, ''), hidden)}
+                收入 {maskAmount(formatAmount(totalIncome, '+'), hidden)} · 支出{' '}
+                {maskAmount(formatAmount(totalExpense, '-'), hidden)}
               </Text>
             </View>
 
             <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
               <View style={styles.cardHeaderRow}>
-                <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>支出偏好</Text>
-                <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>按记账人聚合</Text>
+                <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>记账参与</Text>
+                <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>按成员</Text>
               </View>
-              {categoryRows.length === 0 ? (
+              {totalCount === 0 ? (
                 <View style={styles.emptyBox}>
-                  <SymbolView name="chart.pie" tintColor={palette.textTertiary} size={34} />
-                  <Text style={{ color: palette.textSecondary }}>本期没有普通支出记录</Text>
+                  <SymbolView name="person.2" tintColor={palette.textTertiary} size={34} />
+                  <Text style={{ color: palette.textSecondary }}>{periodName}还没有成员记账</Text>
                 </View>
               ) : (
                 <View style={styles.detailGroupList}>
-                  {categoryRows.map((item) => (
+                  {rows.map((item) => (
                     <View key={item.id} style={styles.detailGroupRow}>
                       <Text style={[styles.detailGroupName, { color: palette.textPrimary }]} numberOfLines={1}>
                         {item.name}
@@ -2639,14 +3355,14 @@ function MemberAnalysisSheet({
                           style={[
                             styles.detailGroupFill,
                             {
-                              backgroundColor: item.color,
-                              width: `${Math.max(6, (item.amount / maxCategoryAmount) * 100)}%`,
+                              backgroundColor: palette.accent,
+                              width: `${Math.max(6, (item.count / maxCount) * 100)}%`,
                             },
                           ]}
                         />
                       </View>
-                      <Text style={[styles.detailGroupAmount, { color: item.color }]} numberOfLines={1}>
-                        {maskAmount(formatAmount(item.amount, '-'), hidden)}
+                      <Text style={[styles.detailGroupAmount, { color: palette.textPrimary }]} numberOfLines={1}>
+                        {hidden ? '****' : `${item.count} 笔`}
                       </Text>
                     </View>
                   ))}
@@ -2656,41 +3372,78 @@ function MemberAnalysisSheet({
 
             <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
               <View style={styles.cardHeaderRow}>
-                <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>参与趋势</Text>
-                <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>近 6 期支出</Text>
+                <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>收支贡献</Text>
+                <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>收入 / 支出</Text>
               </View>
-              <CategoryDetailTrendChart series={trend} palette={palette} />
+              {rows.map((item) => (
+                <View key={item.id} style={styles.memberContributionRow}>
+                  <Text style={[styles.memberContributionName, { color: palette.textPrimary }]}>{item.name}</Text>
+                  <View style={styles.memberContributionBars}>
+                    <View style={[styles.memberContributionTrack, { backgroundColor: palette.base }]}>
+                      <View
+                        style={[
+                          styles.memberContributionFill,
+                          { width: `${Math.max(4, (item.income / maxMoney) * 100)}%`, backgroundColor: palette.income },
+                        ]}
+                      />
+                    </View>
+                    <View style={[styles.memberContributionTrack, { backgroundColor: palette.base }]}>
+                      <View
+                        style={[
+                          styles.memberContributionFill,
+                          {
+                            width: `${Math.max(4, (item.expense / maxMoney) * 100)}%`,
+                            backgroundColor: palette.expense,
+                          },
+                        ]}
+                      />
+                    </View>
+                  </View>
+                  <View style={styles.memberContributionAmounts}>
+                    <Text style={[styles.memberContributionAmount, { color: palette.income }]}>
+                      {maskAmount(formatAmount(item.income, '+'), hidden)}
+                    </Text>
+                    <Text style={[styles.memberContributionAmount, { color: palette.expense }]}>
+                      {maskAmount(formatAmount(item.expense, '-'), hidden)}
+                    </Text>
+                  </View>
+                </View>
+              ))}
             </View>
 
             <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
               <View style={styles.cardHeaderRow}>
-                <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>记账明细</Text>
-                <Text style={[styles.detailSectionMeta, { color: palette.accent }]}>全部 {rows.length} 笔</Text>
+                <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>支出偏好</Text>
+                <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>最高分类</Text>
               </View>
-              {rows.length === 0 ? (
+              {rows.every((row) => !row.topCategory) ? (
                 <View style={styles.emptyBox}>
-                  <SymbolView name="list.bullet.rectangle" tintColor={palette.textTertiary} size={34} />
-                  <Text style={{ color: palette.textSecondary }}>这个周期还没有该成员记录</Text>
+                  <SymbolView name="chart.pie" tintColor={palette.textTertiary} size={34} />
+                  <Text style={{ color: palette.textSecondary }}>{periodName}没有普通支出记录</Text>
                 </View>
               ) : (
-                rows.map((t) => (
-                  <View key={t.id} style={[styles.detailRow, { borderBottomColor: palette.separator }]}>
-                    <View style={styles.flex}>
-                      <Text style={[styles.detailNote, { color: palette.textPrimary }]} numberOfLines={1}>
-                        {t.note || '（无备注）'}
+                rows
+                  .filter((row) => row.topCategory)
+                  .map((row) => (
+                    <View key={row.id} style={[styles.detailRow, { borderBottomColor: palette.separator }]}>
+                      <Text style={[styles.memberPreferenceName, { color: palette.textPrimary }]}>{row.name}</Text>
+                      <View
+                        style={[
+                          styles.categoryColorDot,
+                          { backgroundColor: row.topCategory?.color ?? palette.textTertiary },
+                        ]}
+                      />
+                      <Text style={[styles.detailNote, styles.flex, { color: palette.textPrimary }]} numberOfLines={1}>
+                        {row.topCategory?.name}
                       </Text>
-                      <Text style={[styles.detailDate, { color: palette.textSecondary }]}>
-                        {new Date(t.occurred_at).toLocaleDateString('zh-CN')}
+                      <Text
+                        style={[styles.detailAmount, { color: row.topCategory?.color ?? palette.expense }]}
+                        numberOfLines={1}
+                      >
+                        {maskAmount(formatAmount(row.topCategory?.amount ?? 0, '-'), hidden)}
                       </Text>
                     </View>
-                    <Text
-                      style={[styles.detailAmount, { color: t.type === 'income' ? palette.income : palette.expense }]}
-                      numberOfLines={1}
-                    >
-                      {maskAmount(formatAmount(t.amount, t.type === 'income' ? '+' : '-'), hidden)}
-                    </Text>
-                  </View>
-                ))
+                  ))
               )}
             </View>
           </ScrollView>
@@ -2748,6 +3501,7 @@ const styles = StyleSheet.create({
   card: { borderRadius: Radius.lg, padding: Space[4] },
   noMargin: { marginBottom: 0 },
   cardHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space[3] },
+  cardHeaderAction: { flexDirection: 'row', alignItems: 'center', gap: Space[1] },
   filterBar: {
     minHeight: 46,
     borderRadius: Radius.lg,
@@ -2759,7 +3513,7 @@ const styles = StyleSheet.create({
     gap: Space[3],
   },
   filterBarLeft: { flexDirection: 'row', alignItems: 'center', gap: Space[2], flex: 1, minWidth: 0 },
-  filterBarRight: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
+  filterBarRight: { flexDirection: 'row', alignItems: 'center', gap: Space[1] },
   filterBarText: { fontSize: 15, fontWeight: '600' },
   filterBarMeta: { fontSize: 13, fontVariant: ['tabular-nums'] },
   filterIconBadge: {
@@ -2769,6 +3523,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  periodStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: Radius.full,
+    paddingHorizontal: Space[2],
+    paddingVertical: 4,
+  },
+  periodStatusDot: { width: 5, height: 5, borderRadius: Radius.full },
+  periodStatusText: { fontSize: 11, lineHeight: 14, fontWeight: '700' },
+  dataReadinessCard: {
+    minHeight: 68,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: Space[3],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[3],
+  },
+  dataReadinessIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dataReadinessTitle: { fontSize: 15, lineHeight: 20, fontWeight: '700' },
+  dataReadinessBody: { fontSize: 13, lineHeight: 18, marginTop: 2 },
   filterSummaryCard: { borderRadius: Radius.lg, padding: Space[4], flexDirection: 'row', gap: Space[3] },
   filterSummaryIcon: {
     width: 40,
@@ -2814,10 +3596,24 @@ const styles = StyleSheet.create({
     paddingVertical: Space[2],
   },
   filterResetText: { fontSize: 15, fontWeight: '600' },
-  monthlyOverview: { flexDirection: 'row', gap: Space[3], borderRadius: Radius.lg, padding: Space[4] },
-  monthlyOverviewCell: { flex: 1, minWidth: 0, gap: Space[1] },
+  monthlyOverview: { borderRadius: Radius.lg, padding: Space[4], gap: Space[3] },
+  overviewHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space[3] },
+  overviewTitle: { fontSize: 16, lineHeight: 22, fontWeight: '700' },
+  overviewStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: Radius.full,
+    paddingHorizontal: Space[2],
+    paddingVertical: 4,
+  },
+  overviewStatusDot: { width: 5, height: 5, borderRadius: Radius.full },
+  overviewStatusText: { fontSize: 11, lineHeight: 14, fontWeight: '700' },
+  overviewMetrics: { flexDirection: 'row', alignItems: 'stretch' },
+  monthlyOverviewCell: { flex: 1, minWidth: 0, gap: Space[1], paddingHorizontal: Space[3] },
   monthlyOverviewLabel: { fontSize: 13 },
   monthlyOverviewAmount: { fontSize: 18, lineHeight: 24, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  monthlyOverviewAmountPrimary: { fontSize: 24, lineHeight: 30 },
   budgetCard: { gap: Space[3] },
   budgetHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space[3] },
   budgetTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
@@ -2849,9 +3645,17 @@ const styles = StyleSheet.create({
   monthlyCategoryBody: { flexDirection: 'row', alignItems: 'center', gap: Space[3], paddingTop: Space[3] },
   monthlyDonutTotal: { fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'] },
   monthlyCategoryList: { flex: 1, minWidth: 0, gap: Space[2] },
-  monthlyCategoryRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2], paddingVertical: 2 },
-  monthlyCategoryName: { flex: 1, fontSize: 16, fontWeight: '500' },
-  monthlyCategoryPercent: { fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  monthlyCategoryRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Space[2], paddingVertical: 2 },
+  categoryColorDot: { width: 8, height: 8, borderRadius: Radius.full },
+  monthlyCategoryName: { flex: 1, minWidth: 0, fontSize: 14, fontWeight: '500' },
+  monthlyCategoryPercent: { fontSize: 13, fontVariant: ['tabular-nums'], width: 34, textAlign: 'right' },
+  monthlyCategoryAmount: {
+    fontSize: 13,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+    width: 60,
+    textAlign: 'right',
+  },
   waterfallList: { gap: Space[3] },
   waterfallRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
   waterfallLabel: { width: 38, fontSize: 14 },
@@ -2926,6 +3730,24 @@ const styles = StyleSheet.create({
   insightDot: { width: 8, height: 8, borderRadius: Radius.full, marginTop: 6 },
   insightMinorTitle: { width: 82, fontSize: 13, fontWeight: '700' },
   insightMinorBody: { flex: 1, fontSize: 13 },
+  insightDetailHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: Space[3] },
+  insightActionBlock: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md,
+    paddingHorizontal: Space[3],
+    paddingVertical: Space[2],
+  },
+  insightActionBlockText: { fontSize: 14, lineHeight: 20, fontWeight: '600' },
+  statsEntryCard: { minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: Space[3] },
+  statsEntryIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statsEntryText: { fontSize: 13, lineHeight: 18, marginTop: 3 },
+  statsEntryMeta: { fontSize: 12, lineHeight: 17, marginTop: 3, fontVariant: ['tabular-nums'] },
   moreStatsCard: { gap: Space[3] },
   statsMetricRow: { flexDirection: 'row', gap: Space[2] },
   statsMetric: {
@@ -2943,9 +3765,9 @@ const styles = StyleSheet.create({
   heatLegend: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   heatLegendText: { fontSize: 11 },
   heatLegendCell: { width: 8, height: 8, borderRadius: 2 },
-  heatRows: { gap: 4 },
-  heatWeekRow: { flexDirection: 'row', gap: 4 },
-  heatCell: { flex: 1, height: 12, borderRadius: 3 },
+  heatRows: { gap: HEATMAP_ROW_GAP },
+  heatWeekRow: { flexDirection: 'row', gap: HEATMAP_COLUMN_GAP },
+  heatCell: {},
   weekdayRows: { gap: Space[2] },
   weekdayRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
   weekdayLabel: { width: 18, fontSize: 12, textAlign: 'center' },
@@ -2980,6 +3802,14 @@ const styles = StyleSheet.create({
   memberBarFill: { height: '100%', borderRadius: Radius.full },
   memberAmount: { fontSize: 13, fontVariant: ['tabular-nums'], width: 76, textAlign: 'right' },
   memberCount: { fontSize: 16, fontWeight: '600', fontVariant: ['tabular-nums'], width: 28, textAlign: 'right' },
+  memberContributionRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2], paddingVertical: Space[2] },
+  memberContributionName: { width: 54, fontSize: 13, fontWeight: '600' },
+  memberContributionBars: { flex: 1, gap: Space[1] },
+  memberContributionTrack: { height: 7, borderRadius: Radius.full, overflow: 'hidden' },
+  memberContributionFill: { height: '100%', borderRadius: Radius.full },
+  memberContributionAmounts: { width: 84, gap: 1 },
+  memberContributionAmount: { fontSize: 11, fontWeight: '600', textAlign: 'right', fontVariant: ['tabular-nums'] },
+  memberPreferenceName: { width: 48, fontSize: 14, fontWeight: '600' },
   goalsCard: { gap: Space[2] },
   emptyGoalsCard: {
     alignItems: 'center',
@@ -3015,7 +3845,12 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   newGoalRowText: { fontSize: 16, fontWeight: '600' },
-  customRangeContent: { paddingHorizontal: Space[4], paddingBottom: Space[10], gap: Space[3] },
+  customRangeContent: {
+    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingHorizontal: Space[4],
+    paddingBottom: Space[10],
+    gap: Space[3],
+  },
   customDateCard: { borderRadius: Radius.lg, paddingHorizontal: Space[4] },
   customDateRow: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: Space[3] },
   customDateDivider: { height: StyleSheet.hairlineWidth },
@@ -3038,12 +3873,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[3],
+    paddingHorizontal: Space[6],
+    paddingTop: Space[5],
+    paddingBottom: Space[4],
   },
-  sheetTitle: { fontSize: 20, fontWeight: '700' },
-  sheetAction: { fontSize: 16 },
-  sheetContent: { paddingHorizontal: Space[4], paddingBottom: Space[10], gap: Space[3] },
+  sheetTitle: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
+  sheetAction: { fontSize: 16, fontWeight: '600' },
+  sheetContent: {
+    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingHorizontal: Space[6],
+    paddingBottom: Space[10],
+    gap: Space[3],
+  },
   detailSummaryCard: { borderRadius: Radius.lg, padding: Space[4], gap: Space[2] },
   detailSummaryLabel: { fontSize: 14, fontWeight: '600' },
   detailSummaryAmount: { fontSize: 36, lineHeight: 42, fontWeight: '700', fontVariant: ['tabular-nums'] },

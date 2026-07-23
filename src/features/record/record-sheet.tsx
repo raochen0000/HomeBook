@@ -32,14 +32,13 @@ import {
   useCreateTransaction,
   useHiddenCategoryIds,
   useMemberships,
-  useSoftDeleteTransaction,
   useTransactions,
   useUpdateTransaction,
   type Category,
   type FamilyMembership,
   type Transaction,
 } from '@/api';
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 
@@ -106,7 +105,6 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   const membersQ = useMemberships();
   const createM = useCreateTransaction();
   const updateM = useUpdateTransaction();
-  const deleteM = useSoftDeleteTransaction();
   const transactionsQ = useTransactions();
   const saving = createM.isPending || updateM.isPending;
 
@@ -118,7 +116,6 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   const [type, setType] = useState<TxnType>(
     editing ? (editing.type === 'income' ? 'income' : 'expense') : (prefs?.default_txn_type ?? 'expense'),
   );
-  const [toast, setToast] = useState<string | null>(null);
   const [raw, setRaw] = useState(editing?.amount ? (editing.amount / 100).toString() : '');
   const [categoryId, setCategoryId] = useState<string | null>(editing?.category_id ?? null);
   const [note, setNote] = useState(editing?.note ?? '');
@@ -211,7 +208,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
         setRaw('');
         setNote('');
         setCategoryId(null);
-        setToast('已保存，继续记下一笔');
+        toast.success('已保存，继续记下一笔');
       } else {
         // 庆祝交由父层在面板关闭后展示（onDismiss），这里只上报「是否家庭第一笔」并关闭面板。
         onSaved?.({ firstRecord: isFirstRecord });
@@ -220,25 +217,6 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
     } catch (e) {
       Alert.alert('保存失败', (e as Error).message ?? String(e));
     }
-  };
-
-  const handleDelete = () => {
-    if (!editing) return;
-    Alert.alert('删除这笔流水？', '删除后列表与报表口径将不再统计它。', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '删除',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteM.mutateAsync(editing.id);
-            onClose();
-          } catch (e) {
-            Alert.alert('删除失败', (e as Error).message ?? String(e));
-          }
-        },
-      },
-    ]);
   };
 
   /** 单个分类圆底项（横滑与网格两种布局复用）。 */
@@ -371,17 +349,11 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
         <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
       </View>
 
-      {/* 标题行：标题居中；编辑态右侧显示删除 */}
+      {/* 标题行：标题居中（删除入口走列表左滑，DESIGN §9.9：非保存动作不放标题两侧） */}
       <View style={styles.topBar}>
         <View style={styles.topActionSpacer} />
         <Text style={[styles.topTitle, { color: palette.textPrimary }]}>{editing ? '编辑流水' : '记一笔'}</Text>
-        {editing ? (
-          <Pressable hitSlop={8} onPress={handleDelete} style={styles.topActionRight}>
-            <Text style={[styles.topAction, { color: palette.danger }]}>删除</Text>
-          </Pressable>
-        ) : (
-          <View style={styles.topActionSpacer} />
-        )}
+        <View style={styles.topActionSpacer} />
       </View>
 
       {/* 支出 / 收入：iOS 原生分段控件（SwiftUI Picker.segmented） */}
@@ -434,13 +406,13 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
         style={[
           styles.save,
           // 贴底但留出 Home Indicator 的清空间（折叠态还会有少量余量落在按钮下方，整体不挡系统横条）。
-          { backgroundColor: palette.accent, opacity: canSave ? 1 : 0.35, marginBottom: Space[6] },
+          { backgroundColor: palette.ink, opacity: canSave ? 1 : 0.35, marginBottom: Space[6] },
         ]}
       >
         {saving ? (
-          <ActivityIndicator color={palette.onAccent} />
+          <ActivityIndicator color={palette.onInk} />
         ) : (
-          <Text style={[styles.saveText, { color: palette.onAccent }]}>保存</Text>
+          <Text style={[styles.saveText, { color: palette.onInk }]}>保存</Text>
         )}
       </Pressable>
 
@@ -455,9 +427,6 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
         }}
         onClose={() => setMemberOpen(false)}
       />
-
-      {/* 「继续记下一笔」的轻提示 */}
-      <Toast visible={toast !== null} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
 }

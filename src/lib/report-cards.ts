@@ -14,6 +14,7 @@ export type ReportCardId =
   | 'insights'
   | 'income_target'
   | 'income_expense'
+  | 'expense_trend'
   | 'income_trend'
   | 'expense_category'
   | 'category_mom'
@@ -41,6 +42,7 @@ export const REPORT_CARDS: ReportCardMeta[] = [
   { id: 'insights', title: '财务洞察', icon: 'sparkles' },
   { id: 'income_target', title: '收入目标', icon: 'flag.checkered' },
   { id: 'income_expense', title: '收支对比', icon: 'chart.bar.xaxis' },
+  { id: 'expense_trend', title: '支出趋势', icon: 'chart.line.uptrend.xyaxis' },
   { id: 'income_trend', title: '收入趋势', icon: 'chart.bar.fill' },
   { id: 'expense_category', title: '支出分类占比', icon: 'chart.pie.fill' },
   { id: 'category_mom', title: '分类环比', icon: 'arrow.up.arrow.down' },

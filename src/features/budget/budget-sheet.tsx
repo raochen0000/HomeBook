@@ -18,6 +18,7 @@ import {
   useTransactions,
   type Category,
 } from '@/api';
+import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { budgetLevel, daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
 import { categoryColorKey } from '@/lib/category-style';
@@ -28,7 +29,7 @@ const toCents = (raw: string) => Math.round(Number(raw || '0') * 100);
 export function BudgetSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <Body onClose={onClose} /> : null}
+      {visible ? <Body /> : null}
     </Modal>
   );
 }
@@ -37,7 +38,7 @@ function levelColor(level: 'normal' | 'warning' | 'danger', palette: ReturnType<
   return level === 'danger' ? palette.danger : level === 'warning' ? palette.warning : palette.accent;
 }
 
-function Body({ onClose }: { onClose: () => void }) {
+function Body() {
   const palette = usePalette();
   const period = currentPeriod();
   const profileQ = useMyProfile();
@@ -59,20 +60,16 @@ function Body({ onClose }: { onClose: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView style={styles.flex}>
-        <View style={styles.topBar}>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>预算 · {monthLabel(new Date())}</Text>
-          <Pressable hitSlop={8} onPress={onClose}>
-            <Text style={[styles.action, { color: palette.textSecondary }]}>完成</Text>
-          </Pressable>
-        </View>
+        {/* 悬浮磨砂标题区（自动保存/预览型：纯标题，DESIGN §9.9）；onClose 由下滑手势承担 */}
+        <SheetHeader title={`预算 · ${monthLabel(new Date())}`} />
 
         {budgetQ.isLoading ? null : !budget ? (
           <View style={styles.center}>
             <SymbolView name="chart.pie" tintColor={palette.textTertiary} size={48} />
             <Text style={{ color: palette.textSecondary }}>本月还没有预算</Text>
             {isOwner ? (
-              <Pressable onPress={() => setEditing(true)} style={[styles.primary, { backgroundColor: palette.accent }]}>
-                <Text style={[styles.primaryText, { color: palette.onAccent }]}>设置预算</Text>
+              <Pressable onPress={() => setEditing(true)} style={[styles.primary, { backgroundColor: palette.ink }]}>
+                <Text style={[styles.primaryText, { color: palette.onInk }]}>设置预算</Text>
               </Pressable>
             ) : (
               <Text style={{ color: palette.textTertiary, fontSize: 13 }}>请户主设置本月预算</Text>
@@ -271,15 +268,8 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView style={styles.flex}>
-        <View style={styles.topBar}>
-          <Pressable hitSlop={8} onPress={onBack}>
-            <Text style={[styles.action, { color: palette.textSecondary }]}>取消</Text>
-          </Pressable>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>设置预算</Text>
-          <Pressable hitSlop={8} onPress={handleSave} disabled={!canSave}>
-            <Text style={[styles.action, { color: canSave ? palette.accent : palette.textTertiary }]}>保存</Text>
-          </Pressable>
-        </View>
+        {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
+        <SheetHeader title="设置预算" onBack={onBack} onConfirm={handleSave} confirmDisabled={!canSave} />
 
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>本月总预算</Text>
@@ -340,10 +330,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[3],
+    paddingHorizontal: Space[6],
+    paddingTop: Space[5],
+    paddingBottom: Space[4],
   },
-  title: { fontSize: 17, fontWeight: '700' },
+  title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   action: { fontSize: 16, minWidth: 36 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[3], paddingHorizontal: Space[6] },
   primary: {
@@ -361,7 +352,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
-  content: { paddingHorizontal: Space[4], paddingBottom: Space[12], gap: Space[3] },
+  content: {
+    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingHorizontal: Space[6],
+    paddingBottom: Space[12],
+    gap: Space[3],
+  },
   totalCard: { padding: Space[5], borderRadius: Radius.lg, gap: Space[2] },
   totalAmount: { fontSize: 30, fontWeight: '700', fontVariant: ['tabular-nums'] },
   totalMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: Space[1] },

@@ -23,8 +23,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { singleLineTextInputStyle } from '@/constants/text-input';
 import { normalizeEmail, sendPasswordResetOtp, updatePassword, verifyPasswordResetOtp } from '@/lib/auth';
 
 /** OTP 位数（与 Studio Email provider 的 Email OTP Length 一致）。 */
@@ -77,7 +78,6 @@ export function ForgotPasswordSheet({
   const [showPassword, setShowPassword] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
 
   // 打开时的表单重置放在 Modal onShow 里（见下），避免在 effect 中同步 setState。
 
@@ -94,16 +94,16 @@ export function ForgotPasswordSheet({
 
   const onSend = async () => {
     if (!canSend) {
-      if (!normalized) setToast('请输入有效的邮箱地址');
+      if (!normalized) toast.error('请输入有效的邮箱地址');
       return;
     }
     setBusy(true);
     try {
       await sendPasswordResetOtp(email);
       setCooldown(60);
-      setToast('验证码已发送，请查收邮件');
+      toast.success('验证码已发送，请查收邮件');
     } catch (err) {
-      setToast(resetErrorText(err));
+      toast.error(resetErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -111,9 +111,9 @@ export function ForgotPasswordSheet({
 
   const onSubmit = async () => {
     if (!canSubmit) {
-      if (!normalized) setToast('请输入有效的邮箱地址');
-      else if (code.length !== OTP_LEN) setToast('请输入 6 位验证码');
-      else if (password.length < 6) setToast('新密码至少 6 位');
+      if (!normalized) toast.error('请输入有效的邮箱地址');
+      else if (code.length !== OTP_LEN) toast.error('请输入 6 位验证码');
+      else if (password.length < 6) toast.error('新密码至少 6 位');
       return;
     }
     setBusy(true);
@@ -124,7 +124,7 @@ export function ForgotPasswordSheet({
       // 兜底关闭（正常情况下父层随 session 卸载，这里防止极端时序下残留）。
       onClose();
     } catch (err) {
-      setToast(resetErrorText(err));
+      toast.error(resetErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -149,7 +149,9 @@ export function ForgotPasswordSheet({
           {/* 头部：取消 + 标题 */}
           <View style={styles.header}>
             <Pressable hitSlop={8} onPress={onClose} disabled={busy} style={styles.headerBtn}>
-              <Text style={[styles.cancelText, { color: busy ? palette.textTertiary : palette.accent }]}>取消</Text>
+              <Text style={[styles.cancelText, { color: busy ? palette.textTertiary : palette.textSecondary }]}>
+                取消
+              </Text>
             </Pressable>
             <Text style={[styles.headerTitle, { color: palette.textPrimary }]}>找回密码</Text>
             <View style={styles.headerBtn} />
@@ -206,7 +208,7 @@ export function ForgotPasswordSheet({
                 />
                 <View style={[styles.ccDivider, { backgroundColor: palette.separator }]} />
                 <Pressable hitSlop={6} onPress={onSend} disabled={!canSend} accessibilityLabel="获取验证码">
-                  <Text style={[styles.sendText, { color: canSend ? palette.accent : palette.textTertiary }]}>
+                  <Text style={[styles.sendText, { color: canSend ? palette.textPrimary : palette.textTertiary }]}>
                     {cooldown > 0 ? `${cooldown}s 后重发` : '获取验证码'}
                   </Text>
                 </Pressable>
@@ -240,12 +242,12 @@ export function ForgotPasswordSheet({
               <Pressable
                 onPress={onSubmit}
                 disabled={!canSubmit}
-                style={[styles.primary, { backgroundColor: palette.accent, opacity: canSubmit ? 1 : 0.35 }]}
+                style={[styles.primary, { backgroundColor: palette.ink, opacity: canSubmit ? 1 : 0.35 }]}
               >
                 {busy ? (
-                  <ActivityIndicator color={palette.onAccent} />
+                  <ActivityIndicator color={palette.onInk} />
                 ) : (
-                  <Text style={[styles.primaryText, { color: palette.onAccent }]}>重置密码</Text>
+                  <Text style={[styles.primaryText, { color: palette.onInk }]}>重置密码</Text>
                 )}
               </Pressable>
 
@@ -257,7 +259,6 @@ export function ForgotPasswordSheet({
             </ScrollView>
           </KeyboardAvoidingView>
         </SafeAreaView>
-        <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
       </View>
     </Modal>
   );
@@ -290,7 +291,7 @@ const styles = StyleSheet.create({
   },
   fieldGap: { width: Space[2] },
   ccDivider: { width: StyleSheet.hairlineWidth, height: 22, marginHorizontal: Space[3] },
-  input: { flex: 1, fontSize: 16, paddingVertical: 0 },
+  input: singleLineTextInputStyle,
   sendText: { fontSize: 15, fontWeight: '600' },
 
   primary: {

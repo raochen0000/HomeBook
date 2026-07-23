@@ -18,6 +18,7 @@ import {
   useTransferOwnership,
   type FamilyMembership,
 } from '@/api';
+import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useAvatarTints, usePalette } from '@/constants/design';
 
 import { DangerConfirmSheet } from './danger-confirm-sheet';
@@ -112,12 +113,8 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView style={styles.flex}>
-        <View style={styles.topBar}>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>成员管理</Text>
-          <Pressable hitSlop={8} onPress={onClose}>
-            <Text style={[styles.action, { color: palette.textSecondary }]}>完成</Text>
-          </Pressable>
-        </View>
+        {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
+        <SheetHeader title="成员管理" />
 
         <ScrollView contentContainerStyle={styles.content}>
           {/* 计数 + 邀请 */}
@@ -128,10 +125,10 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
             <Pressable
               onPress={onRequestInvite}
               disabled={full}
-              style={[styles.inviteBtn, { backgroundColor: palette.accent, opacity: full ? 0.4 : 1 }]}
+              style={[styles.inviteBtn, { backgroundColor: palette.ink, opacity: full ? 0.4 : 1 }]}
             >
-              <SymbolView name="person.crop.circle.badge.plus" tintColor={palette.onAccent} size={16} />
-              <Text style={[styles.inviteText, { color: palette.onAccent }]}>{full ? '已满员' : '邀请家人'}</Text>
+              <SymbolView name="person.crop.circle.badge.plus" tintColor={palette.onInk} size={16} />
+              <Text style={[styles.inviteText, { color: palette.onInk }]}>{full ? '已满员' : '邀请家人'}</Text>
             </Pressable>
           </View>
 
@@ -222,12 +219,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[3],
+    paddingHorizontal: Space[6],
+    paddingTop: Space[5],
+    paddingBottom: Space[4],
   },
-  title: { fontSize: 20, fontWeight: '700' },
+  title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   action: { fontSize: 16 },
-  content: { paddingHorizontal: Space[4], paddingBottom: Space[12], gap: Space[3] },
+  content: {
+    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingHorizontal: Space[6],
+    paddingBottom: Space[12],
+    gap: Space[3],
+  },
 
   countRow: {
     flexDirection: 'row',

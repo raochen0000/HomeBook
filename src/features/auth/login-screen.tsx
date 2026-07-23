@@ -37,8 +37,9 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { singleLineTextInputStyle } from '@/constants/text-input';
 import {
   isAppleAuthAvailable,
   normalizeCnPhone,
@@ -151,7 +152,6 @@ export function LoginScreen() {
   const [panelHeight, setPanelHeight] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>(PHONE_OTP_ENABLED ? 'phone' : 'email');
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [phoneInput, setPhoneInput] = useState('');
@@ -207,7 +207,7 @@ export function LoginScreen() {
   // 协议闸门：未勾选时拦截所有登录入口并提示。返回 false 表示调用方应中止。
   const ensureAgreed = useCallback(() => {
     if (agreed) return true;
-    setToast('请先阅读并同意《用户协议》与《隐私政策》');
+    toast.warning('请先阅读并同意《用户协议》与《隐私政策》');
     return false;
   }, [agreed]);
 
@@ -229,7 +229,7 @@ export function LoginScreen() {
     try {
       await signInWithApple();
     } catch (e) {
-      setToast((e as Error).message ?? String(e));
+      toast.error((e as Error).message ?? String(e));
     } finally {
       setBusy(false);
     }
@@ -288,7 +288,6 @@ export function LoginScreen() {
                     phone={phoneInput}
                     setPhone={setPhoneInput}
                     setBusy={setBusy}
-                    onToast={setToast}
                     ensureAgreed={ensureAgreed}
                     onRememberLogin={(payload) => void persistRememberChoice(rememberMe, payload)}
                   />
@@ -301,7 +300,6 @@ export function LoginScreen() {
                     email={emailInput}
                     setEmail={setEmailInput}
                     setBusy={setBusy}
-                    onToast={setToast}
                     ensureAgreed={ensureAgreed}
                     onRememberLogin={(payload) => void persistRememberChoice(rememberMe, payload)}
                     onForgot={() => setForgotOpen(true)}
@@ -360,11 +358,11 @@ export function LoginScreen() {
                 />
                 <Text style={[styles.agreeText, { color: palette.textTertiary }]}>
                   登录即表示你已阅读并同意
-                  <Text style={{ color: palette.accent }} onPress={() => setToast('用户协议 · 敬请期待')}>
+                  <Text style={{ color: palette.accent }} onPress={() => toast.info('用户协议 · 敬请期待')}>
                     《用户协议》
                   </Text>
                   与
-                  <Text style={{ color: palette.accent }} onPress={() => setToast('隐私政策 · 敬请期待')}>
+                  <Text style={{ color: palette.accent }} onPress={() => toast.info('隐私政策 · 敬请期待')}>
                     《隐私政策》
                   </Text>
                 </Text>
@@ -384,7 +382,6 @@ export function LoginScreen() {
         }}
       />
       <ForgotPasswordSheet visible={forgotOpen} initialEmail={emailInput} onClose={() => setForgotOpen(false)} />
-      <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
 }
@@ -395,7 +392,6 @@ type FormProps = {
   rememberMe: boolean;
   setRememberMe: (b: boolean) => void;
   setBusy: (b: boolean) => void;
-  onToast: (t: string) => void;
   /** 协议未勾选时返回 false（并已提示），调用方须中止。 */
   ensureAgreed: () => boolean;
   onRememberLogin: (payload: Omit<RememberedLogin, 'rememberMe'>) => void;
@@ -408,7 +404,6 @@ function PhoneForm({
   rememberMe,
   setRememberMe,
   setBusy,
-  onToast,
   ensureAgreed,
   onRememberLogin,
   phone,
@@ -431,16 +426,16 @@ function PhoneForm({
   const onSend = async () => {
     if (!ensureAgreed()) return;
     if (!canSend) {
-      if (!e164) onToast('请输入有效的中国大陆手机号');
+      if (!e164) toast.error('请输入有效的中国大陆手机号');
       return;
     }
     setBusy(true);
     try {
       await sendPhoneOtp(phone);
       setCooldown(60);
-      onToast('验证码已发送');
+      toast.success('验证码已发送');
     } catch (err) {
-      onToast(otpErrorText(err));
+      toast.error(otpErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -455,7 +450,7 @@ function PhoneForm({
       onRememberLogin({ mode: 'phone', phone });
       // 成功后 session 变化会卸载本页。
     } catch (err) {
-      onToast(otpErrorText(err));
+      toast.error(otpErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -517,7 +512,6 @@ function EmailForm({
   rememberMe,
   setRememberMe,
   setBusy,
-  onToast,
   ensureAgreed,
   onRememberLogin,
   email,
@@ -533,7 +527,7 @@ function EmailForm({
   const onLogin = async () => {
     if (!ensureAgreed()) return;
     if (!canLogin) {
-      onToast(emailValid ? '密码至少 6 位' : '请输入有效邮箱');
+      toast.error(emailValid ? '密码至少 6 位' : '请输入有效邮箱');
       return;
     }
     setBusy(true);
@@ -542,7 +536,7 @@ function EmailForm({
       onRememberLogin({ mode: 'email', email });
       // 成功后 session 变化会卸载本页。
     } catch (err) {
-      onToast((err as Error).message ?? String(err));
+      toast.error((err as Error).message ?? String(err));
     } finally {
       setBusy(false);
     }
@@ -731,7 +725,7 @@ function AppleLoginSheet({
             <View style={[styles.sheetGrabber, { backgroundColor: palette.separator }]} />
           </View>
           <Pressable style={styles.sheetCancel} hitSlop={8} onPress={onClose} disabled={busy}>
-            <Text style={[styles.sheetCancelText, { color: palette.accent }]}>取消</Text>
+            <Text style={[styles.sheetCancelText, { color: palette.textSecondary }]}>取消</Text>
           </Pressable>
 
           <SymbolView name="apple.logo" tintColor={palette.textPrimary} size={38} />
@@ -913,7 +907,7 @@ const styles = StyleSheet.create({
   fieldGap: { width: Space[2] },
   cc: { fontSize: 16, fontWeight: '600' },
   ccDivider: { width: StyleSheet.hairlineWidth, height: 22, marginHorizontal: Space[3] },
-  input: { flex: 1, fontSize: 16, paddingVertical: 0 },
+  input: singleLineTextInputStyle,
   sendText: { fontSize: 15, fontWeight: '600' },
 
   primary: {

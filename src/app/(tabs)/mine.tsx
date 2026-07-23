@@ -23,13 +23,12 @@ import {
   shapes,
 } from '@expo/ui/swift-ui/modifiers';
 import { useRouter, type Href } from 'expo-router';
-import { useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useMyProfile } from '@/api';
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { Space, usePalette } from '@/constants/design';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { MenuRow, Row, SettingsList } from '@/features/settings/native-list';
@@ -56,7 +55,6 @@ export default function MineScreen() {
   );
   const { session } = useSession();
   const { data: profile } = useMyProfile();
-  const [toast, setToast] = useState<string | null>(null);
 
   const avatarFiles = useAvatarFiles(profile ? [{ id: profile.id, avatar_url: profile.avatar_url }] : []);
   const avatarUri = profile ? (avatarFiles.get(profile.id) ?? null) : null;
@@ -133,7 +131,7 @@ export default function MineScreen() {
             label="深色模式"
             selection="system"
             onSelectionChange={(v) => {
-              if (v !== 'system') setToast('深色模式即将上线，当前跟随系统');
+              if (v !== 'system') toast.info('深色模式即将上线，当前跟随系统');
             }}
             options={[
               { value: 'system', label: '跟随系统' },
@@ -147,7 +145,7 @@ export default function MineScreen() {
             label="语言"
             selection="zh"
             onSelectionChange={(v) => {
-              if (v !== 'zh') setToast('暂仅支持简体中文');
+              if (v !== 'zh') toast.info('暂仅支持简体中文');
             }}
             options={[
               { value: 'zh', label: '简体中文' },
@@ -189,8 +187,6 @@ export default function MineScreen() {
           onLayout={onHeaderLayout}
         />
       </View>
-
-      <Toast visible={toast !== null} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
 }

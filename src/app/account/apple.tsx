@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { bindApple, unbindApple, useSession } from '@/lib/auth';
 
@@ -54,16 +54,15 @@ export default function AppleScreen() {
   const supported = Platform.OS === 'ios';
 
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
 
   const onBind = async () => {
     if (busy) return;
     setBusy(true);
     try {
       const ok = await bindApple();
-      if (ok) setToast('Apple 绑定成功');
+      if (ok) toast.success('Apple 绑定成功');
     } catch (err) {
-      setToast(appleErrorText(err));
+      toast.error(appleErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -79,9 +78,9 @@ export default function AppleScreen() {
           setBusy(true);
           try {
             await unbindApple();
-            setToast('已解绑 Apple');
+            toast.success('已解绑 Apple');
           } catch (err) {
-            setToast(appleErrorText(err));
+            toast.error(appleErrorText(err));
           } finally {
             setBusy(false);
           }
@@ -182,7 +181,6 @@ export default function AppleScreen() {
           </>
         )}
       </ScrollView>
-      <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
 }

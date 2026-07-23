@@ -5,6 +5,7 @@ import { useColorScheme } from 'react-native';
 import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { ToastHost } from '@/components/toast';
 import { LoginScreen } from '@/features/auth/login-screen';
 import { NotificationGate } from '@/features/notifications/notification-gate';
 import { usePushRegistration } from '@/features/notifications/use-push-registration';
@@ -68,6 +69,8 @@ function AppShell() {
       {session ? <NotificationGate /> : null}
       {/* 未登录时以全屏覆盖层显示登录页（流程 1）；session 出现后自动卸载。 */}
       {!loading && !session ? <LoginScreen /> : null}
+      {/* 全局轻提示：置于所有覆盖层（含登录页）之上，故排在最后。 */}
+      <ToastHost />
     </ThemeProvider>
   );
 }

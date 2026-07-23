@@ -34,7 +34,7 @@ import {
   type Transaction,
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { avatarTintFor, Radius, Space, useAvatarTints, useCategoryColors, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import {
@@ -123,7 +123,6 @@ export default function HomeScreen() {
     familyId: '',
   });
   // 保存成功的顶部轻提示。
-  const [savedToast, setSavedToast] = useState(false);
   // 首次记账庆祝：保存时标记 pending，待记账面板关闭动画结束（onDismiss）后再弹，避免叠在面板上。
   const [celebrate, setCelebrate] = useState(false);
   const pendingCelebrateRef = useRef(false);
@@ -405,8 +404,8 @@ export default function HomeScreen() {
 
       {/* 记一笔 悬浮钮（IA §2：Tab Bar 右上方常驻） */}
       {/* 系统蓝强调底 + 白加号：accent 系统蓝（DESIGN §9.2 v0.6.0） */}
-      <Pressable onPress={openCreate} style={[styles.fab, { backgroundColor: palette.accent, shadowColor: '#000' }]}>
-        <SymbolView name="plus" tintColor={palette.onAccent} size={28} weight="semibold" />
+      <Pressable onPress={openCreate} style={[styles.fab, { backgroundColor: palette.ink, shadowColor: '#000' }]}>
+        <SymbolView name="plus" tintColor={palette.onInk} size={28} weight="semibold" />
       </Pressable>
 
       {/* 记账面板（流程 2 + 编辑/删除 流程 10） */}
@@ -418,7 +417,7 @@ export default function HomeScreen() {
         onSaved={({ firstRecord }) => {
           // 第一笔：标记待庆祝（面板关闭后再弹）；否则走常规「已记一笔」toast。
           if (firstRecord) pendingCelebrateRef.current = true;
-          else setSavedToast(true);
+          else toast.success('已记一笔');
         }}
         onDismiss={() => {
           if (pendingCelebrateRef.current) {
@@ -428,9 +427,6 @@ export default function HomeScreen() {
         }}
         onClose={() => setSheet({ open: false, editing: null, familyId: '' })}
       />
-
-      {/* 保存成功顶部轻提示 */}
-      <Toast visible={savedToast} text="已记一笔" onHide={() => setSavedToast(false)} />
 
       {/* 首次记账庆祝（PRD §4.3 S1）：面板关闭后弹出 */}
       <FirstRecordCelebration visible={celebrate} onClose={() => setCelebrate(false)} />

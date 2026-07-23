@@ -29,6 +29,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type FamilyPreview, type JoinImpact, usePreviewFamily, useJoinFamily } from '@/api';
+import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useAvatarTints, usePalette } from '@/constants/design';
 
 /** 邀请码异常态 → 人话提示（status=ok 不在此列）。 */
@@ -122,15 +123,10 @@ function ScanBody({ onClose }: { onClose: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView style={styles.flex}>
-        <View style={styles.topBar}>
-          <Pressable hitSlop={8} onPress={preview ? backToInput : undefined} disabled={!preview}>
-            <Text style={[styles.action, { color: preview ? palette.info : 'transparent' }]}>返回</Text>
-          </Pressable>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>加入家庭</Text>
-          <Pressable hitSlop={8} onPress={onClose}>
-            <Text style={[styles.action, { color: palette.textSecondary }]}>取消</Text>
-          </Pressable>
-        </View>
+        {/* 悬浮磨砂标题区（DESIGN §9.9）：预览子状态显示返回；关闭靠下滑手势 */}
+        <SheetHeader title="加入家庭" onBack={preview ? backToInput : undefined} />
+        {/* 内容非滚动，用占位撑开标题区高度 */}
+        <View style={styles.headerSpacer} />
 
         {preview?.family ? (
           <PreviewCard
@@ -164,13 +160,13 @@ function ScanBody({ onClose }: { onClose: () => void }) {
               disabled={code.trim().length === 0 || busy}
               style={[
                 styles.primary,
-                { backgroundColor: palette.accent, opacity: code.trim().length === 0 || busy ? 0.35 : 1 },
+                { backgroundColor: palette.ink, opacity: code.trim().length === 0 || busy ? 0.35 : 1 },
               ]}
             >
               {previewM.isPending ? (
-                <ActivityIndicator color={palette.onAccent} />
+                <ActivityIndicator color={palette.onInk} />
               ) : (
-                <Text style={[styles.primaryText, { color: palette.onAccent }]}>下一步</Text>
+                <Text style={[styles.primaryText, { color: palette.onInk }]}>下一步</Text>
               )}
             </Pressable>
             <Pressable onPress={() => setManual(false)} hitSlop={8} style={styles.switchBtn} disabled={busy}>
@@ -196,8 +192,8 @@ function ScanBody({ onClose }: { onClose: () => void }) {
             ) : (
               <View style={styles.permWrap}>
                 <Text style={[styles.label, { color: palette.textSecondary }]}>扫码需要相机权限</Text>
-                <Pressable onPress={requestPermission} style={[styles.primary, { backgroundColor: palette.accent }]}>
-                  <Text style={[styles.primaryText, { color: palette.onAccent }]}>开启相机</Text>
+                <Pressable onPress={requestPermission} style={[styles.primary, { backgroundColor: palette.ink }]}>
+                  <Text style={[styles.primaryText, { color: palette.onInk }]}>开启相机</Text>
                 </Pressable>
               </View>
             )}
@@ -298,13 +294,13 @@ function PreviewCard({
         style={[
           styles.primary,
           styles.joinBtn,
-          { backgroundColor: palette.accent, opacity: blocked || joining ? 0.35 : 1 },
+          { backgroundColor: palette.ink, opacity: blocked || joining ? 0.35 : 1 },
         ]}
       >
         {joining ? (
-          <ActivityIndicator color={palette.onAccent} />
+          <ActivityIndicator color={palette.onInk} />
         ) : (
-          <Text style={[styles.primaryText, { color: palette.onAccent }]}>
+          <Text style={[styles.primaryText, { color: palette.onInk }]}>
             {blocked ? '无法加入' : `加入「${family.name}」`}
           </Text>
         )}
@@ -327,15 +323,7 @@ function Avatar({ url, label, tint, size }: { url: string | null; label: string;
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[3],
-  },
-  title: { fontSize: 20, fontWeight: '700' },
-  action: { fontSize: 16, minWidth: 40 },
+  headerSpacer: { height: SHEET_HEADER_HEIGHT },
   scanWrap: { flex: 1, alignItems: 'center', gap: Space[4], paddingHorizontal: Space[6], paddingTop: Space[4] },
   cameraBox: { width: '100%', aspectRatio: 1, borderRadius: Radius.lg, overflow: 'hidden', backgroundColor: '#000' },
   scanOverlay: {

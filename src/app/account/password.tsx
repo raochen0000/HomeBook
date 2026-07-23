@@ -20,8 +20,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { singleLineTextInputStyle } from '@/constants/text-input';
 import { updatePassword, useSession } from '@/lib/auth';
 
 /** 密码最短长度（与 Supabase Auth 最小长度一致）。 */
@@ -63,7 +64,6 @@ export default function PasswordScreen() {
   const [confirm, setConfirm] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
 
   const lengthOk = pwd.length >= MIN_LEN;
   const matchOk = confirm.length > 0 && pwd === confirm;
@@ -73,17 +73,17 @@ export default function PasswordScreen() {
 
   const onSave = async () => {
     if (!canSave) {
-      if (!lengthOk) setToast(`密码至少 ${MIN_LEN} 位`);
-      else if (!matchOk) setToast('两次输入的密码不一致');
+      if (!lengthOk) toast.error(`密码至少 ${MIN_LEN} 位`);
+      else if (!matchOk) toast.error('两次输入的密码不一致');
       return;
     }
     setBusy(true);
     try {
       await updatePassword(pwd);
-      setToast('密码已更新');
+      toast.success('密码已更新');
       setTimeout(() => router.back(), 700);
     } catch (err) {
-      setToast(passwordErrorText(err));
+      toast.error(passwordErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -160,12 +160,12 @@ export default function PasswordScreen() {
           <Pressable
             onPress={onSave}
             disabled={!canSave}
-            style={[styles.primary, { backgroundColor: palette.accent, opacity: canSave ? 1 : 0.35 }]}
+            style={[styles.primary, { backgroundColor: palette.ink, opacity: canSave ? 1 : 0.35 }]}
           >
             {busy ? (
-              <ActivityIndicator color={palette.onAccent} />
+              <ActivityIndicator color={palette.onInk} />
             ) : (
-              <Text style={[styles.primaryText, { color: palette.onAccent }]}>保存密码</Text>
+              <Text style={[styles.primaryText, { color: palette.onInk }]}>保存密码</Text>
             )}
           </Pressable>
 
@@ -180,7 +180,6 @@ export default function PasswordScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-      <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
 }
@@ -200,7 +199,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Space[4],
   },
   fieldGap: { width: Space[2] },
-  input: { flex: 1, fontSize: 16, paddingVertical: 0 },
+  input: singleLineTextInputStyle,
 
   errorRow: { flexDirection: 'row', alignItems: 'center', gap: Space[1], paddingHorizontal: Space[1] },
   errorText: { fontSize: 12 },

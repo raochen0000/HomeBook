@@ -36,7 +36,7 @@ export function useSession(): { session: Session | null; loading: boolean } {
 /**
  * 邮箱登录；账号不存在则自动注册（实例已开 mailer_autoconfirm，注册即拿到 session）。
  * Supabase 出于防枚举对「无此账号」与「密码错误」都返回同一错误，故先试登录、失败再试注册：
- * 注册成功＝原本没账号；注册报「已注册」＝其实是密码错了。
+ * 注册成功＝原本没账号；注册报「已注册」＝登录凭据不匹配，对外仍给合并提示。
  */
 export async function signInWithEmail(email: string, password: string): Promise<void> {
   const trimmed = email.trim();
@@ -49,10 +49,10 @@ export async function signInWithEmail(email: string, password: string): Promise<
     options: { data: { nickname: normalizeDefaultNickname(trimmed.split('@')[0]) } },
   });
   if (signUp.error) {
-    // 邮箱已注册 → 说明账号存在、是密码不对；其它则是注册校验失败（如邮箱格式被拒）
+    // 邮箱已注册时不区分账号存在/密码错误，避免通过登录文案枚举邮箱。
     const code = (signUp.error as { code?: string }).code;
     if (code === 'user_already_exists') {
-      throw new Error('密码错误');
+      throw new Error('邮箱或密码错误');
     }
     throw new Error(signUp.error.message || '注册失败，请重试');
   }

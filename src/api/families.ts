@@ -1,7 +1,7 @@
 /** 家庭 / profile 数据访问 + 家庭相关 RPC（创建、邀请、加入）。 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { pickAndUploadAvatar, pickAndUploadFamilyCover } from '@/adapters/storage';
+import { pickAndUploadAvatar, pickAndUploadFamilyAvatar, pickAndUploadFamilyCover } from '@/adapters/storage';
 import type { Tables } from '@/lib/database.types';
 import { validateNickname } from '@/lib/profile';
 import { supabase } from '@/lib/supabase';
@@ -232,9 +232,15 @@ export async function updateMyAvatarUrl(url: string): Promise<void> {
   if (error) throw error;
 }
 
-/** 把封面公开 URL 写回家庭（RLS：仅户主可改）。 */
+/** 把家庭封面（hero 背景大图）公开 URL 写回家庭（RLS：仅户主可改）。 */
 export async function updateFamilyCoverUrl(familyId: string, url: string): Promise<void> {
   const { error } = await supabase.from('families').update({ cover_url: url }).eq('id', familyId);
+  if (error) throw error;
+}
+
+/** 把家庭头像（方块小图）公开 URL 写回家庭（RLS：仅户主可改）。 */
+export async function updateFamilyAvatarUrl(familyId: string, url: string): Promise<void> {
+  const { error } = await supabase.from('families').update({ avatar_url: url }).eq('id', familyId);
   if (error) throw error;
 }
 
@@ -275,7 +281,7 @@ export function useUpdateMyAvatar() {
   });
 }
 
-/** 选图 → 压缩 → 上传 → 写回 family.cover_url 的一站式 mutation（仅户主）。取消时 data 为 null。 */
+/** 家庭封面：选图（宽幅原图）→ 压缩 → 上传 → 写回 family.cover_url（仅户主）。取消时 data 为 null。 */
 export function useUpdateFamilyCover() {
   const qc = useQueryClient();
   return useMutation({
@@ -283,6 +289,23 @@ export function useUpdateFamilyCover() {
       const url = await pickAndUploadFamilyCover(familyId);
       if (url === null) return null;
       await updateFamilyCoverUrl(familyId, url);
+      return url;
+    },
+    onSuccess: (url) => {
+      if (url === null) return;
+      qc.invalidateQueries({ queryKey: queryKeys.family });
+    },
+  });
+}
+
+/** 家庭头像：选图（方形裁）→ 压缩 → 上传 → 写回 family.avatar_url（仅户主）。取消时 data 为 null。 */
+export function useUpdateFamilyAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (familyId: string) => {
+      const url = await pickAndUploadFamilyAvatar(familyId);
+      if (url === null) return null;
+      await updateFamilyAvatarUrl(familyId, url);
       return url;
     },
     onSuccess: (url) => {

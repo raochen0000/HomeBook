@@ -5,7 +5,8 @@
  *
  * 约定（与迁移 0022 的 RLS 一致）：
  *   - 两个 public 桶；读走公开 CDN，写受 RLS 管控（不开放客户端删除）。
- *   - 头像路径 {userId}.jpg、封面路径 {familyId}.jpg —— 文件名（去扩展名）即归属 id。
+ *   - 用户头像路径 {userId}.jpg、家庭头像 {familyId}.jpg、家庭封面 {familyId}.cover.jpg ——
+ *     文件名首段（split_part(name,'.',1)）即归属 id，三者共用 0022 的 owner 写策略。
  *     刻意放在桶根目录、不建子文件夹：本自托管实例的 storage.prefixes 表开了 RLS，却归
  *     supabase_storage_admin 独占、postgres 无权加策略；一旦路径含子文件夹，上传会因触发器
  *     向 prefixes 插行被 RLS 拒而失败（报 new row violates row-level security policy）。
@@ -109,8 +110,8 @@ export async function pickAndUploadAvatar(userId: string): Promise<string | null
   return uploadPublic(AVATAR_BUCKET, `${userId}.jpg`, base64);
 }
 
-/** 选图并上传为「家庭头像/封面」，返回公开 URL；取消返回 null。仅户主有写权限（RLS 兜底）。 */
-export async function pickAndUploadFamilyCover(familyId: string): Promise<string | null> {
+/** 选图并上传为「家庭头像」（方形裁 512），返回公开 URL；取消返回 null。仅户主有写权限（RLS 兜底）。 */
+export async function pickAndUploadFamilyAvatar(familyId: string): Promise<string | null> {
   let uri: string;
   try {
     uri = await pickSquareImage();
@@ -120,6 +121,45 @@ export async function pickAndUploadFamilyCover(familyId: string): Promise<string
   }
   const base64 = await compressToBase64(uri);
   return uploadPublic(FAMILY_COVER_BUCKET, `${familyId}.jpg`, base64);
+}
+
+/** 封面：不裁剪（iOS 编辑器只支持方裁，封面要宽幅原图），宽压到 1280 保比例。 */
+const COVER_MAX_WIDTH = 1280;
+
+/** 弹相册选图（不裁剪，取原图），取消抛 PickCanceledError，无权限抛 PermissionDeniedError。 */
+async function pickFullImage(): Promise<string> {
+  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!perm.granted) throw new PermissionDeniedError();
+
+  const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+  if (res.canceled || !res.assets?.length) throw new PickCanceledError();
+  return res.assets[0].uri;
+}
+
+/** 保比例压缩为 JPEG（宽 1280），返回 base64（不含 data: 前缀）。 */
+async function compressWideToBase64(uri: string): Promise<string> {
+  const ctx = ImageManipulator.manipulate(uri);
+  ctx.resize({ width: COVER_MAX_WIDTH });
+  const ref = await ctx.renderAsync();
+  const out = await ref.saveAsync({ compress: COMPRESS_QUALITY, format: SaveFormat.JPEG, base64: true });
+  if (!out.base64) throw new Error('图片压缩失败');
+  return out.base64;
+}
+
+/**
+ * 选图并上传为「家庭封面」（宽幅大图，家庭页 hero 背景 / 加入预览卡），返回公开 URL；取消返回 null。
+ * 路径 {familyId}.cover.jpg：split_part(name,'.',1) 仍是家庭 id，天然复用 0022 的户主写策略。
+ */
+export async function pickAndUploadFamilyCover(familyId: string): Promise<string | null> {
+  let uri: string;
+  try {
+    uri = await pickFullImage();
+  } catch (e) {
+    if (e instanceof PickCanceledError) return null;
+    throw e;
+  }
+  const base64 = await compressWideToBase64(uri);
+  return uploadPublic(FAMILY_COVER_BUCKET, `${familyId}.cover.jpg`, base64);
 }
 
 // ── 意见反馈截图（多选、保宽高比、压到 2MB 内）──────────────────────────────────

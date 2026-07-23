@@ -1,9 +1,11 @@
 /**
- * 家庭（Tab 3）：有家庭·户主 → 富仪表盘（hero + 本月概览 + 成员 + 快捷功能 + 家庭管理）；
+ * 家庭（Tab 3）：有家庭·户主 → 身份仪表盘（hero + 成员 + 快捷功能带实时角标 + 家庭管理）；
  * 无家庭 → 创建/加入兜底；非户主成员 → 仪表盘 + 退出家庭。
+ * 定位：家庭身份 / 成员概览 / 能力入口 + 当下状态（预算剩余·储蓄目标数·通知未读红点）；
+ * 聚合·对比类（收支环比、成员贡献排名）归报表 Tab，本页不再重复（IA §110）。
  * 全程 RN 渲染（交互态多，沿用 mine.tsx 卡片风格）；二维码/扫码/各面板在独立 Sheet 内。
- * 配色遵循项目约定：收入=红、支出=绿（DESIGN §4.2.2 红涨绿跌）；趋势用中性灰+箭头（DESIGN §13）。
  */
+import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useRef, useState } from 'react';
@@ -12,17 +14,20 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  useBudget,
   useCreateFamily,
   useDissolveFamily,
   useLeaveFamily,
   useMemberships,
   useMyFamily,
   useMyProfile,
+  useSavingsGoals,
   useTransactions,
-  useUpdateFamilyCover,
+  useUnreadNotifications,
+  type SavingsGoal,
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { Radius, Space, TabBarInset, useAvatarTints, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import { CategoryManageSheet } from '@/features/category/manage-sheet';
@@ -35,7 +40,8 @@ import { NotificationCenterSheet } from '@/features/notifications/center-sheet';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
-import { amountParts, currentPeriod, formatPercent, percentDelta, previousPeriod, signForNet } from '@/lib/format';
+import { budgetLevel, daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
+import { currentPeriod, formatAmount } from '@/lib/format';
 
 /** 家庭成员人数上限（暂为常量，后端未提供该配置）。 */
 const MAX_MEMBERS = 8;
@@ -45,30 +51,39 @@ function localDayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
+/** 瓦片角标用的紧凑金额：分 → 「¥1,280」（取整到元，带千分位）。 */
+function formatCny(cents: number): string {
+  return `¥${Math.round(cents / 100).toLocaleString('en-US')}`;
+}
+
 export default function FamilyScreen() {
   const palette = usePalette();
   const avatarTints = useAvatarTints();
   const insets = useSafeAreaInsets();
   const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 69);
+  const period = currentPeriod();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
   const membershipsQ = useMemberships();
   const transactionsQ = useTransactions();
+  const budgetQ = useBudget(period);
+  const savingsQ = useSavingsGoals();
+  const unreadQ = useUnreadNotifications();
   const createFamilyM = useCreateFamily();
   const leaveM = useLeaveFamily();
   const dissolveM = useDissolveFamily();
-  const updateCoverM = useUpdateFamilyCover();
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [memberManageOpen, setMemberManageOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [savingsOpen, setSavingsOpen] = useState(false);
+  // 「家庭当下」点某目标 → 深链到该目标详情（F9）；从瓦片进则为 null（落列表）。
+  const [savingsGoalId, setSavingsGoalId] = useState<string | null>(null);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [dissolveOpen, setDissolveOpen] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   // 成员管理页请求打开邀请页的待办标记（先关成员管理，其 dismiss 后再开邀请页）。
   const pendingInviteRef = useRef(false);
 
@@ -77,43 +92,21 @@ export default function FamilyScreen() {
   const members = membershipsQ.data ?? [];
   const isOwner = !!family && family.owner_user_id === myId;
 
-  // 户主点击家庭头像换图：选图 → 压缩 → 上传 → 写回 cover_url（取消则静默）。
-  const onChangeCover = () => {
-    if (!family || !isOwner || updateCoverM.isPending) return;
-    updateCoverM.mutate(family.id, {
-      onError: (e) => Alert.alert('家庭头像更新失败', (e as Error).message ?? String(e)),
-    });
-  };
+  // 家庭头像（avatar_url）与封面（cover_url）的更换入口在「家庭设置」，本页只读展示。
 
-  // ── 仪表盘统计：本月收支/环比、本月总笔数、连续记账天数、按成员的本月/今日笔数 ──
+  // ── 家庭活跃度：本月总笔数、连续记账天数、各成员今日笔数（聚合/对比类留给报表）──
   const stats = useMemo(() => {
     const txns = transactionsQ.data ?? [];
-    const period = currentPeriod();
-    const prevP = previousPeriod(period);
     const todayKey = localDayKey(new Date());
 
-    let income = 0;
-    let expense = 0;
     let monthCount = 0;
-    let prevIncome = 0;
-    let prevExpense = 0;
-    const byMemberMonth = new Map<string, number>();
     const byMemberToday = new Map<string, number>();
     const recordedDays = new Set<string>();
 
     for (const t of txns) {
       const occurred = new Date(t.occurred_at);
       recordedDays.add(localDayKey(occurred));
-      const tp = currentPeriod(occurred);
-      if (tp === period) {
-        monthCount += 1;
-        if (t.type === 'income') income += t.amount;
-        else expense += t.amount;
-        byMemberMonth.set(t.recorder_user_id, (byMemberMonth.get(t.recorder_user_id) ?? 0) + 1);
-      } else if (tp === prevP) {
-        if (t.type === 'income') prevIncome += t.amount;
-        else prevExpense += t.amount;
-      }
+      if (currentPeriod(occurred) === period) monthCount += 1;
       if (localDayKey(occurred) === todayKey) {
         byMemberToday.set(t.recorder_user_id, (byMemberToday.get(t.recorder_user_id) ?? 0) + 1);
       }
@@ -129,24 +122,36 @@ export default function FamilyScreen() {
       cursor.setDate(cursor.getDate() - 1);
     }
 
-    const balance = income - expense;
-    const prevBalance = prevIncome - prevExpense;
-    const maxMemberMonth = Math.max(1, ...Array.from(byMemberMonth.values()));
+    return { monthCount, streak, byMemberToday };
+  }, [transactionsQ.data, period]);
 
-    return {
-      income,
-      expense,
-      balance,
-      monthCount,
-      streak,
-      incomeTrend: percentDelta(income, prevIncome),
-      expenseTrend: percentDelta(expense, prevExpense),
-      balanceTrend: percentDelta(balance, prevBalance),
-      byMemberMonth,
-      byMemberToday,
-      maxMemberMonth,
-    };
-  }, [transactionsQ.data]);
+  // ── 预算执行（口径同预算页：仅日常支出，排除储蓄流水）──
+  const budgetTotal = budgetQ.data?.budget?.total_amount ?? null;
+  const budgetUsed = useMemo(
+    () => expenseUsedInPeriod(transactionsQ.data ?? [], period).total,
+    [transactionsQ.data, period],
+  );
+  const budgetRemaining = budgetTotal == null ? 0 : budgetTotal - budgetUsed;
+  const budgetPct = budgetTotal && budgetTotal > 0 ? Math.round((budgetUsed / budgetTotal) * 100) : 0;
+  const budgetSub =
+    budgetTotal == null ? '未设置' : budgetRemaining >= 0 ? `剩 ${formatCny(budgetRemaining)}` : '已超支';
+
+  // ── 储蓄目标：数量角标 + 「家庭当下」精选目标（截止日最近的进行中目标）──
+  const goals = useMemo(() => savingsQ.data ?? [], [savingsQ.data]);
+  const goalCount = goals.length;
+  const savingsSub = goalCount > 0 ? `${goalCount} 个目标` : '共同攒钱';
+  const featuredGoal = useMemo<SavingsGoal | null>(() => {
+    // 只在未达成目标里选：优先有截止日且最近的；其余按原顺序（最新创建在前）兜底。已达成的不展示。
+    const active = goals.filter((g) => g.saved_amount < g.target_amount);
+    if (active.length === 0) return null;
+    const withDeadline = active.filter((g) => g.deadline).sort((a, b) => a.deadline!.localeCompare(b.deadline!));
+    return withDeadline[0] ?? active[0];
+  }, [goals]);
+  const activeGoalCount = useMemo(() => goals.filter((g) => g.saved_amount < g.target_amount).length, [goals]);
+
+  const unreadCount = unreadQ.data?.length ?? 0;
+  // 单人家庭：隐藏成员列表与「家庭当下」，聚焦邀请转化（PRD F1 关键态）。
+  const singlePerson = (family?.member_count ?? members.length) <= 1;
 
   const onCreate = () => {
     Alert.prompt(
@@ -193,10 +198,19 @@ export default function FamilyScreen() {
 
   const onInvite = () => {
     if (!isOwner) {
-      setToast('仅户主可邀请家人');
+      toast.warning('仅户主可邀请家人');
       return;
     }
     setInviteOpen(true);
+  };
+
+  const openSavingsList = () => {
+    setSavingsGoalId(null);
+    setSavingsOpen(true);
+  };
+  const openGoalDetail = (id: string) => {
+    setSavingsGoalId(id);
+    setSavingsOpen(true);
   };
 
   const loading = profileQ.isLoading || familyQ.isLoading;
@@ -225,9 +239,9 @@ export default function FamilyScreen() {
               <Pressable
                 disabled={busy}
                 onPress={onCreate}
-                style={[styles.primary, { backgroundColor: palette.accent, opacity: busy ? 0.5 : 1 }]}
+                style={[styles.primary, { backgroundColor: palette.ink, opacity: busy ? 0.5 : 1 }]}
               >
-                <ThemedText style={[styles.primaryText, { color: palette.onAccent }]}>创建家庭</ThemedText>
+                <ThemedText style={[styles.primaryText, { color: palette.onInk }]}>创建家庭</ThemedText>
               </Pressable>
               <Pressable
                 onPress={() => setScanOpen(true)}
@@ -245,166 +259,165 @@ export default function FamilyScreen() {
             contentContainerStyle={[styles.content, { paddingTop: headerHeight + Space[2] }]}
             scrollIndicatorInsets={{ top: headerHeight, bottom: TabBarInset }}
           >
-            {/* Hero：家庭名片 + 三项统计 */}
-            <View style={[styles.hero, { backgroundColor: palette.bannerTint }]}>
+            {/* Hero：家庭名片（封面图 / 品牌蓝渐变 + 家庭头像）+ 三项统计（毛玻璃）。身份区，全 App 唯一放胆用色处。 */}
+            <View style={styles.hero}>
+              {/* 背景层：有封面（cover_url）显封面大图，无则品牌蓝渐变 */}
+              {family.cover_url ? (
+                <Image source={family.cover_url} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
+              ) : (
+                <View style={[StyleSheet.absoluteFill, styles.heroGradient]} />
+              )}
+              {/* 暗色蒙版：保证白字在任意背景（亮蓝 / 浅色封面）下可读 */}
+              <View style={[StyleSheet.absoluteFill, styles.heroScrim]} pointerEvents="none" />
+              <SymbolView
+                name="house.fill"
+                tintColor="rgba(255,255,255,0.14)"
+                size={96}
+                style={styles.heroHouse}
+                pointerEvents="none"
+              />
+
               <View style={styles.heroHead}>
                 <View style={styles.heroTop}>
-                  <Pressable onPress={onChangeCover} disabled={!isOwner || updateCoverM.isPending}>
-                    <FamilyAvatar
-                      url={family.cover_url}
-                      uploading={updateCoverM.isPending}
-                      canEdit={isOwner}
-                      palette={palette}
+                  {/* 家庭头像（avatar_url）：只读展示；更换入口在「家庭设置」 */}
+                  {family.avatar_url ? (
+                    <Image
+                      source={family.avatar_url}
+                      style={styles.heroBadgeGlass}
+                      contentFit="cover"
+                      transition={150}
                     />
-                  </Pressable>
+                  ) : (
+                    <View style={styles.heroBadgeGlass}>
+                      <ThemedText style={styles.heroBadgeText}>家</ThemedText>
+                    </View>
+                  )}
                   <View style={styles.flex}>
-                    <ThemedText style={[styles.heroName, { color: palette.textPrimary }]}>{family.name}</ThemedText>
+                    <ThemedText style={styles.heroName}>{family.name}</ThemedText>
                     <View style={styles.heroMetaRow}>
-                      <SymbolView name="person.2.fill" tintColor={palette.textSecondary} size={13} />
-                      <ThemedText style={[styles.heroMeta, { color: palette.textSecondary }]}>
-                        {family.member_count} 位成员
-                      </ThemedText>
+                      <SymbolView name="person.2.fill" tintColor="rgba(255,255,255,0.85)" size={13} />
+                      <ThemedText style={styles.heroMeta}>{family.member_count} 位成员</ThemedText>
                       {isOwner ? (
-                        <View style={[styles.roleBadge, { backgroundColor: palette.bannerTint }]}>
-                          <ThemedText style={[styles.roleBadgeText, { color: palette.textPrimary }]}>户主</ThemedText>
+                        <View style={styles.heroRoleBadge}>
+                          <ThemedText style={styles.heroRoleBadgeText}>户主</ThemedText>
                         </View>
                       ) : null}
                     </View>
                   </View>
-                  <SymbolView name="house.fill" tintColor={palette.textTertiary} size={34} style={styles.heroHouse} />
                 </View>
-                <ThemedText style={[styles.heroTagline, { color: palette.textSecondary }]}>
-                  一起记录生活，温暖每一天
-                </ThemedText>
+                <ThemedText style={styles.heroTagline}>一起记录生活，温暖每一天</ThemedText>
               </View>
 
-              <View style={[styles.heroStats, { backgroundColor: palette.card }]}>
+              <BlurView intensity={24} tint="dark" style={styles.heroStats}>
                 <HeroStat icon="book.closed.fill" value={`${stats.monthCount}`} unit="笔" label="本月已记账" />
-                <View style={[styles.heroStatDivider, { backgroundColor: palette.separator }]} />
+                <View style={styles.heroStatDivider} />
                 <HeroStat icon="flame.fill" value={`${stats.streak}`} unit="天" label="已连续记账" />
-                <View style={[styles.heroStatDivider, { backgroundColor: palette.separator }]} />
+                <View style={styles.heroStatDivider} />
                 <HeroStat icon="calendar" value={createdLabel} label="创建家庭" />
-              </View>
+              </BlurView>
             </View>
 
-            {/* 本月家庭概览 */}
-            <View style={[styles.card, styles.overview, { backgroundColor: palette.card }]}>
-              <View style={styles.overviewHead}>
-                <ThemedText style={[styles.cardTitle, { color: palette.textPrimary }]}>本月家庭概览</ThemedText>
-                <View style={[styles.periodPill, { backgroundColor: palette.base }]}>
-                  <ThemedText style={[styles.periodText, { color: palette.textPrimary }]}>本月</ThemedText>
-                  <SymbolView name="chevron.down" tintColor={palette.textSecondary} size={10} />
-                </View>
-              </View>
-              <View style={styles.overviewRow}>
-                <OverviewCol
-                  label="支出"
-                  cents={stats.expense}
-                  color={palette.expense}
-                  trend={stats.expenseTrend}
-                  textSecondary={palette.textSecondary}
+            {singlePerson ? (
+              <InviteGuideCard palette={palette} onGenerate={onInvite} onScan={() => setScanOpen(true)} />
+            ) : (
+              <>
+                <FamilyNowCard
+                  palette={palette}
+                  budgetSet={budgetTotal != null}
+                  budgetUsed={budgetUsed}
+                  budgetTotal={budgetTotal ?? 0}
+                  budgetPct={budgetPct}
+                  budgetRemaining={budgetRemaining}
+                  daysLeft={daysToMonthEnd()}
+                  goal={featuredGoal}
+                  activeGoalCount={activeGoalCount}
+                  isOwner={isOwner}
+                  onBudget={() => setBudgetOpen(true)}
+                  onSavingsList={openSavingsList}
+                  onGoalDetail={openGoalDetail}
                 />
-                <View style={[styles.overviewDivider, { backgroundColor: palette.separator }]} />
-                <OverviewCol
-                  label="收入"
-                  cents={stats.income}
-                  color={palette.income}
-                  trend={stats.incomeTrend}
-                  textSecondary={palette.textSecondary}
-                />
-                <View style={[styles.overviewDivider, { backgroundColor: palette.separator }]} />
-                <OverviewCol
-                  label="结余"
-                  cents={stats.balance}
-                  sign={signForNet(stats.balance)}
-                  color={palette.textPrimary}
-                  trend={stats.balanceTrend}
-                  textSecondary={palette.textSecondary}
-                />
-              </View>
-            </View>
 
-            {/* 家庭成员 */}
-            <View style={styles.section}>
-              <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>
-                家庭成员{' '}
-                <ThemedText style={{ color: palette.textTertiary, fontSize: 15 }}>
-                  （{members.length}/{MAX_MEMBERS}）
-                </ThemedText>
-              </ThemedText>
-              <View style={[styles.card, { backgroundColor: palette.card }]}>
-                {members.map((m, i) => {
-                  const monthN = stats.byMemberMonth.get(m.userId) ?? 0;
-                  const todayN = stats.byMemberToday.get(m.userId) ?? 0;
-                  const ratio = Math.min(1, monthN / stats.maxMemberMonth);
-                  const tint = avatarTints[i % avatarTints.length];
-                  return (
-                    <View key={m.id}>
-                      {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
-                      <View style={styles.memberRow}>
-                        {m.avatarUrl ? (
-                          <Image source={m.avatarUrl} style={styles.memberAvatar} contentFit="cover" transition={120} />
-                        ) : (
-                          <View style={[styles.memberAvatar, styles.memberAvatarFallback, { backgroundColor: tint }]}>
-                            <SymbolView name="person.fill" tintColor="#FFFFFF" size={20} />
-                          </View>
-                        )}
-                        <View style={styles.flex}>
-                          <View style={styles.memberNameRow}>
-                            <ThemedText style={[styles.memberName, { color: palette.textPrimary }]}>
-                              {m.nickname}
-                              {m.userId === myId ? '（我）' : ''}
-                            </ThemedText>
-                            <View style={[styles.roleBadge, { backgroundColor: palette.bannerTint }]}>
-                              <ThemedText
-                                style={[
-                                  styles.roleBadgeText,
-                                  { color: m.role === 'owner' ? palette.textPrimary : palette.textSecondary },
-                                ]}
+                {/* 家庭成员 */}
+                <View style={styles.section}>
+                  <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>
+                    家庭成员{' '}
+                    <ThemedText style={{ color: palette.textTertiary, fontSize: 15 }}>
+                      （{members.length}/{MAX_MEMBERS}）
+                    </ThemedText>
+                  </ThemedText>
+                  <View style={[styles.card, { backgroundColor: palette.card }]}>
+                    {members.map((m, i) => {
+                      const todayN = stats.byMemberToday.get(m.userId) ?? 0;
+                      const tint = avatarTints[i % avatarTints.length];
+                      return (
+                        <View key={m.id}>
+                          {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
+                          <View style={styles.memberRow}>
+                            {m.avatarUrl ? (
+                              <Image
+                                source={m.avatarUrl}
+                                style={styles.memberAvatar}
+                                contentFit="cover"
+                                transition={120}
+                              />
+                            ) : (
+                              <View
+                                style={[styles.memberAvatar, styles.memberAvatarFallback, { backgroundColor: tint }]}
                               >
-                                {m.role === 'owner' ? '户主' : '成员'}
-                              </ThemedText>
+                                <SymbolView name="person.fill" tintColor="#FFFFFF" size={20} />
+                              </View>
+                            )}
+                            <View style={styles.flex}>
+                              <View style={styles.memberNameRow}>
+                                <ThemedText style={[styles.memberName, { color: palette.textPrimary }]}>
+                                  {m.nickname}
+                                  {m.userId === myId ? '（我）' : ''}
+                                </ThemedText>
+                                <View style={[styles.roleBadge, { backgroundColor: palette.bannerTint }]}>
+                                  <ThemedText
+                                    style={[
+                                      styles.roleBadgeText,
+                                      { color: m.role === 'owner' ? palette.textPrimary : palette.textSecondary },
+                                    ]}
+                                  >
+                                    {m.role === 'owner' ? '户主' : '成员'}
+                                  </ThemedText>
+                                </View>
+                              </View>
+                              <View style={styles.memberActivity}>
+                                <SymbolView
+                                  name={todayN > 0 ? 'checkmark.circle.fill' : 'circle'}
+                                  tintColor={todayN > 0 ? palette.accent : palette.textTertiary}
+                                  size={12}
+                                />
+                                <ThemedText style={[styles.memberSub, { color: palette.textSecondary }]}>
+                                  {todayN > 0 ? `今日已记 ${todayN} 笔` : '今日未记账'}
+                                </ThemedText>
+                              </View>
                             </View>
                           </View>
-                          <ThemedText style={[styles.memberSub, { color: palette.textSecondary }]}>
-                            今天记账 {todayN} 笔
-                          </ThemedText>
                         </View>
-                        <View style={styles.memberRight}>
-                          <ThemedText style={[styles.memberMonth, { color: palette.textSecondary }]}>
-                            本月{' '}
-                            <ThemedText style={{ color: palette.textPrimary, fontWeight: '600' }}>{monthN}</ThemedText>{' '}
-                            笔
-                          </ThemedText>
-                          <View style={[styles.progressTrack, { backgroundColor: palette.separator }]}>
-                            <View
-                              style={[
-                                styles.progressFill,
-                                { backgroundColor: tint, width: `${Math.max(6, ratio * 100)}%` },
-                              ]}
-                            />
-                          </View>
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              </>
+            )}
 
             {/* 快捷功能 */}
             <View style={styles.section}>
               <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>快捷功能</ThemedText>
               <View style={styles.quickRow}>
-                <QuickTile
-                  icon="chart.pie.fill"
-                  title="预算管理"
-                  sub="查看与设置"
-                  onPress={() => setBudgetOpen(true)}
-                />
-                <QuickTile icon="target" title="储蓄目标" sub="共同攒钱" onPress={() => setSavingsOpen(true)} />
+                <QuickTile icon="chart.pie.fill" title="预算管理" sub={budgetSub} onPress={() => setBudgetOpen(true)} />
+                <QuickTile icon="target" title="储蓄目标" sub={savingsSub} onPress={openSavingsList} />
                 <QuickTile icon="person.crop.circle.badge.plus" title="邀请家人" sub="加入家庭" onPress={onInvite} />
-                <QuickTile icon="bell.fill" title="家庭通知" sub="重要提醒" onPress={() => setNotifyOpen(true)} />
+                <QuickTile
+                  icon="bell.fill"
+                  title="家庭通知"
+                  sub={unreadCount > 0 ? `${unreadCount} 条未读` : '重要提醒'}
+                  badge={unreadCount}
+                  onPress={() => setNotifyOpen(true)}
+                />
                 <QuickTile
                   icon="square.grid.2x2.fill"
                   title="分类管理"
@@ -467,7 +480,6 @@ export default function FamilyScreen() {
           </Animated.View>
         </View>
       </View>
-
       <InviteSheet visible={inviteOpen} onClose={() => setInviteOpen(false)} />
       <ScanSheet visible={scanOpen} onClose={() => setScanOpen(false)} />
       {/* 成员管理里的「邀请家人」先关本页、待其 dismiss 动画结束再开邀请页，避免 pageSheet 叠加。 */}
@@ -498,51 +510,22 @@ export default function FamilyScreen() {
         onClose={() => setDissolveOpen(false)}
       />
       <BudgetSheet visible={budgetOpen} onClose={() => setBudgetOpen(false)} />
-      <SavingsSheet visible={savingsOpen} onClose={() => setSavingsOpen(false)} />
+      <SavingsSheet
+        visible={savingsOpen}
+        initialGoalId={savingsGoalId}
+        onClose={() => {
+          setSavingsOpen(false);
+          setSavingsGoalId(null);
+        }}
+      />
       <CategoryManageSheet visible={categoryOpen} onClose={() => setCategoryOpen(false)} />
       <FamilySettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <NotificationCenterSheet visible={notifyOpen} onClose={() => setNotifyOpen(false)} />
-      <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
 }
 
-// ── 家庭头像：有封面显示封面图，无则「家」字底；户主可点更换（带相机角标）──
-function FamilyAvatar({
-  url,
-  uploading,
-  canEdit,
-  palette,
-}: {
-  url: string | null;
-  uploading: boolean;
-  canEdit: boolean;
-  palette: ReturnType<typeof usePalette>;
-}) {
-  return (
-    <View style={styles.heroBadgeWrap}>
-      {url ? (
-        <Image source={url} style={styles.heroBadge} contentFit="cover" transition={120} />
-      ) : (
-        <View style={[styles.heroBadge, { backgroundColor: palette.accent }]}>
-          <ThemedText style={[styles.heroBadgeText, { color: palette.onAccent }]}>家</ThemedText>
-        </View>
-      )}
-      {uploading ? (
-        <View style={[styles.heroBadge, styles.heroBadgeOverlay]}>
-          <ActivityIndicator color="#fff" size="small" />
-        </View>
-      ) : null}
-      {canEdit ? (
-        <View style={[styles.heroBadgeCamera, { backgroundColor: palette.accent, borderColor: palette.bannerTint }]}>
-          <SymbolView name="camera.fill" tintColor={palette.onAccent} size={10} />
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-// ── Hero 单项统计：图标 + 数值 + 标签 ──
+// ── Hero 单项统计：图标 + 数值 + 标签（常驻彩色/封面之上，用白字）──
 function HeroStat({
   icon,
   value,
@@ -554,27 +537,19 @@ function HeroStat({
   unit?: string;
   label: string;
 }) {
-  const palette = usePalette();
   return (
     <View style={styles.heroStat}>
-      <View style={[styles.heroStatIcon, { backgroundColor: palette.bannerTint }]}>
-        <SymbolView name={icon} tintColor={palette.textSecondary} size={15} />
+      <View style={styles.heroStatIcon}>
+        <SymbolView name={icon} tintColor="rgba(255,255,255,0.9)" size={15} />
       </View>
       <View style={styles.heroStatBody}>
         <View style={styles.heroStatValueRow}>
-          <ThemedText
-            style={[styles.heroStatValue, { color: palette.textPrimary }]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-          >
+          <ThemedText style={styles.heroStatValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
             {value}
           </ThemedText>
-          {unit ? (
-            <ThemedText style={[styles.heroStatUnit, { color: palette.textSecondary }]}>{unit}</ThemedText>
-          ) : null}
+          {unit ? <ThemedText style={styles.heroStatUnit}>{unit}</ThemedText> : null}
         </View>
-        <ThemedText style={[styles.heroStatLabel, { color: palette.textSecondary }]} numberOfLines={1}>
+        <ThemedText style={styles.heroStatLabel} numberOfLines={1}>
           {label}
         </ThemedText>
       </View>
@@ -582,68 +557,203 @@ function HeroStat({
   );
 }
 
-// ── 概览单列：标签 + 两段式金额 + 较上月趋势（中性灰 + 箭头）──
-function OverviewCol({
-  label,
-  cents,
-  sign = '',
-  color,
-  trend,
-  textSecondary,
+// ── 家庭当下：预算执行 + 精选储蓄目标，两行均可点进各自面板（当下状态 + 行动）──
+function FamilyNowCard({
+  palette,
+  budgetSet,
+  budgetUsed,
+  budgetTotal,
+  budgetPct,
+  budgetRemaining,
+  daysLeft,
+  goal,
+  activeGoalCount,
+  isOwner,
+  onBudget,
+  onSavingsList,
+  onGoalDetail,
 }: {
-  label: string;
-  cents: number;
-  sign?: '+' | '-' | '';
-  color: string;
-  trend: { pct: number; up: boolean } | null;
-  textSecondary: string;
+  palette: ReturnType<typeof usePalette>;
+  budgetSet: boolean;
+  budgetUsed: number;
+  budgetTotal: number;
+  budgetPct: number;
+  budgetRemaining: number;
+  daysLeft: number;
+  goal: SavingsGoal | null;
+  activeGoalCount: number;
+  isOwner: boolean;
+  onBudget: () => void;
+  onSavingsList: () => void;
+  onGoalDetail: (id: string) => void;
 }) {
-  const p = amountParts(cents, sign);
+  const level = budgetLevel(budgetPct);
+  const budgetColor = level === 'danger' ? palette.danger : level === 'warning' ? palette.warning : palette.accent;
+  const goalPct =
+    goal && goal.target_amount > 0 ? Math.min(100, Math.round((goal.saved_amount / goal.target_amount) * 100)) : 0;
+  const goalRemain = goal ? Math.max(0, goal.target_amount - goal.saved_amount) : 0;
+
   return (
-    <View style={styles.overviewCol}>
-      <ThemedText style={[styles.overviewLabel, { color: textSecondary }]}>{label}</ThemedText>
-      <View style={styles.overviewAmountRow}>
-        <ThemedText style={[styles.overviewInt, { color }]}>
-          {p.sign}
-          {p.currency}
-          {p.integer}
-        </ThemedText>
-        <ThemedText style={[styles.overviewDec, { color }]}>.{p.decimal}</ThemedText>
-      </View>
-      <View style={styles.overviewTrendRow}>
-        {trend ? (
-          <>
-            <ThemedText style={[styles.overviewTrend, { color: textSecondary }]}>
-              较上月 {formatPercent(trend.pct)}
+    <View style={styles.section}>
+      <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>家庭当下</ThemedText>
+      <View style={[styles.card, { backgroundColor: palette.card }]}>
+        {/* 预算行 */}
+        <Pressable style={styles.nowBlock} onPress={onBudget}>
+          <View style={styles.nowHead}>
+            <View style={styles.nowHeadL}>
+              <SymbolView name="chart.pie.fill" tintColor={palette.accent} size={14} />
+              <ThemedText style={[styles.nowLabel, { color: palette.textPrimary }]}>本月预算</ThemedText>
+            </View>
+            <View style={styles.nowHeadR}>
+              {budgetSet ? (
+                <ThemedText style={[styles.nowMeta, { color: palette.textTertiary }]}>距月底 {daysLeft} 天</ThemedText>
+              ) : null}
+              <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
+            </View>
+          </View>
+          {budgetSet ? (
+            <>
+              <View style={styles.nowAmountRow}>
+                <View style={styles.nowAmountLeft}>
+                  <ThemedText style={[styles.nowAmountBig, { color: palette.textPrimary }]}>
+                    {formatAmount(budgetUsed)}
+                  </ThemedText>
+                  <ThemedText style={[styles.nowAmountSub, { color: palette.textSecondary }]}>
+                    {' / '}
+                    {formatAmount(budgetTotal)}
+                  </ThemedText>
+                </View>
+                <ThemedText style={[styles.nowPct, { color: budgetColor }]}>{budgetPct}%</ThemedText>
+              </View>
+              <View style={[styles.nowTrack, { backgroundColor: palette.separator }]}>
+                <View
+                  style={[styles.nowFill, { backgroundColor: budgetColor, width: `${Math.min(100, budgetPct)}%` }]}
+                />
+              </View>
+              <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>
+                {budgetRemaining >= 0
+                  ? `剩 ${formatAmount(budgetRemaining)} 可用`
+                  : `已超支 ${formatAmount(-budgetRemaining)}`}
+              </ThemedText>
+            </>
+          ) : (
+            <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>
+              {isOwner ? '点此设置本月预算，全家一起看执行' : '尚未设置预算，可请户主设置'}
             </ThemedText>
-            <SymbolView name={trend.up ? 'arrow.up' : 'arrow.down'} tintColor={textSecondary} size={9} />
-          </>
+          )}
+        </Pressable>
+
+        <View style={[styles.divider, { backgroundColor: palette.separator }]} />
+
+        {/* 储蓄行：有目标 → 精选目标进度（点进详情）；无 → 引导建目标 */}
+        {goal ? (
+          <Pressable style={styles.nowBlock} onPress={() => onGoalDetail(goal.id)}>
+            <View style={styles.nowHead}>
+              <View style={styles.nowHeadL}>
+                <SymbolView name="target" tintColor={palette.accent} size={14} />
+                <ThemedText style={[styles.nowLabel, { color: palette.textPrimary }]} numberOfLines={1}>
+                  {goal.name}
+                </ThemedText>
+              </View>
+              <View style={styles.nowHeadR}>
+                <ThemedText style={[styles.nowPct, { color: palette.accent }]}>{goalPct}%</ThemedText>
+                <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
+              </View>
+            </View>
+            <View style={styles.nowAmountRow}>
+              <View style={styles.nowAmountLeft}>
+                <ThemedText style={[styles.nowAmountBig, { color: palette.textPrimary, fontSize: 18 }]}>
+                  {formatAmount(goal.saved_amount)}
+                </ThemedText>
+                <ThemedText style={[styles.nowAmountSub, { color: palette.textSecondary }]}>
+                  {' / '}
+                  {formatAmount(goal.target_amount)}
+                </ThemedText>
+              </View>
+            </View>
+            <View style={[styles.nowTrack, { backgroundColor: palette.separator }]}>
+              <View style={[styles.nowFill, { backgroundColor: palette.accent, width: `${goalPct}%` }]} />
+            </View>
+            <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>
+              {goalRemain > 0 ? `距达成还差 ${formatAmount(goalRemain)}` : '已达成目标'}
+              {activeGoalCount > 1 ? ` · 另有 ${activeGoalCount - 1} 个目标` : ''}
+            </ThemedText>
+          </Pressable>
         ) : (
-          <ThemedText style={[styles.overviewTrend, { color: textSecondary }]}>较上月 —</ThemedText>
+          <Pressable style={styles.nowBlock} onPress={onSavingsList}>
+            <View style={styles.nowHead}>
+              <View style={styles.nowHeadL}>
+                <SymbolView name="target" tintColor={palette.accent} size={14} />
+                <ThemedText style={[styles.nowLabel, { color: palette.textPrimary }]}>储蓄目标</ThemedText>
+              </View>
+              <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
+            </View>
+            <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>和家人一起定个攒钱目标</ThemedText>
+          </Pressable>
         )}
       </View>
     </View>
   );
 }
 
-// ── 快捷功能瓦片 ──
+// ── 单人家庭：邀请引导卡（主 CTA 用墨色 ink，见 DESIGN §2.5 例外③）──
+function InviteGuideCard({
+  palette,
+  onGenerate,
+  onScan,
+}: {
+  palette: ReturnType<typeof usePalette>;
+  onGenerate: () => void;
+  onScan: () => void;
+}) {
+  return (
+    <View style={[styles.card, styles.invite, { backgroundColor: palette.bannerTint }]}>
+      <View style={[styles.inviteIcon, { backgroundColor: palette.card }]}>
+        <SymbolView name="person.2.fill" tintColor={palette.accent} size={26} />
+      </View>
+      <ThemedText style={[styles.inviteTitle, { color: palette.textPrimary }]}>还只有你一个人</ThemedText>
+      <ThemedText style={[styles.inviteBody, { color: palette.textSecondary }]}>
+        邀请家人加入，一起记录每天的收支，账本自动共享给全家。
+      </ThemedText>
+      <Pressable style={[styles.invitePrimary, { backgroundColor: palette.ink }]} onPress={onGenerate}>
+        <SymbolView name="person.crop.circle.badge.plus" tintColor={palette.onInk} size={18} />
+        <ThemedText style={[styles.invitePrimaryText, { color: palette.onInk }]}>生成邀请码</ThemedText>
+      </Pressable>
+      <Pressable onPress={onScan}>
+        <ThemedText style={[styles.inviteGhost, { color: palette.accent }]}>或 · 扫码加入他人家庭</ThemedText>
+      </Pressable>
+    </View>
+  );
+}
+
+// ── 快捷功能瓦片（可选右上角红点角标，用于家庭通知未读数）──
 function QuickTile({
   icon,
   title,
   sub,
+  badge,
   onPress,
 }: {
   icon: SymbolViewProps['name'];
   title: string;
   sub: string;
+  badge?: number;
   onPress: () => void;
 }) {
   const palette = usePalette();
   return (
     <Pressable onPress={onPress} style={[styles.quickTile, { backgroundColor: palette.card }]}>
-      <SymbolView name={icon} tintColor={palette.accent} size={26} />
+      {/* 单色近黑图标：与黑按钮同语言，全页彩色只留给金额/进度/选中（DESIGN §2 黑白灰骨架）。 */}
+      <SymbolView name={icon} tintColor={palette.textPrimary} size={26} />
       <ThemedText style={[styles.quickTitle, { color: palette.textPrimary }]}>{title}</ThemedText>
-      <ThemedText style={[styles.quickSub, { color: palette.textTertiary }]}>{sub}</ThemedText>
+      <ThemedText style={[styles.quickSub, { color: palette.textTertiary }]} numberOfLines={1}>
+        {sub}
+      </ThemedText>
+      {badge && badge > 0 ? (
+        <View style={[styles.quickBadge, { backgroundColor: palette.danger, borderColor: palette.card }]}>
+          <ThemedText style={styles.quickBadgeText}>{badge > 99 ? '99+' : badge}</ThemedText>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -665,7 +775,8 @@ function ManageRow({
   disabled?: boolean;
 }) {
   const palette = usePalette();
-  const tint = danger ? palette.danger : palette.textSecondary;
+  // 非危险项图标用近黑，与快捷功能瓦片同语言；危险项（解散/退出）保持红。
+  const tint = danger ? palette.danger : palette.textPrimary;
   const titleColor = danger ? palette.danger : palette.textPrimary;
   return (
     <Pressable onPress={onPress} disabled={disabled} style={[styles.manageRow, { opacity: disabled ? 0.4 : 1 }]}>
@@ -705,32 +816,39 @@ const styles = StyleSheet.create({
   },
   content: { paddingHorizontal: Space[4], paddingBottom: TabBarInset, gap: Space[5] },
 
-  // Hero
+  // Hero（品牌蓝渐变 / 封面图之上，白字 + 毛玻璃统计条）
   hero: { borderRadius: Radius.lg, padding: Space[4], gap: Space[4], overflow: 'hidden' },
+  heroGradient: { experimental_backgroundImage: 'linear-gradient(145deg, #3C9FFE, #0169D4)' },
+  // 顶部略暗（白字标题可读）→ 中段透 → 底部加深（毛玻璃统计条上白字可读）
+  heroScrim: {
+    experimental_backgroundImage:
+      'linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.06) 42%, rgba(0,0,0,0.40) 100%)',
+  },
   heroHead: { gap: Space[2] },
   heroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Space[3] },
-  heroBadgeWrap: { width: 52, height: 52 },
-  heroBadge: { width: 52, height: 52, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
-  heroBadgeText: { fontSize: 26, lineHeight: 32, fontWeight: '700' },
-  heroBadgeOverlay: { position: 'absolute', top: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.35)' },
-  heroBadgeCamera: {
-    position: 'absolute',
-    right: -4,
-    bottom: -4,
-    width: 20,
-    height: 20,
-    borderRadius: Radius.full,
-    borderWidth: 2,
+  heroBadgeGlass: {
+    width: 50,
+    height: 50,
+    borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.35)',
   },
-  heroName: { fontSize: 22, lineHeight: 28, fontWeight: '700' },
+  heroBadgeText: { fontSize: 24, lineHeight: 30, fontWeight: '700', color: '#FFFFFF' },
+  heroName: { fontSize: 22, lineHeight: 28, fontWeight: '700', color: '#FFFFFF' },
   heroMetaRow: { flexDirection: 'row', alignItems: 'center', gap: Space[1], marginTop: 2 },
-  heroMeta: { fontSize: 13, lineHeight: 18 },
-  heroTagline: { fontSize: 13, lineHeight: 18 },
-  heroHouse: { opacity: 0.5 },
-  roleBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: Radius.sm },
-  roleBadgeText: { fontSize: 12, lineHeight: 16, fontWeight: '600' },
+  heroMeta: { fontSize: 13, lineHeight: 18, color: 'rgba(255,255,255,0.85)' },
+  heroTagline: { fontSize: 13, lineHeight: 18, color: 'rgba(255,255,255,0.78)' },
+  heroHouse: { position: 'absolute', top: -8, right: -10 },
+  heroRoleBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: Radius.sm,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  heroRoleBadgeText: { fontSize: 12, lineHeight: 16, fontWeight: '600', color: '#FFFFFF' },
 
   heroStats: {
     flexDirection: 'row',
@@ -738,15 +856,25 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     paddingVertical: Space[3],
     paddingHorizontal: Space[1],
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   heroStat: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Space[2], paddingHorizontal: Space[1] },
-  heroStatIcon: { width: 28, height: 28, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
+  heroStatIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
   heroStatBody: { flex: 1, gap: 1 },
   heroStatValueRow: { flexDirection: 'row', alignItems: 'baseline', gap: 2 },
-  heroStatValue: { flexShrink: 1, fontSize: 15, lineHeight: 19, fontWeight: '700' },
-  heroStatUnit: { fontSize: 11, lineHeight: 14 },
-  heroStatLabel: { fontSize: 11, lineHeight: 14 },
-  heroStatDivider: { width: StyleSheet.hairlineWidth, height: 28 },
+  heroStatValue: { flexShrink: 1, fontSize: 15, lineHeight: 19, fontWeight: '700', color: '#FFFFFF' },
+  heroStatUnit: { fontSize: 11, lineHeight: 14, color: 'rgba(255,255,255,0.78)' },
+  heroStatLabel: { fontSize: 11, lineHeight: 14, color: 'rgba(255,255,255,0.78)' },
+  heroStatDivider: { width: StyleSheet.hairlineWidth, height: 28, backgroundColor: 'rgba(255,255,255,0.22)' },
 
   // 通用卡片 / 区块
   card: { borderRadius: Radius.lg, overflow: 'hidden' },
@@ -754,28 +882,6 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 17, fontWeight: '600', paddingHorizontal: Space[1] },
   cardTitle: { fontSize: 16, fontWeight: '600' },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: Space[4] },
-
-  // 本月概览
-  overview: { padding: Space[4], gap: Space[3] },
-  overviewHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  periodPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space[1],
-    paddingHorizontal: Space[3],
-    paddingVertical: Space[1],
-    borderRadius: Radius.full,
-  },
-  periodText: { fontSize: 13, lineHeight: 16 },
-  overviewRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  overviewCol: { flex: 1, gap: 4 },
-  overviewDivider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginHorizontal: Space[2] },
-  overviewLabel: { fontSize: 13, lineHeight: 16 },
-  overviewAmountRow: { flexDirection: 'row', alignItems: 'baseline' },
-  overviewInt: { fontSize: 20, fontWeight: '700' },
-  overviewDec: { fontSize: 13, fontWeight: '600' },
-  overviewTrendRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  overviewTrend: { fontSize: 11, lineHeight: 14 },
 
   // 成员
   memberRow: {
@@ -789,11 +895,44 @@ const styles = StyleSheet.create({
   memberAvatarFallback: { alignItems: 'center', justifyContent: 'center' },
   memberNameRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
   memberName: { fontSize: 16, fontWeight: '600' },
-  memberSub: { fontSize: 13, lineHeight: 16, marginTop: 2 },
-  memberRight: { alignItems: 'flex-end', gap: 4, width: 96 },
-  memberMonth: { fontSize: 13, lineHeight: 16 },
-  progressTrack: { width: '100%', height: 4, borderRadius: Radius.full, overflow: 'hidden' },
-  progressFill: { height: 4, borderRadius: Radius.full },
+  roleBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: Radius.sm },
+  roleBadgeText: { fontSize: 12, lineHeight: 16, fontWeight: '600' },
+  memberActivity: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  memberSub: { fontSize: 13, lineHeight: 16 },
+
+  // 家庭当下（预算 / 储蓄）
+  nowBlock: { paddingVertical: Space[3], paddingHorizontal: Space[4], gap: 7 },
+  nowHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  nowHeadL: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  nowHeadR: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  nowLabel: { fontSize: 14.5, fontWeight: '600', flexShrink: 1 },
+  nowMeta: { fontSize: 12 },
+  nowAmountRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  nowAmountLeft: { flexDirection: 'row', alignItems: 'baseline', flexShrink: 1 },
+  nowAmountBig: { fontSize: 20, fontWeight: '700' },
+  nowAmountSub: { fontSize: 13 },
+  nowPct: { fontSize: 13, fontWeight: '600' },
+  nowTrack: { width: '100%', height: 7, borderRadius: Radius.full, overflow: 'hidden' },
+  nowFill: { height: 7, borderRadius: Radius.full },
+  nowFoot: { fontSize: 12, lineHeight: 16 },
+
+  // 单人家庭邀请引导
+  invite: { alignItems: 'center', gap: Space[2], padding: Space[5] },
+  inviteIcon: { width: 50, height: 50, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
+  inviteTitle: { fontSize: 16, fontWeight: '600', marginTop: Space[1] },
+  inviteBody: { fontSize: 13, lineHeight: 19, textAlign: 'center', paddingHorizontal: Space[2] },
+  invitePrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    alignSelf: 'stretch',
+    height: 46,
+    borderRadius: Radius.md,
+    marginTop: Space[2],
+  },
+  invitePrimaryText: { fontSize: 16, fontWeight: '600' },
+  inviteGhost: { fontSize: 13.5, fontWeight: '500', marginTop: Space[1] },
 
   // 快捷功能（正方形瓦片，4 列网格；超过 4 个自动换行，末行左对齐）
   quickRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: Space[2] },
@@ -805,9 +944,23 @@ const styles = StyleSheet.create({
     gap: Space[1],
     padding: Space[2],
     borderRadius: Radius.lg,
+    overflow: 'visible',
   },
   quickTitle: { fontSize: 13, lineHeight: 17, fontWeight: '600', marginTop: 2 },
   quickSub: { fontSize: 11, lineHeight: 14 },
+  quickBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: Radius.full,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickBadgeText: { color: '#FFFFFF', fontSize: 10, lineHeight: 13, fontWeight: '700' },
 
   // 家庭管理
   manageRow: {

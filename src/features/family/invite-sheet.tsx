@@ -12,6 +12,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createInvitation, type Invitation, useMyFamily, useMyProfile } from '@/api';
+import { SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, usePalette } from '@/constants/design';
 
 /** react-native-qrcode-svg 的 ref 暴露 toDataURL（回调返回 base64 PNG，无 data: 前缀）。 */
@@ -20,7 +21,7 @@ type QRRef = { toDataURL: (cb: (data: string) => void) => void };
 export function InviteSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <InviteBody onClose={onClose} /> : null}
+      {visible ? <InviteBody /> : null}
     </Modal>
   );
 }
@@ -41,7 +42,7 @@ function fmtRemain(ms: number): string {
   return `${p(hh)}:${p(mm)}:${p(ss)}`;
 }
 
-function InviteBody({ onClose }: { onClose: () => void }) {
+function InviteBody() {
   const palette = usePalette();
   const familyQ = useMyFamily();
   const profileQ = useMyProfile();
@@ -119,12 +120,8 @@ function InviteBody({ onClose }: { onClose: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView style={styles.flex}>
-        <View style={styles.topBar}>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>邀请家人</Text>
-          <Pressable hitSlop={8} onPress={onClose}>
-            <Text style={[styles.action, { color: palette.textSecondary }]}>完成</Text>
-          </Pressable>
-        </View>
+        {/* 悬浮磨砂标题区（纯预览型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
+        <SheetHeader title="邀请家人" />
 
         <View style={styles.center}>
           {loading ? (
@@ -165,9 +162,9 @@ function InviteBody({ onClose }: { onClose: () => void }) {
               <Pressable
                 onPress={onCopy}
                 disabled={expired}
-                style={[styles.copyBtn, { backgroundColor: palette.accent, opacity: expired ? 0.35 : 1 }]}
+                style={[styles.copyBtn, { backgroundColor: palette.ink, opacity: expired ? 0.35 : 1 }]}
               >
-                <Text style={[styles.copyText, { color: palette.onAccent }]}>{copied ? '已复制 ✓' : '复制邀请码'}</Text>
+                <Text style={[styles.copyText, { color: palette.onInk }]}>{copied ? '已复制 ✓' : '复制邀请码'}</Text>
               </Pressable>
 
               {/* 存图 + 刷新 */}
@@ -202,10 +199,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[3],
+    paddingHorizontal: Space[6],
+    paddingTop: Space[5],
+    paddingBottom: Space[4],
   },
-  title: { fontSize: 20, fontWeight: '700' },
+  title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   action: { fontSize: 16 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[3], paddingHorizontal: Space[6] },
   familyName: { fontSize: 22, fontWeight: '700', textAlign: 'center' },

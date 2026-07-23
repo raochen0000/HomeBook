@@ -7,6 +7,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAllNotifications, useMarkAllNotificationsRead, useMarkNotificationRead, type Notification } from '@/api';
+import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, usePalette } from '@/constants/design';
 
 type Payload = Record<string, string> | null;
@@ -55,12 +56,12 @@ function timeLabel(iso: string): string {
 export function NotificationCenterSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <Body onClose={onClose} /> : null}
+      {visible ? <Body /> : null}
     </Modal>
   );
 }
 
-function Body({ onClose }: { onClose: () => void }) {
+function Body() {
   const palette = usePalette();
   const listQ = useAllNotifications();
   const markRead = useMarkNotificationRead();
@@ -72,19 +73,8 @@ function Body({ onClose }: { onClose: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView style={styles.flex}>
-        <View style={styles.topBar}>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>通知中心</Text>
-          <View style={styles.topRight}>
-            {hasUnread ? (
-              <Pressable hitSlop={8} onPress={() => markAll.mutate()}>
-                <Text style={[styles.action, { color: palette.info }]}>全部已读</Text>
-              </Pressable>
-            ) : null}
-            <Pressable hitSlop={8} onPress={onClose}>
-              <Text style={[styles.action, { color: palette.textSecondary }]}>完成</Text>
-            </Pressable>
-          </View>
-        </View>
+        {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
+        <SheetHeader title="通知中心" />
 
         {items.length === 0 ? (
           <View style={styles.center}>
@@ -93,6 +83,12 @@ function Body({ onClose }: { onClose: () => void }) {
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.content}>
+            {/* 「全部已读」从标题区移入内容区（DESIGN §9.9：非保存动作不放标题两侧） */}
+            {hasUnread ? (
+              <Pressable hitSlop={8} onPress={() => markAll.mutate()} style={styles.markAllRow}>
+                <Text style={[styles.action, { color: palette.info }]}>全部已读</Text>
+              </Pressable>
+            ) : null}
             {items.map((n) => {
               const d = describe(n);
               const unread = !n.read_at;
@@ -130,14 +126,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[3],
+    paddingHorizontal: Space[6],
+    paddingTop: Space[5],
+    paddingBottom: Space[4],
   },
-  title: { fontSize: 20, fontWeight: '700' },
+  title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   topRight: { flexDirection: 'row', alignItems: 'center', gap: Space[4] },
   action: { fontSize: 16 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[2] },
-  content: { paddingHorizontal: Space[4], paddingBottom: Space[12], gap: Space[2] },
+  content: {
+    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingHorizontal: Space[6],
+    paddingBottom: Space[12],
+    gap: Space[2],
+  },
+  markAllRow: { alignSelf: 'flex-end' },
   row: { flexDirection: 'row', gap: Space[3], padding: Space[4], borderRadius: Radius.lg },
   iconWrap: { width: 40, height: 40, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
   col: { flex: 1, gap: 2 },

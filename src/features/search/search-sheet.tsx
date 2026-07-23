@@ -40,7 +40,7 @@ import {
   useTransactions,
   type Transaction,
 } from '@/api';
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { avatarTintFor, Radius, Space, useAvatarTints, useCategoryColors, usePalette } from '@/constants/design';
 import { DayGroup, EndOfListHint, type AvatarInfo, type RowData } from '@/features/home/components';
 import { TransactionDetailSheet } from '@/features/home/transaction-detail-sheet';
@@ -117,7 +117,6 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   // 点击结果行 → 详情；左滑 → 编辑 / 删除，与首页列表一致。
   const [detail, setDetail] = useState<{ open: boolean; txn: Transaction | null }>({ open: false, txn: null });
   const [editing, setEditing] = useState<Transaction | null>(null);
-  const [hint, setHint] = useState<string | null>(null);
   const softDeleteM = useSoftDeleteTransaction();
 
   const multiMember = (familyQ.data?.member_count ?? 1) > 1;
@@ -234,7 +233,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const onRowPress = (id: string) => {
     const txn = (txnsQ.data ?? []).find((t) => t.id === id);
     if (!txn) {
-      setHint('该记录已不存在');
+      toast.error('该记录已不存在');
       txnsQ.refetch();
       return;
     }
@@ -244,12 +243,12 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const openEdit = (id: string) => {
     const txn = (txnsQ.data ?? []).find((t) => t.id === id);
     if (!txn) {
-      setHint('该记录已不存在');
+      toast.error('该记录已不存在');
       txnsQ.refetch();
       return;
     }
     if (txn.source !== 'normal') {
-      setHint('储蓄流水请在对应储蓄目标内管理');
+      toast.info('储蓄流水请在对应储蓄目标内管理');
       return;
     }
     setEditing(txn);
@@ -258,7 +257,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const confirmDelete = (id: string) => {
     const txn = (txnsQ.data ?? []).find((t) => t.id === id);
     if (txn?.source !== 'normal') {
-      setHint('储蓄流水请在对应储蓄目标内管理');
+      toast.info('储蓄流水请在对应储蓄目标内管理');
       return;
     }
     Alert.alert('删除这笔记录？', '删除后将从账单中移除，无法在 App 内恢复。', [
@@ -464,8 +463,6 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         recorderId={myId ?? ''}
         onClose={() => setEditing(null)}
       />
-
-      <Toast visible={!!hint} text={hint ?? ''} onHide={() => setHint(null)} />
     </View>
   );
 }

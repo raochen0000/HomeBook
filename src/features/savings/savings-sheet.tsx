@@ -31,7 +31,8 @@ import {
   useUpdateGoal,
   type SavingsGoal,
 } from '@/api';
-import { Toast } from '@/components/toast';
+import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
+import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { formatAmount } from '@/lib/format';
 
@@ -58,28 +59,36 @@ function daysLeft(deadline: string | null): number | null {
   return Math.ceil((d.getTime() - now.getTime()) / 86400000);
 }
 
-export function SavingsSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+export function SavingsSheet({
+  visible,
+  onClose,
+  initialGoalId,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  /** 直接进入某目标详情（F9 深链，用于家庭页「家庭当下」卡点击）；为空则落列表。 */
+  initialGoalId?: string | null;
+}) {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <Body onClose={onClose} /> : null}
+      {visible ? <Body initialGoalId={initialGoalId} /> : null}
     </Modal>
   );
 }
 
-function Body({ onClose }: { onClose: () => void }) {
+function Body({ initialGoalId }: { initialGoalId?: string | null }) {
   const palette = usePalette();
   const goalsQ = useSavingsGoals();
-  const [view, setView] = useState<ViewState>({ mode: 'list' });
-  const [achievedName, setAchievedName] = useState<string | null>(null);
+  const [view, setView] = useState<ViewState>(
+    initialGoalId ? { mode: 'detail', goalId: initialGoalId } : { mode: 'list' },
+  );
 
   const goals = goalsQ.data ?? [];
   const currentGoal = (id: string) => goals.find((g) => g.id === id) ?? null;
 
   let content: React.ReactNode;
   if (view.mode === 'list') {
-    content = (
-      <GoalList palette={palette} goals={goals} loading={goalsQ.isLoading} onClose={onClose} setView={setView} />
-    );
+    content = <GoalList palette={palette} goals={goals} loading={goalsQ.isLoading} setView={setView} />;
   } else if (view.mode === 'form') {
     content = <GoalForm goal={view.goal} onBack={() => setView({ mode: 'list' })} />;
   } else if (view.mode === 'txn') {
@@ -89,7 +98,7 @@ function Body({ onClose }: { onClose: () => void }) {
         goal={g}
         dir={view.dir}
         onBack={() => setView({ mode: 'detail', goalId: g.id })}
-        onAchieved={setAchievedName}
+        onAchieved={(name) => toast.success(`「${name}」已达成`)}
       />
     ) : null;
   } else {
@@ -97,16 +106,7 @@ function Body({ onClose }: { onClose: () => void }) {
     content = g ? <GoalDetail goal={g} onBack={() => setView({ mode: 'list' })} setView={setView} /> : null;
   }
 
-  return (
-    <View style={[styles.root, { backgroundColor: palette.base }]}>
-      {content}
-      <Toast
-        visible={!!achievedName}
-        text={achievedName ? `「${achievedName}」已达成` : ''}
-        onHide={() => setAchievedName(null)}
-      />
-    </View>
-  );
+  return <View style={[styles.root, { backgroundColor: palette.base }]}>{content}</View>;
 }
 
 // ── 目标列表 ─────────────────────────────────────────────────────────────────
@@ -114,13 +114,11 @@ function GoalList({
   palette,
   goals,
   loading,
-  onClose,
   setView,
 }: {
   palette: ReturnType<typeof usePalette>;
   goals: SavingsGoal[];
   loading: boolean;
-  onClose: () => void;
   setView: (v: ViewState) => void;
 }) {
   const onNew = () => {
@@ -133,12 +131,8 @@ function GoalList({
 
   return (
     <SafeAreaView style={styles.flex}>
-      <View style={styles.topBar}>
-        <Text style={[styles.title, { color: palette.textPrimary }]}>储蓄目标</Text>
-        <Pressable hitSlop={8} onPress={onClose}>
-          <Text style={[styles.action, { color: palette.textSecondary }]}>完成</Text>
-        </Pressable>
-      </View>
+      {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
+      <SheetHeader title="储蓄目标" />
 
       {loading ? (
         <View style={styles.center}>
@@ -149,8 +143,8 @@ function GoalList({
           <SymbolView name="target" tintColor={palette.textTertiary} size={48} />
           <Text style={{ color: palette.textSecondary }}>还没有储蓄目标</Text>
           <Text style={{ color: palette.textTertiary, fontSize: 13 }}>一家人一起攒个小目标吧</Text>
-          <Pressable onPress={onNew} style={[styles.primary, { backgroundColor: palette.accent }]}>
-            <Text style={[styles.primaryText, { color: palette.onAccent }]}>新建目标</Text>
+          <Pressable onPress={onNew} style={[styles.primary, { backgroundColor: palette.ink }]}>
+            <Text style={[styles.primaryText, { color: palette.onInk }]}>新建目标</Text>
           </Pressable>
         </View>
       ) : (
@@ -241,17 +235,8 @@ function GoalDetail({
 
   return (
     <SafeAreaView style={styles.flex}>
-      <View style={styles.topBar}>
-        <Pressable hitSlop={8} onPress={onBack}>
-          <SymbolView name="chevron.left" tintColor={palette.textSecondary} size={20} />
-        </Pressable>
-        <Text style={[styles.title, { color: palette.textPrimary }]} numberOfLines={1}>
-          {goal.name}
-        </Text>
-        <Pressable hitSlop={8} onPress={() => setView({ mode: 'form', goal })}>
-          <Text style={[styles.action, { color: palette.textSecondary }]}>编辑</Text>
-        </Pressable>
-      </View>
+      {/* 子视图：仅返回（DESIGN §9.9）；「编辑」入口移入内容区 */}
+      <SheetHeader title={goal.name} onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
@@ -271,10 +256,10 @@ function GoalDetail({
         <View style={styles.txnBtns}>
           <Pressable
             onPress={() => setView({ mode: 'txn', goalId: goal.id, dir: 'deposit' })}
-            style={[styles.txnBtn, { backgroundColor: palette.accent }]}
+            style={[styles.txnBtn, { backgroundColor: palette.ink }]}
           >
-            <SymbolView name="arrow.down" tintColor={palette.onAccent} size={16} weight="semibold" />
-            <Text style={[styles.txnBtnText, { color: palette.onAccent }]}>存入</Text>
+            <SymbolView name="arrow.down" tintColor={palette.onInk} size={16} weight="semibold" />
+            <Text style={[styles.txnBtnText, { color: palette.onInk }]}>存入</Text>
           </Pressable>
           <Pressable
             onPress={() => setView({ mode: 'txn', goalId: goal.id, dir: 'withdraw' })}
@@ -289,6 +274,11 @@ function GoalDetail({
             <Text style={[styles.txnBtnText, { color: palette.textPrimary }]}>取出</Text>
           </Pressable>
         </View>
+
+        {/* 编辑入口（从标题区移入内容区，DESIGN §9.9：非保存动作不放标题两侧） */}
+        <Pressable onPress={() => setView({ mode: 'form', goal })} hitSlop={8} style={styles.editLink}>
+          <Text style={{ color: palette.info, fontSize: 15 }}>编辑目标信息</Text>
+        </Pressable>
 
         {goal.note ? (
           <View style={[styles.noteCard, { backgroundColor: palette.card }]}>
@@ -422,15 +412,13 @@ function GoalForm({ goal, onBack }: { goal: SavingsGoal | null; onBack: () => vo
 
   return (
     <SafeAreaView style={styles.flex}>
-      <View style={styles.topBar}>
-        <Pressable hitSlop={8} onPress={onBack}>
-          <Text style={[styles.action, { color: palette.textSecondary }]}>取消</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: palette.textPrimary }]}>{isEdit ? '编辑目标' : '新建目标'}</Text>
-        <Pressable hitSlop={8} onPress={handleSave} disabled={!canSave}>
-          <Text style={[styles.action, { color: canSave ? palette.accent : palette.textTertiary }]}>保存</Text>
-        </Pressable>
-      </View>
+      {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
+      <SheetHeader
+        title={isEdit ? '编辑目标' : '新建目标'}
+        onBack={onBack}
+        onConfirm={handleSave}
+        confirmDisabled={!canSave}
+      />
 
       <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
         <Field label="目标名称" palette={palette}>
@@ -541,15 +529,8 @@ function TxnForm({
 
   return (
     <SafeAreaView style={styles.flex}>
-      <View style={styles.topBar}>
-        <Pressable hitSlop={8} onPress={onBack}>
-          <Text style={[styles.action, { color: palette.textSecondary }]}>取消</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: palette.textPrimary }]}>{isDep ? '存入' : '取出'}</Text>
-        <Pressable hitSlop={8} onPress={handleSave} disabled={!canSave}>
-          <Text style={[styles.action, { color: canSave ? palette.accent : palette.textTertiary }]}>确定</Text>
-        </Pressable>
-      </View>
+      {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
+      <SheetHeader title={isDep ? '存入' : '取出'} onBack={onBack} onConfirm={handleSave} confirmDisabled={!canSave} />
 
       <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
         <Text style={{ color: palette.textSecondary, paddingHorizontal: Space[1] }}>
@@ -618,14 +599,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[3],
+    paddingHorizontal: Space[6],
+    paddingTop: Space[5],
+    paddingBottom: Space[4],
     gap: Space[3],
   },
-  title: { fontSize: 17, fontWeight: '700', flex: 1, textAlign: 'center' },
+  title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   action: { fontSize: 16, minWidth: 36 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[2], paddingHorizontal: Space[6] },
-  content: { paddingHorizontal: Space[4], paddingBottom: Space[12], gap: Space[3] },
+  content: {
+    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingHorizontal: Space[6],
+    paddingBottom: Space[12],
+    gap: Space[3],
+  },
+  editLink: { alignSelf: 'center' },
   primary: {
     height: 48,
     borderRadius: Radius.md,
@@ -673,7 +661,12 @@ const styles = StyleSheet.create({
   divider: { height: StyleSheet.hairlineWidth, marginLeft: Space[4] + 22 },
   entryRow: { flexDirection: 'row', alignItems: 'center', gap: Space[3], padding: Space[4] },
   deleteRow: { alignItems: 'center', paddingVertical: Space[4], marginTop: Space[2] },
-  formContent: { paddingHorizontal: Space[4], paddingBottom: Space[12], gap: Space[4] },
+  formContent: {
+    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingHorizontal: Space[6],
+    paddingBottom: Space[12],
+    gap: Space[4],
+  },
   field: { gap: Space[2] },
   input: { height: 50, borderRadius: Radius.md, paddingHorizontal: Space[4], fontSize: 16 },
   bigAmount: {

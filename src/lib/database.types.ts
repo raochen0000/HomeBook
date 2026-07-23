@@ -50,6 +50,7 @@ export type Database = {
           id: string;
           name: string;
           cover_url: string | null;
+          avatar_url: string | null;
           owner_user_id: string;
           timezone: string;
           member_count: number;
@@ -61,6 +62,7 @@ export type Database = {
           id?: string;
           name: string;
           cover_url?: string | null;
+          avatar_url?: string | null;
           owner_user_id: string;
           timezone: string;
           member_count?: number;
@@ -72,6 +74,7 @@ export type Database = {
           id?: string;
           name?: string;
           cover_url?: string | null;
+          avatar_url?: string | null;
           owner_user_id?: string;
           timezone?: string;
           member_count?: number;

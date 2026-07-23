@@ -36,9 +36,9 @@ export function NotificationGate() {
           </Text>
           <Pressable
             onPress={() => markRead.mutate(removed.id)}
-            style={[styles.fsButton, { backgroundColor: palette.accent }]}
+            style={[styles.fsButton, { backgroundColor: palette.ink }]}
           >
-            <Text style={[styles.fsButtonText, { color: palette.onAccent }]}>我知道了</Text>
+            <Text style={[styles.fsButtonText, { color: palette.onInk }]}>我知道了</Text>
           </Pressable>
         </SafeAreaView>
       </View>

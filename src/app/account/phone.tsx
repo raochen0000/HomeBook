@@ -21,8 +21,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { singleLineTextInputStyle } from '@/constants/text-input';
 import { bindPhone, normalizeCnPhone, useSession, verifyPhoneChange } from '@/lib/auth';
 
 /** OTP 位数（与 Studio Phone provider 配置一致）。 */
@@ -79,7 +80,6 @@ export default function PhoneScreen() {
   const [code, setCode] = useState('');
   const [cooldown, setCooldown] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
 
   const e164 = normalizeCnPhone(phone);
   const canSend = !!e164 && cooldown === 0 && !busy;
@@ -94,20 +94,20 @@ export default function PhoneScreen() {
 
   const onSend = async () => {
     if (!canSend) {
-      if (!e164) setToast('请输入有效的中国大陆手机号');
+      if (!e164) toast.error('请输入有效的中国大陆手机号');
       return;
     }
     if (e164 === currentPhone) {
-      setToast('新手机号不能与当前手机号相同');
+      toast.error('新手机号不能与当前手机号相同');
       return;
     }
     setBusy(true);
     try {
       await bindPhone(phone); // updateUser({ phone }) 触发 phone_change 验证码下发
       setCooldown(60);
-      setToast('验证码已发送');
+      toast.success('验证码已发送');
     } catch (err) {
-      setToast(bindErrorText(err));
+      toast.error(bindErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -118,11 +118,11 @@ export default function PhoneScreen() {
     setBusy(true);
     try {
       await verifyPhoneChange(phone, code);
-      setToast(hasPhone ? '换绑成功' : '绑定成功');
+      toast.success(hasPhone ? '换绑成功' : '绑定成功');
       // session 由 onAuthStateChange 自动刷新；稍候返回账号页以展示成功提示。
       setTimeout(() => router.back(), 700);
     } catch (err) {
-      setToast(bindErrorText(err));
+      toast.error(bindErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -188,7 +188,7 @@ export default function PhoneScreen() {
             />
             <View style={[styles.ccDivider, { backgroundColor: palette.separator }]} />
             <Pressable hitSlop={6} onPress={onSend} disabled={!canSend} accessibilityLabel="获取验证码">
-              <Text style={[styles.sendText, { color: canSend ? palette.accent : palette.textTertiary }]}>
+              <Text style={[styles.sendText, { color: canSend ? palette.textPrimary : palette.textTertiary }]}>
                 {cooldown > 0 ? `${cooldown}s 后重发` : '获取验证码'}
               </Text>
             </Pressable>
@@ -198,14 +198,12 @@ export default function PhoneScreen() {
           <Pressable
             onPress={onSubmit}
             disabled={!canSubmit}
-            style={[styles.primary, { backgroundColor: palette.accent, opacity: canSubmit ? 1 : 0.35 }]}
+            style={[styles.primary, { backgroundColor: palette.ink, opacity: canSubmit ? 1 : 0.35 }]}
           >
             {busy ? (
-              <ActivityIndicator color={palette.onAccent} />
+              <ActivityIndicator color={palette.onInk} />
             ) : (
-              <Text style={[styles.primaryText, { color: palette.onAccent }]}>
-                {hasPhone ? '确认换绑' : '绑定手机号'}
-              </Text>
+              <Text style={[styles.primaryText, { color: palette.onInk }]}>{hasPhone ? '确认换绑' : '绑定手机号'}</Text>
             )}
           </Pressable>
 
@@ -218,7 +216,6 @@ export default function PhoneScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-      <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
 }
@@ -251,7 +248,7 @@ const styles = StyleSheet.create({
   },
   cc: { fontSize: 16, fontWeight: '600' },
   ccDivider: { width: StyleSheet.hairlineWidth, height: 22, marginHorizontal: Space[3] },
-  input: { flex: 1, fontSize: 16, paddingVertical: 0 },
+  input: singleLineTextInputStyle,
   sendText: { fontSize: 15, fontWeight: '600' },
 
   primary: {

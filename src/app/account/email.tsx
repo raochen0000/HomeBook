@@ -22,8 +22,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { singleLineTextInputStyle } from '@/constants/text-input';
 import { bindEmail, normalizeEmail, useSession, verifyEmailChange } from '@/lib/auth';
 
 /** OTP 位数（与 Studio 邮件模板配置一致）。 */
@@ -80,7 +81,6 @@ export default function EmailScreen() {
   const [code, setCode] = useState('');
   const [cooldown, setCooldown] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
 
   const normalized = normalizeEmail(email);
   const canSend = !!normalized && cooldown === 0 && !busy;
@@ -95,20 +95,20 @@ export default function EmailScreen() {
 
   const onSend = async () => {
     if (!canSend) {
-      if (!normalized) setToast('请输入有效的邮箱地址');
+      if (!normalized) toast.error('请输入有效的邮箱地址');
       return;
     }
     if (normalized === currentEmail) {
-      setToast('新邮箱不能与当前邮箱相同');
+      toast.error('新邮箱不能与当前邮箱相同');
       return;
     }
     setBusy(true);
     try {
       await bindEmail(email); // updateUser({ email }) 触发 email_change 验证码下发
       setCooldown(60);
-      setToast('验证码已发送，请查收邮件');
+      toast.success('验证码已发送，请查收邮件');
     } catch (err) {
-      setToast(bindErrorText(err));
+      toast.error(bindErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -119,11 +119,11 @@ export default function EmailScreen() {
     setBusy(true);
     try {
       await verifyEmailChange(email, code);
-      setToast(hasEmail ? '换绑成功' : '绑定成功');
+      toast.success(hasEmail ? '换绑成功' : '绑定成功');
       // session 由 onAuthStateChange 自动刷新；稍候返回账号页以展示成功提示。
       setTimeout(() => router.back(), 700);
     } catch (err) {
-      setToast(bindErrorText(err));
+      toast.error(bindErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -191,7 +191,7 @@ export default function EmailScreen() {
             />
             <View style={[styles.ccDivider, { backgroundColor: palette.separator }]} />
             <Pressable hitSlop={6} onPress={onSend} disabled={!canSend} accessibilityLabel="获取验证码">
-              <Text style={[styles.sendText, { color: canSend ? palette.accent : palette.textTertiary }]}>
+              <Text style={[styles.sendText, { color: canSend ? palette.textPrimary : palette.textTertiary }]}>
                 {cooldown > 0 ? `${cooldown}s 后重发` : '获取验证码'}
               </Text>
             </Pressable>
@@ -201,14 +201,12 @@ export default function EmailScreen() {
           <Pressable
             onPress={onSubmit}
             disabled={!canSubmit}
-            style={[styles.primary, { backgroundColor: palette.accent, opacity: canSubmit ? 1 : 0.35 }]}
+            style={[styles.primary, { backgroundColor: palette.ink, opacity: canSubmit ? 1 : 0.35 }]}
           >
             {busy ? (
-              <ActivityIndicator color={palette.onAccent} />
+              <ActivityIndicator color={palette.onInk} />
             ) : (
-              <Text style={[styles.primaryText, { color: palette.onAccent }]}>
-                {hasEmail ? '确认换绑' : '绑定邮箱'}
-              </Text>
+              <Text style={[styles.primaryText, { color: palette.onInk }]}>{hasEmail ? '确认换绑' : '绑定邮箱'}</Text>
             )}
           </Pressable>
 
@@ -219,7 +217,6 @@ export default function EmailScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-      <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
 }
@@ -252,7 +249,7 @@ const styles = StyleSheet.create({
   },
   fieldGap: { width: Space[2] },
   ccDivider: { width: StyleSheet.hairlineWidth, height: 22, marginHorizontal: Space[3] },
-  input: { flex: 1, fontSize: 16, paddingVertical: 0 },
+  input: singleLineTextInputStyle,
   sendText: { fontSize: 15, fontWeight: '600' },
 
   primary: {

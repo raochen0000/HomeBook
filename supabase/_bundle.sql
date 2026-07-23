@@ -1,4 +1,4 @@
--- 家账 HomeBook · 全量建库脚本（22 个迁移按序合并）
+-- 家账 HomeBook · 全量建库脚本（32 个迁移按序合并）
 -- 用法：在自托管实例的 Studio → SQL Editor 整段粘贴执行一次。
 -- 全程包在一个事务里，任一步出错整体回滚，便于安全重试。
 -- 注意：表无 IF NOT EXISTS，仅供首次建库；重复执行会因对象已存在而报错（属预期）。
@@ -1925,5 +1925,700 @@ create policy "covers_update_owner" on storage.objects
           coalesce(owner::text, owner_id)::uuid,
           (split_part(name, '.', 1))::uuid)
   );
+
+-- ============================================================
+-- >>> migrations/20260627120023_transaction_last_editor.sql
+-- ============================================================
+-- 记录每笔流水的「最后修改者」，用于首页流水第二行展示修改者头像（仅当被他人修改时）。
+-- 数据库端口被防火墙拦截，请在 Supabase Studio → SQL Editor 执行本文件（不要走 psql/CLI）。
+
+alter table public.transactions
+  add column if not exists last_editor_user_id uuid references public.profiles(id) on delete set null;
+
+comment on column public.transactions.last_editor_user_id is
+  '最后一次 UPDATE 的操作者（auth.uid()）；NULL 表示自创建后未被编辑。';
+
+-- 每次 UPDATE 自动把修改者盖章为当前登录用户（含软删除，但软删行已被列表过滤，无影响）。
+create or replace function public.set_transaction_last_editor()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.last_editor_user_id := auth.uid();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_transactions_last_editor on public.transactions;
+create trigger trg_transactions_last_editor
+  before update on public.transactions
+  for each row
+  execute function public.set_transaction_last_editor();
+
+-- ============================================================
+-- >>> migrations/20260703120024_delete_account_rpc.sql
+-- ============================================================
+-- 0024 · delete_account RPC —— 账号注销（软注销 / 匿名化墓碑 + 断开登录身份）
+-- ----------------------------------------------------------------------------
+-- 数据库端口被防火墙拦截，请在 Supabase Studio → SQL Editor 执行本文件（不要走 psql/CLI）。
+--
+-- 语义（产品定稿）：注销后
+--   · 家庭流水等共享数据「保留」，原家庭成员仍可见（transactions RLS 按家庭成员判定，与记录人无关）；
+--   · 注销者从成员名单「消失」（membership → left）；
+--   · 登录身份「永久删除」：手机号/邮箱/密码清空、第三方身份与会话删除、账号封禁 → 无法再登录。
+--
+-- 为什么不能硬删 auth.users：profiles.id → auth.users ON DELETE CASCADE，而
+-- transactions.recorder_user_id → profiles(id) 为 NO ACTION，只要记过账，级联删 profiles 会被
+-- 流水外键挡住、整个删除失败。故 profiles 行「永久保留为匿名墓碑」，承载流水外键与展示回退。
+
+-- ── delete_account：本人注销自己的账号 ───────────────────────────────────────
+-- SECURITY DEFINER（postgres 属主）：绕过 RLS 完成多表事务，并可直接操作 auth.*。
+create or replace function public.delete_account()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid   uuid := (select auth.uid());
+  v_mem   public.memberships;
+  v_multi boolean;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  -- 当前 active 成员关系（单人无家庭时可能没有）
+  select * into v_mem from public.memberships
+    where user_id = v_uid and status = 'active';
+
+  if found then
+    if v_mem.role = 'owner' then
+      select count(*) > 1 into v_multi from public.memberships
+        where family_id = v_mem.family_id and status = 'active';
+      if v_multi then
+        -- 多人家庭户主不能直接注销：沿用生命周期红线，先转让或解散
+        raise exception '你是家庭户主，请先转让户主或解散家庭后再注销'
+          using errcode = '42501';
+      end if;
+      -- 单人家庭户主：顺带解散家庭（作废邀请码 + 标记 dissolved），无第二人会看这些数据
+      update public.invitations set status = 'revoked'
+        where family_id = v_mem.family_id and status = 'valid';
+      update public.families set status = 'dissolved', member_count = 0
+        where id = v_mem.family_id;
+    else
+      -- 多人家庭普通成员：退出即可，流水留在家庭供其他成员查看
+      update public.families set member_count = greatest(member_count - 1, 0)
+        where id = v_mem.family_id;
+    end if;
+
+    update public.memberships set status = 'left', left_at = now()
+      where id = v_mem.id;
+  end if;
+
+  -- 匿名化 profile 墓碑：保留行（供流水 recorder_user_id 外键与展示回退），清空 PII
+  update public.profiles
+     set nickname          = '已注销用户',
+         avatar_url        = null,
+         current_family_id = null,
+         status            = 'deactivated',
+         updated_at        = now()
+   where id = v_uid;
+
+  -- 断开登录身份（definer=postgres 身份直接操作 auth.*）
+  delete from auth.identities where user_id = v_uid;   -- 解绑 Apple 等第三方
+  delete from auth.sessions   where user_id = v_uid;   -- refresh_tokens 级联，现有登录立即失效
+  -- 清空凭据 + 封禁：手机号/邮箱释放可再注册；即使某版本无 banned_until，清空凭据+删身份亦无从登录
+  update auth.users
+     set phone              = null,
+         phone_confirmed_at = null,
+         email              = null,
+         email_confirmed_at = null,
+         encrypted_password = null,
+         banned_until       = 'infinity',
+         updated_at         = now()
+   where id = v_uid;
+end;
+$$;
+
+-- 收紧 EXECUTE 授权：撤销 PUBLIC，仅授予 authenticated
+revoke execute on function public.delete_account() from public;
+grant  execute on function public.delete_account() to authenticated;
+
+-- ── 墓碑 profile 可见性 ───────────────────────────────────────────────────────
+-- 注销后 membership 变 left，private.shares_family 对旧家人返回 false，原 profiles_select
+-- 便读不到墓碑行 → 首页流水记录人一栏会走空。墓碑已完全匿名（nickname='已注销用户'、无头像、
+-- 无 PII），故额外放开：任何登录用户可读 status='deactivated' 的 profile，保证流水展示完整。
+drop policy if exists "profiles_select_deactivated" on public.profiles;
+create policy "profiles_select_deactivated" on public.profiles
+  for select to authenticated
+  using (status = 'deactivated');
+
+-- ============================================================
+-- >>> migrations/20260704120025_feedback.sql
+-- ============================================================
+-- 0025 · 意见反馈：feedback 表 + submit_feedback RPC + 反馈图片桶存储策略（PRD §18.3.7 / DATAMODEL §5.5）
+-- ----------------------------------------------------------------------------
+-- 数据库端口被防火墙拦截，请在 Supabase Studio → SQL Editor 执行本文件（不要走 psql/CLI）。
+--
+-- 语义（产品定稿）：MVP 单向提交——客户端只经 submit_feedback RPC 写入，不读回历史；
+-- 运营侧经控制台 service_role 查看跟进。反馈始终关联提交者 user_id（服务端 auth.uid() 落定，
+-- 客户端伪造不了）；contact_ok 仅表达「可否被账号回访」，不影响身份关联。
+
+-- ── FEEDBACK（意见反馈）──────────────────────────────────────────────────────
+create table public.feedback (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references public.profiles(id) on delete cascade,
+  family_id   uuid references public.families(id) on delete set null,   -- 提交时家庭快照，可空
+  type        text not null check (type in ('feature','bug','suggestion','other')),
+  content     text not null check (char_length(btrim(content)) between 5 and 200),
+  image_paths text[] not null default '{}'
+                check (coalesce(array_length(image_paths, 1), 0) <= 5),  -- 反馈图片桶内对象路径，≤ 5
+  contact_ok  boolean not null default true,
+  device      jsonb not null default '{}',                              -- app_version/build/platform/os_version/device_model/brand/timezone
+  status      text not null default 'open'
+                check (status in ('open','in_progress','resolved','closed')),  -- 运营侧流转态，MVP 客户端不展示
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+-- 防刷频率查询 + 运营侧按时间浏览
+create index feedback_user_created_idx on public.feedback (user_id, created_at desc);
+create index feedback_status_created_idx on public.feedback (status, created_at desc);
+
+create trigger set_updated_at before update on public.feedback
+  for each row execute function public.set_updated_at();
+
+-- RLS 开启但「不建任何客户端策略」：写入只走下面的 SECURITY DEFINER RPC（属主 postgres 绕过 RLS），
+-- 读取只走 service_role（控制台）。故 authenticated 直接 select/insert 一律被拒。
+alter table public.feedback enable row level security;
+
+-- ── submit_feedback：本人提交一条反馈（服务端集中校验 + 防刷）───────────────────
+-- SECURITY DEFINER（postgres 属主）：绕过 RLS 落库，并从 auth.uid() 取真实提交者与当前家庭。
+create or replace function public.submit_feedback(
+  p_type        text,
+  p_content     text,
+  p_image_paths text[]  default '{}',
+  p_contact_ok  boolean default true,
+  p_device      jsonb   default '{}'
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid     uuid := (select auth.uid());
+  v_content text := btrim(coalesce(p_content, ''));
+  v_family  uuid;
+  v_recent  int;
+  v_id      uuid;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  -- 字段校验（与表 CHECK 双保险，且给出可读报错）
+  if p_type is null or p_type not in ('feature','bug','suggestion','other') then
+    raise exception '反馈类型不合法' using errcode = '22023';
+  end if;
+  if char_length(v_content) < 5 or char_length(v_content) > 200 then
+    raise exception '问题描述需 5–200 字' using errcode = '22023';
+  end if;
+  if coalesce(array_length(p_image_paths, 1), 0) > 5 then
+    raise exception '最多上传 5 张图片' using errcode = '22023';
+  end if;
+
+  -- 防刷：相邻两条最短间隔 30s
+  if exists (
+    select 1 from public.feedback
+    where user_id = v_uid and created_at > now() - interval '30 seconds'
+  ) then
+    raise exception '提交过于频繁，请稍后再试' using errcode = '429';
+  end if;
+  -- 防刷：每人每日 ≤ 20 条
+  select count(*) into v_recent from public.feedback
+    where user_id = v_uid and created_at > now() - interval '1 day';
+  if v_recent >= 20 then
+    raise exception '今日反馈已达上限' using errcode = '429';
+  end if;
+
+  -- 当前家庭快照（单人无家庭时为 null）
+  select current_family_id into v_family from public.profiles where id = v_uid;
+
+  insert into public.feedback (user_id, family_id, type, content, image_paths, contact_ok, device)
+  values (v_uid, v_family, p_type, v_content, coalesce(p_image_paths, '{}'), coalesce(p_contact_ok, true), coalesce(p_device, '{}'))
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+revoke execute on function public.submit_feedback(text, text, text[], boolean, jsonb) from public;
+grant  execute on function public.submit_feedback(text, text, text[], boolean, jsonb) to authenticated;
+
+-- ── 反馈图片桶：homebook-feedback-images（public，与 0022 头像/封面同策略范式）──────
+-- 建桶（幂等）。设为 public：本实例 storage 上下文取不到 auth.uid()，做不了「仅本人可读」的
+-- 私有 RLS（见 0022）；MVP 用「公开桶 + 不可猜随机路径」，URL 公开但不可枚举。真·私有（仅
+-- service_role 可读）需后续走 Edge Function 服务端代传，届时把本桶改私有并收紧写策略。
+insert into storage.buckets (id, name, public)
+values ('homebook-feedback-images', 'homebook-feedback-images', true)
+on conflict (id) do nothing;
+
+-- 清理可能的旧策略（幂等）
+do $$
+declare r record;
+begin
+  for r in
+    select policyname from pg_policies
+    where schemaname = 'storage' and tablename = 'objects'
+      and policyname in ('feedback_images_select','feedback_images_insert_own')
+  loop
+    execute format('drop policy %I on storage.objects', r.policyname);
+  end loop;
+end $$;
+
+-- SELECT：放行上传时的 RETURNING 读（桶本就公开），TO public
+create policy "feedback_images_select" on storage.objects
+  for select to public
+  using (bucket_id = 'homebook-feedback-images');
+
+-- INSERT：文件名须以「上传者本人 uid + 下划线」开头（路径 {userId}_{uuid}.jpg，根目录避开 prefixes RLS）
+create policy "feedback_images_insert_own" on storage.objects
+  for insert to public
+  with check (
+    bucket_id = 'homebook-feedback-images'
+    and starts_with(name, coalesce(owner::text, owner_id) || '_')
+  );
+
+-- ============================================================
+-- >>> migrations/20260704120026_notification_preferences.sql
+-- ============================================================
+-- 0026 · 通知偏好：notification_preferences 表（每用户一行、六列布尔） + 本人 RLS（PRD §18.3.3 / DATAMODEL §5.6）
+-- ----------------------------------------------------------------------------
+-- 数据库端口被防火墙拦截，请在 Supabase Studio → SQL Editor 执行本文件（不要走 psql/CLI）。
+--
+-- 语义（产品定稿）：通知设置页的六类分类开关持久化。客户端直读 + upsert（onConflict = user_id），
+-- RLS 仅本人可读写；行不存在（老用户 / 从未改过）→ 客户端回落「全开」默认。本表只落用户
+-- 「愿不愿收该类系统推送」的意愿——App 内通知中心（流程 13）不受影响、始终可见；系统推送
+-- （expo-notifications + APNs）落地后由投递侧读取本表决定是否推送对应分类。
+
+-- ── NOTIFICATION_PREFERENCES（通知偏好）────────────────────────────────────────
+create table public.notification_preferences (
+  user_id           uuid primary key references public.profiles(id) on delete cascade,
+  family_activity   boolean not null default true,   -- 家庭动态（被移出 / 户主变更等，见流程 13 §15）
+  budget_alert      boolean not null default true,   -- 预算超支预警
+  savings_progress  boolean not null default true,   -- 储蓄目标进展
+  monthly_summary   boolean not null default true,   -- 月度总结提醒
+  member_change     boolean not null default true,   -- 成员与邀请变动
+  account_security  boolean not null default true,   -- 账号安全
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
+create trigger set_updated_at before update on public.notification_preferences
+  for each row execute function public.set_updated_at();
+
+-- 表权限：0008 的「grant ... on all tables」只覆盖当时已存在的表，本表建于其后，故此处显式补授
+-- （GRANT 负责「能否访问该表」，RLS 负责「哪些行」）。无 delete：行随账号级联清理，不给客户端删权。
+grant select, insert, update on public.notification_preferences to authenticated;
+
+-- ── RLS：仅本人可读写（select / insert / update；无 delete，随账号级联清理）──────────
+alter table public.notification_preferences enable row level security;
+
+create policy "notification_prefs_select_self" on public.notification_preferences
+  for select to authenticated
+  using (user_id = (select auth.uid()));
+
+create policy "notification_prefs_insert_self" on public.notification_preferences
+  for insert to authenticated
+  with check (user_id = (select auth.uid()));
+
+create policy "notification_prefs_update_self" on public.notification_preferences
+  for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+-- ============================================================
+-- >>> migrations/20260704120027_device_tokens.sql
+-- ============================================================
+-- 0027 · 推送设备令牌：device_tokens 表 + register/unregister RPC（PRD §18.3.3 层级二 / DATAMODEL §5.7）
+-- ----------------------------------------------------------------------------
+-- 数据库端口被防火墙拦截，请在 Supabase Studio → SQL Editor 执行本文件（不要走 psql/CLI）。
+--
+-- 语义（产品定稿）：每台设备一行（token 主键）的推送令牌，供投递侧按 notification_preferences
+-- 决定后向该用户的设备发系统推送。写（注册/注销）只走下面两个 SECURITY DEFINER RPC——避免
+-- 「同设备换登录用户时认领他人 token 行」触发 RLS 死角（USING 用旧行 user_id 判定会挡住新用户）。
+-- 客户端登录注册、登出/注销注销；投递侧以 service_role 读。令牌获取（getExpoPushTokenAsync / APNs）
+-- 依赖付费 Apple Developer，故本表 + RPC 先建、客户端 PUSH_DELIVERY_ENABLED 开关灰度（默认关）。
+
+-- ── DEVICE_TOKENS（推送设备令牌）──────────────────────────────────────────────
+create table public.device_tokens (
+  token       text primary key,                                              -- Expo push token 或 APNs device token（设备唯一）
+  user_id     uuid not null references public.profiles(id) on delete cascade,-- 当前登录者（注销随账号级联）
+  platform    text not null check (platform in ('ios','android')),
+  provider    text not null default 'expo' check (provider in ('expo','apns')),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+create index device_tokens_user_idx on public.device_tokens (user_id);
+
+create trigger set_updated_at before update on public.device_tokens
+  for each row execute function public.set_updated_at();
+
+-- 表权限：本表建于 0008「grant ... on all tables」之后不被覆盖，仅显式补 SELECT（读策略要用）；
+-- 写不授客户端权（走下面 SECURITY DEFINER RPC，以属主 postgres 身份落库）。
+grant select on public.device_tokens to authenticated;
+
+-- ── RLS：仅本人可读（便于客户端自查）；写只走 RPC，投递读走 service_role ──────────
+alter table public.device_tokens enable row level security;
+
+create policy "device_tokens_select_self" on public.device_tokens
+  for select to authenticated
+  using (user_id = (select auth.uid()));
+
+-- ── register_device_token：注册/更新本设备令牌（同设备换用户时改挂当前登录者）────────
+create or replace function public.register_device_token(
+  p_token    text,
+  p_platform text,
+  p_provider text default 'expo'
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+  if p_token is null or btrim(p_token) = '' then
+    raise exception 'token 不能为空' using errcode = '22023';
+  end if;
+  if p_platform not in ('ios','android') then
+    raise exception 'platform 不合法' using errcode = '22023';
+  end if;
+  if coalesce(p_provider, 'expo') not in ('expo','apns') then
+    raise exception 'provider 不合法' using errcode = '22023';
+  end if;
+
+  insert into public.device_tokens (token, user_id, platform, provider)
+  values (btrim(p_token), v_uid, p_platform, coalesce(p_provider, 'expo'))
+  on conflict (token) do update
+    set user_id    = excluded.user_id,      -- 同设备换登录用户 → 改挂新用户
+        platform   = excluded.platform,
+        provider   = excluded.provider,
+        updated_at = now();
+end;
+$$;
+
+revoke execute on function public.register_device_token(text, text, text) from public;
+grant  execute on function public.register_device_token(text, text, text) to authenticated;
+
+-- ── unregister_device_token：登出/注销时注销本设备令牌（仅注销本人挂着的行）───────────
+create or replace function public.unregister_device_token(p_token text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+  delete from public.device_tokens
+    where token = btrim(coalesce(p_token, '')) and user_id = v_uid;
+end;
+$$;
+
+revoke execute on function public.unregister_device_token(text) from public;
+grant  execute on function public.unregister_device_token(text) to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260705120028_accounting_preferences.sql
+-- ============================================================
+-- 0028 · 记账偏好：accounting_preferences 表（每用户一行） + 本人 RLS（PRD §18.3.1 / DATAMODEL §5.8）
+-- ----------------------------------------------------------------------------
+-- 数据库端口被防火墙拦截，请在 Supabase Studio → SQL Editor 执行本文件（不要走 psql/CLI）。
+--
+-- 语义（产品定稿）：「我的 → 记账设置」的个人级偏好持久化。客户端直读 + 整行 upsert
+-- （onConflict = user_id），RLS 仅本人可读写；行不存在（老用户 / 从未改过）→ 客户端回落默认。
+-- 仅影响本人视角（默认记账类型、记一笔后行为、金额隐私、报表卡片显隐 / 排序），不涉及全家共享数据。
+
+-- ── ACCOUNTING_PREFERENCES（记账偏好）──────────────────────────────────────────
+create table public.accounting_preferences (
+  user_id               uuid primary key references public.profiles(id) on delete cascade,
+  default_txn_type      text not null default 'expense'
+                          check (default_txn_type in ('expense','income')),  -- 打开记账面板默认选中
+  after_record_behavior text not null default 'close'
+                          check (after_record_behavior in ('close','continue')),  -- 保存即关 / 继续记下一笔
+  amount_privacy        boolean not null default false,   -- 开启后首页 / 报表金额显示 ****（防窥屏）
+  report_card_order     text[]  not null default '{}',    -- 报表卡片用户排序（卡 id 序；空 = 用默认序）
+  report_card_hidden    text[]  not null default '{}',    -- 报表隐藏卡片 id 集合（概览恒不入此列，见客户端 report-cards 注册表）
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now()
+);
+
+create trigger set_updated_at before update on public.accounting_preferences
+  for each row execute function public.set_updated_at();
+
+-- 表权限：0008 的「grant ... on all tables」只覆盖当时已存在的表，本表建于其后，故此处显式补授
+-- （GRANT 负责「能否访问该表」，RLS 负责「哪些行」）。无 delete：行随账号级联清理，不给客户端删权。
+grant select, insert, update on public.accounting_preferences to authenticated;
+
+-- ── RLS：仅本人可读写（select / insert / update；无 delete，随账号级联清理）──────────
+alter table public.accounting_preferences enable row level security;
+
+create policy "accounting_prefs_select_self" on public.accounting_preferences
+  for select to authenticated
+  using (user_id = (select auth.uid()));
+
+create policy "accounting_prefs_insert_self" on public.accounting_preferences
+  for insert to authenticated
+  with check (user_id = (select auth.uid()));
+
+create policy "accounting_prefs_update_self" on public.accounting_preferences
+  for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+-- ============================================================
+-- >>> migrations/20260705120029_recurring_transactions.sql
+-- ============================================================
+-- 0029 · 定时收支：recurring_transactions（家庭共享规则）+ recurring_runs（幂等台账）
+--        + generate_due_recurring_transactions() 补记 RPC（PRD §18 自定义能力 / DATAMODEL §5.9）
+-- ----------------------------------------------------------------------------
+-- 数据库端口被防火墙拦截，请在 Supabase Studio → SQL Editor 执行本文件（不要走 psql/CLI）。
+--
+-- 语义（产品定稿）：用户在「记账设置 → 定时收支」维护「每月 N 号自动记一笔」的规则（如工资、订阅）。
+-- 规则家庭共享（口径同流水账本，RLS 复用 private.is_family_member）；生成的流水记入家庭账本，
+-- 记账人 = 规则创建者（recorder_user_id）。自动记录采用「客户端触发、服务端幂等生成」：客户端在
+-- App 前台调 generate_due_recurring_transactions() 补记缺失的到期流水，recurring_runs 上的
+-- unique(rule_id, period_key) 保证多设备 / 多成员并发下同一期只生成一条。
+
+-- ── RECURRING_TRANSACTIONS（定时收支规则）────────────────────────────────────
+create table public.recurring_transactions (
+  id               uuid primary key default gen_random_uuid(),
+  family_id        uuid not null references public.families(id) on delete cascade,
+  type             text not null check (type in ('expense','income')),
+  amount           bigint not null check (amount > 0),                 -- 单位：分
+  category_id      uuid not null references public.categories(id),
+  note             text,
+  recorder_user_id uuid not null references public.profiles(id),       -- 生成流水的记账人 = 规则创建者
+  created_by       uuid not null references public.profiles(id),
+  day_of_month     int  not null check (day_of_month between 1 and 28), -- 限 1–28，规避小月 29–31 不存在的边界
+  frequency        text not null default 'monthly' check (frequency in ('monthly')), -- 预留列，MVP 仅按月
+  start_date       date not null,                                      -- 首个生效月（含）
+  end_date         date,                                               -- 可选结束（含）；null = 长期有效
+  enabled          boolean not null default true,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+
+create index recurring_transactions_family_idx
+  on public.recurring_transactions (family_id) where enabled;
+
+create trigger set_updated_at before update on public.recurring_transactions
+  for each row execute function public.set_updated_at();
+
+-- ── RECURRING_RUNS（幂等台账：每规则每期至多一行）─────────────────────────────
+-- 客户端一般不直接写本表——由 generate_due_recurring_transactions() 在服务端写。
+-- transaction_id 可空：补记时「先占位 run（抢 unique）成功者才建流水并回填」，避免并发重复建流水。
+create table public.recurring_runs (
+  id             uuid primary key default gen_random_uuid(),
+  rule_id        uuid not null references public.recurring_transactions(id) on delete cascade,
+  period_key     text not null,                                        -- 期键，如 '2026-07'
+  transaction_id uuid references public.transactions(id),
+  created_at     timestamptz not null default now(),
+  unique (rule_id, period_key)                                         -- 幂等的关键
+);
+
+create index recurring_runs_rule_idx on public.recurring_runs (rule_id);
+
+-- 表权限：本表建于 0008「grant on all tables」之后，显式补授。
+-- recurring_transactions 客户端全 CRUD（无物理 delete 限制——规则可真删）；recurring_runs 仅读。
+grant select, insert, update, delete on public.recurring_transactions to authenticated;
+grant select on public.recurring_runs to authenticated;
+
+-- ── RLS ───────────────────────────────────────────────────────────────────────
+alter table public.recurring_transactions enable row level security;
+alter table public.recurring_runs        enable row level security;
+
+-- 规则：家庭成员可增删改查本家庭规则（复用 transactions 同款 private.is_family_member）。
+create policy "recurring_txn_select_member" on public.recurring_transactions
+  for select to authenticated
+  using (private.is_family_member(family_id));
+
+create policy "recurring_txn_insert_member" on public.recurring_transactions
+  for insert to authenticated
+  with check (private.is_family_member(family_id) and created_by = (select auth.uid()));
+
+create policy "recurring_txn_update_member" on public.recurring_transactions
+  for update to authenticated
+  using (private.is_family_member(family_id))
+  with check (private.is_family_member(family_id));
+
+create policy "recurring_txn_delete_member" on public.recurring_transactions
+  for delete to authenticated
+  using (private.is_family_member(family_id));
+
+-- 台账：经所属规则的家庭归属做只读（写入仅经 RPC，SECURITY DEFINER 绕过 RLS）。
+create policy "recurring_runs_select_member" on public.recurring_runs
+  for select to authenticated
+  using (exists (
+    select 1 from public.recurring_transactions r
+    where r.id = recurring_runs.rule_id and private.is_family_member(r.family_id)
+  ));
+
+-- ── RPC：补记调用者当前家庭到期的定时收支（幂等、原子）────────────────────────
+-- SECURITY DEFINER：绕过 transactions_insert 的「recorder_user_id = auth.uid()」限制，
+-- 以规则创建者身份代记。返回本次新生成的流水条数。
+create or replace function public.generate_due_recurring_transactions()
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid    uuid := (select auth.uid());
+  v_fid    uuid;
+  v_tz     text;
+  v_rule   public.recurring_transactions;
+  v_month  date;
+  v_sched  date;
+  v_period text;
+  v_run_id uuid;
+  v_txn_id uuid;
+  v_count  int := 0;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  select current_family_id into v_fid from public.profiles where id = v_uid;
+  if v_fid is null then
+    return 0;
+  end if;
+  select timezone into v_tz from public.families where id = v_fid;
+
+  for v_rule in
+    select * from public.recurring_transactions
+    where family_id = v_fid and enabled
+  loop
+    v_month := date_trunc('month', v_rule.start_date)::date;
+    while v_month <= current_date loop
+      v_sched := make_date(
+        extract(year  from v_month)::int,
+        extract(month from v_month)::int,
+        v_rule.day_of_month
+      );
+      if v_sched >= v_rule.start_date
+         and v_sched <= current_date
+         and (v_rule.end_date is null or v_sched <= v_rule.end_date)
+      then
+        v_period := to_char(v_month, 'YYYY-MM');
+        -- 先抢占 run（unique 为闸）：抢到者才建流水并回填，避免并发重复建。
+        insert into public.recurring_runs (rule_id, period_key)
+          values (v_rule.id, v_period)
+          on conflict (rule_id, period_key) do nothing
+          returning id into v_run_id;
+        if v_run_id is not null then
+          insert into public.transactions
+            (family_id, type, amount, category_id, note, occurred_at, recorder_user_id, source)
+          values (
+            v_rule.family_id, v_rule.type, v_rule.amount, v_rule.category_id, v_rule.note,
+            make_timestamptz(
+              extract(year  from v_sched)::int,
+              extract(month from v_sched)::int,
+              v_rule.day_of_month, 12, 0, 0,
+              coalesce(v_tz, 'Asia/Shanghai')
+            ),
+            v_rule.recorder_user_id, 'normal'
+          )
+          returning id into v_txn_id;
+          update public.recurring_runs set transaction_id = v_txn_id where id = v_run_id;
+          v_count := v_count + 1;
+        end if;
+        v_run_id := null;
+      end if;
+      v_month := (v_month + interval '1 month')::date;
+    end loop;
+  end loop;
+
+  return v_count;
+end;
+$$;
+
+-- PG 默认把 EXECUTE 授予 PUBLIC，收紧后仅授 authenticated（同 0009 约定）。
+revoke execute on function public.generate_due_recurring_transactions() from public;
+grant execute on function public.generate_due_recurring_transactions() to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260705120030_accounting_prefs_summary_entry.sql
+-- ============================================================
+-- 0030 · 记账偏好补列：首页月度总结横幅入口开关（PRD §18.3.1 / DATAMODEL §5.8）
+-- ----------------------------------------------------------------------------
+-- 数据库端口被防火墙拦截，请在 Supabase Studio → SQL Editor 执行本文件（不要走 psql/CLI）。
+--
+-- 0028 的 accounting_preferences 已应用，故此处以 ALTER 增列（幂等 if not exists）。
+-- 语义：控制首页 Hero 卡下方「上月总结来啦」月度总结入口横幅的显隐；默认开（保持既有行为）。
+
+alter table public.accounting_preferences
+  add column if not exists show_monthly_summary_entry boolean not null default true;
+
+-- ============================================================
+-- >>> migrations/20260707120028_notification_pushed_at.sql
+-- ============================================================
+-- 0028 · 通知推送投递支持：notifications 加 pushed_at（供 push-fc 定时轮询标记已推）（PRD §18.3.3 层级二 / 流程 13 §15）
+-- ----------------------------------------------------------------------------
+-- 数据库端口被防火墙拦截，请在 Supabase Studio → SQL Editor 执行本文件（不要走 psql/CLI）。
+--
+-- 语义（产品定稿）：push-fc（阿里云 FC 定时轮询，见 services/push-fc/）每 ~1min 拉取
+-- channel='in_app' 且 pushed_at is null 的通知，按 notification_preferences 决定后经 Expo Push
+-- 发出，随即把这些行标记 pushed_at（含被偏好跳过 / 无令牌的，避免反复处理）。
+-- 现有历史通知一次性回填为已推——只推本迁移之后新产生的通知，防首次轮询把旧通知全推一遍。
+
+alter table public.notifications add column if not exists pushed_at timestamptz;
+
+-- 回填：现有行视为已推（pushed_at 刚加为 null，这里全部落定为 now()）
+update public.notifications set pushed_at = now() where pushed_at is null;
+
+-- 轮询查询用的部分索引（只索引「待推的 in_app 行」，回填后集合很小、写入开销可忽略）
+create index if not exists notifications_push_pending_idx
+  on public.notifications (created_at)
+  where pushed_at is null and channel = 'in_app';
+
+-- ============================================================
+-- >>> migrations/20260722120031_family_avatar_url.sql
+-- ============================================================
+-- 0031 · 家庭头像与封面分离
+--
+-- 背景：families.cover_url 一直被当「家庭头像」（方块小图）在用，但按 PRD §3.5
+-- 「封面」应是家庭页 hero 背景 + 加入家庭预览卡的大图，两个概念被混用了。
+--
+-- 方案：cover_url 归位为「家庭封面」（大图）；新增 avatar_url 存「家庭头像」。
+-- 存量数据：现有 cover_url 里的图是按头像上传的（方形裁 512），整体搬到 avatar_url，
+-- cover_url 清空（封面从未真正存在过，回落品牌蓝渐变 / 预览卡兜底底色）。
+--
+-- Storage 不需要新策略：0022 的写策略用 split_part(name,'.',1)::uuid 取家庭 id，
+-- 新封面路径约定为 {familyId}.cover.jpg —— 首段仍是家庭 id，天然通过校验；
+-- 头像沿用旧路径 {familyId}.jpg（存量公开 URL 不失效）。
+
+alter table public.families add column if not exists avatar_url text;
+
+comment on column public.families.avatar_url is '家庭头像（方块小图）公开 URL；封面大图见 cover_url';
+comment on column public.families.cover_url is '家庭封面（hero 背景 / 加入预览卡大图）公开 URL；头像见 avatar_url';
+
+-- 存量迁移：把「其实是头像」的 cover_url 搬到 avatar_url，cover_url 清空
+update public.families
+   set avatar_url = cover_url,
+       cover_url  = null
+ where cover_url is not null
+   and avatar_url is null;
 
 commit;

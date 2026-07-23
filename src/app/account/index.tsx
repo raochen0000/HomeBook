@@ -11,9 +11,12 @@ import {
   aspectRatio,
   clipShape,
   contentShape,
+  fixedSize,
   font,
   foregroundColor,
   frame,
+  lineLimit,
+  multilineTextAlignment,
   onTapGesture,
   padding,
   resizable,
@@ -157,7 +160,10 @@ export default function AccountScreen() {
                       font({ size: 14 }),
                       foregroundColor(palette.textPrimary),
                       padding({ all: Space[4] }),
-                      frame({ maxWidth: 260 }),
+                      frame({ width: 260, alignment: 'leading' }),
+                      lineLimit(),
+                      fixedSize({ horizontal: false, vertical: true }),
+                      multilineTextAlignment('leading'),
                     ]}
                   >
                     账号需至少保留一种登录方式；仅剩一种时该方式不可解绑。换绑 / 解绑等敏感操作需先验证身份。

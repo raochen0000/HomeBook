@@ -16,8 +16,8 @@ export function FirstRecordCelebration({ visible, onClose }: { visible: boolean;
           <Text style={styles.emoji}>🎉</Text>
           <Text style={[styles.title, { color: palette.textPrimary }]}>记下了第一笔</Text>
           <Text style={[styles.sub, { color: palette.textSecondary }]}>往后每一笔，都是一家人生活的印记。</Text>
-          <Pressable onPress={onClose} style={[styles.btn, { backgroundColor: palette.accent }]}>
-            <Text style={[styles.btnText, { color: palette.onAccent }]}>好的</Text>
+          <Pressable onPress={onClose} style={[styles.btn, { backgroundColor: palette.ink }]}>
+            <Text style={[styles.btnText, { color: palette.onInk }]}>好的</Text>
           </Pressable>
         </View>
       </View>

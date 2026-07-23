@@ -35,7 +35,7 @@ import {
   useSubmitFeedback,
   type FeedbackType,
 } from '@/api';
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
 
 /** 图片网格：每行 5 格，格间距固定，单元格边长按屏宽自适应（见组件内计算）。 */
@@ -68,7 +68,6 @@ export default function FeedbackScreen() {
   const [content, setContent] = useState('');
   const [images, setImages] = useState<PickedImage[]>([]);
   const [contactOk, setContactOk] = useState(true);
-  const [toast, setToast] = useState<string | null>(null);
 
   const busy = submit.isPending;
   const trimmedLen = content.trim().length;
@@ -87,7 +86,7 @@ export default function FeedbackScreen() {
       if (picked.length) setImages((prev) => [...prev, ...picked].slice(0, FEEDBACK_IMAGE_MAX));
     } catch (e) {
       console.warn('[feedback] pickFeedbackImages failed:', e);
-      setToast(
+      toast.error(
         e instanceof PermissionDeniedError
           ? '相册权限未授予，请在系统设置中开启'
           : '无法读取所选图片，请换一张或稍后重试',
@@ -99,18 +98,18 @@ export default function FeedbackScreen() {
 
   const onSubmit = () => {
     if (!canSubmit) {
-      if (trimmedLen < FEEDBACK_CONTENT_MIN) setToast(`请至少输入 ${FEEDBACK_CONTENT_MIN} 个字`);
+      if (trimmedLen < FEEDBACK_CONTENT_MIN) toast.error(`请至少输入 ${FEEDBACK_CONTENT_MIN} 个字`);
       return;
     }
     submit.mutate(
       { type, content: content.trim(), images, contactOk },
       {
         onSuccess: () => {
-          setToast('已收到，感谢反馈');
+          toast.success('已收到，感谢反馈');
           // 停留片刻让用户看到成功提示，再返回上一页。
           setTimeout(() => router.back(), 800);
         },
-        onError: (e) => setToast(submitErrorText(e)),
+        onError: (e) => toast.error(submitErrorText(e)),
       },
     );
   };
@@ -245,17 +244,16 @@ export default function FeedbackScreen() {
           <Pressable
             onPress={onSubmit}
             disabled={!canSubmit}
-            style={[styles.primary, { backgroundColor: palette.accent, opacity: canSubmit ? 1 : 0.35 }]}
+            style={[styles.primary, { backgroundColor: palette.ink, opacity: canSubmit ? 1 : 0.35 }]}
           >
             {busy ? (
-              <ActivityIndicator color={palette.onAccent} />
+              <ActivityIndicator color={palette.onInk} />
             ) : (
-              <Text style={[styles.primaryText, { color: palette.onAccent }]}>提交反馈</Text>
+              <Text style={[styles.primaryText, { color: palette.onInk }]}>提交反馈</Text>
             )}
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
-      <Toast visible={!!toast} text={toast ?? ''} onHide={() => setToast(null)} />
     </View>
   );
 }

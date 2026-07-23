@@ -6,8 +6,9 @@
  * 收入结构仅算 source=normal 收入（排除储蓄取出）。
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Defs, G, Line, Path, Pattern, Polyline, Rect } from 'react-native-svg';
+import Svg, { Circle, Defs, G, Line, Path, Pattern, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, usePalette } from '@/constants/design';
@@ -41,6 +42,50 @@ function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: nu
   const large = Math.abs(endDeg - startDeg) > 180 ? 1 : 0;
   const sweep = endDeg < startDeg ? 1 : 0; // 角度递减 = 屏幕顺时针（沿上半圆）
   return `M ${x0} ${y0} A ${r} ${r} 0 ${large} ${sweep} ${x1} ${y1}`;
+}
+
+function chartTicks(max: number, count = 3): number[] {
+  const top = Math.max(1, max);
+  return Array.from({ length: count }, (_, index) => Math.round((top * (count - 1 - index)) / (count - 1)));
+}
+
+function axisAmountLabel(value: number): string {
+  const yuan = Math.round(value / 100);
+  if (yuan >= 10000) return `${Math.round(yuan / 1000) / 10}万`;
+  if (yuan >= 1000) return `${Math.round(yuan / 100) / 10}k`;
+  return String(yuan);
+}
+
+function SvgYAxis({
+  ticks,
+  width,
+  yOf,
+  chartRight,
+  color,
+  gridColor,
+}: {
+  ticks: number[];
+  width: number;
+  yOf: (value: number) => number;
+  chartRight: number;
+  color: string;
+  gridColor: string;
+}) {
+  return (
+    <>
+      {ticks.map((tick) => {
+        const y = yOf(tick);
+        return (
+          <G key={tick}>
+            <Line x1={width + 6} y1={y} x2={chartRight} y2={y} stroke={gridColor} strokeWidth="1" opacity={0.42} />
+            <SvgText x={width} y={y + 3} fontSize="9" fill={color} textAnchor="end">
+              {axisAmountLabel(tick)}
+            </SvgText>
+          </G>
+        );
+      })}
+    </>
+  );
 }
 
 // ── 结余率仪表 ────────────────────────────────────────────────────────────────
@@ -112,15 +157,17 @@ export function CumulativeCard({
 }) {
   const W = 320;
   const H = 132;
-  const padX = 6;
+  const axisW = 34;
+  const chartRight = W - 2;
   const padY = 14;
   const n = series.labels.length;
   const currVals = series.curr.filter((v): v is number => v != null);
   const max = Math.max(1, ...currVals, ...series.prev);
   const hasData = currVals.some((v) => v > 0) || series.prev.some((v) => v > 0);
-  const stepX = n > 1 ? (W - padX * 2) / (n - 1) : 0;
-  const xOf = (i: number) => padX + i * stepX;
+  const stepX = n > 1 ? (chartRight - axisW) / (n - 1) : 0;
+  const xOf = (i: number) => axisW + i * stepX;
   const yOf = (v: number) => padY + (H - padY * 2) * (1 - v / max);
+  const ticks = chartTicks(max);
 
   const currPts = series.curr
     .map((v, i) => (v == null ? null : `${xOf(i)},${yOf(v)}`))
@@ -155,6 +202,14 @@ export function CumulativeCard({
       ) : (
         <>
           <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+            <SvgYAxis
+              ticks={ticks}
+              width={axisW - 8}
+              yOf={yOf}
+              chartRight={chartRight}
+              color={palette.textTertiary}
+              gridColor={palette.separator}
+            />
             {prevPts ? (
               <Polyline
                 points={prevPts}
@@ -177,7 +232,7 @@ export function CumulativeCard({
               />
             ) : null}
           </Svg>
-          <View style={styles.trendLabels}>
+          <View style={[styles.trendLabels, { paddingLeft: axisW }]}>
             {series.labels.map((l, i) => (
               <Text key={i} style={[styles.trendLabel, { color: palette.textTertiary }]}>
                 {i % labelEvery === 0 ? l : ''}
@@ -226,13 +281,17 @@ export function IncomeExpenseCard({
   /** 当前期进行中时，末位柱形使用斜纹，并补充口径说明。 */
   currentPeriod?: boolean;
 }) {
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const W = 320;
   const H = 150;
+  const axisW = 34;
+  const chartRight = W - 2;
   const padY = 14;
   const n = series.length;
   const max = Math.max(1, ...series.flatMap((s) => [s.income, s.expense]));
-  const hasData = series.some((s) => s.income > 0 || s.expense > 0);
-  const groupW = W / n;
+  const nonZeroCount = series.filter((s) => s.income > 0 || s.expense > 0).length;
+  const hasData = nonZeroCount >= 2;
+  const groupW = (chartRight - axisW) / n;
   const barW = Math.min(13, groupW / 3.2);
   const gap = 4;
   const chartBottom = H - 16;
@@ -246,7 +305,11 @@ export function IncomeExpenseCard({
   const maxBalance = Math.max(0, ...balances);
   const balanceSpan = Math.max(1, maxBalance - minBalance);
   const balanceY = (value: number) => padY + ((maxBalance - value) / balanceSpan) * (chartBottom - padY);
-  const balancePoints = balances.map((value, i) => `${groupW * i + groupW / 2},${balanceY(value)}`).join(' ');
+  const balancePoints = balances.map((value, i) => `${axisW + groupW * i + groupW / 2},${balanceY(value)}`).join(' ');
+  const focusedIndex = selectedIndex ?? n - 1;
+  const focused = series[focusedIndex];
+  const focusedBalance = focused.income - focused.expense;
+  const ticks = chartTicks(max);
 
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
@@ -260,7 +323,9 @@ export function IncomeExpenseCard({
       {!hasData ? (
         <View style={styles.empty}>
           <SymbolView name="chart.bar.xaxis" tintColor={palette.textTertiary} size={36} />
-          <ThemedText style={{ color: palette.textSecondary }}>近 {n} 期还没有收支记录</ThemedText>
+          <ThemedText style={{ color: palette.textSecondary, textAlign: 'center' }}>
+            当前只有 {nonZeroCount} 个周期有收支记录；再积累到 2 个以上周期后展示趋势。
+          </ThemedText>
         </View>
       ) : (
         <>
@@ -271,9 +336,25 @@ export function IncomeExpenseCard({
                 <Line x1="2" y1="12" x2="12" y2="2" stroke="#FFFFFF" strokeWidth="2" opacity="0.28" />
               </Pattern>
             </Defs>
-            <Line x1="0" y1={chartBottom} x2={W} y2={chartBottom} stroke={palette.separator} strokeWidth="1" />
+            <SvgYAxis
+              ticks={ticks}
+              width={axisW - 8}
+              yOf={(value) => chartBottom - ((chartBottom - padY) * value) / max}
+              chartRight={chartRight}
+              color={palette.textTertiary}
+              gridColor={palette.separator}
+            />
+            <Line
+              x1={axisW}
+              y1={chartBottom}
+              x2={chartRight}
+              y2={chartBottom}
+              stroke={palette.separator}
+              strokeWidth="1"
+            />
             {series.map((s, i) => {
-              const cx = groupW * i + groupW / 2;
+              const groupX = axisW + groupW * i;
+              const cx = groupX + groupW / 2;
               const ih = hOf(s.income);
               const eh = hOf(s.expense);
               const isCurrent = currentPeriod && i === n - 1;
@@ -281,7 +362,7 @@ export function IncomeExpenseCard({
                 <G key={i}>
                   {isCurrent ? (
                     <Rect
-                      x={groupW * i + 4}
+                      x={groupX + 4}
                       y={0}
                       width={groupW - 8}
                       height={chartBottom + 5}
@@ -334,6 +415,15 @@ export function IncomeExpenseCard({
                       ) : null}
                     </>
                   ) : null}
+                  <Rect
+                    x={groupX}
+                    y={0}
+                    width={groupW}
+                    height={chartBottom + 12}
+                    fill="transparent"
+                    onPress={() => setSelectedIndex(i)}
+                    accessibilityLabel={`${s.label}，收入 ${formatAmount(s.income, '+')}，支出 ${formatAmount(s.expense, '-')}，结余 ${formatAmount(s.income - s.expense, signForNet(s.income - s.expense))}`}
+                  />
                 </G>
               );
             })}
@@ -346,10 +436,10 @@ export function IncomeExpenseCard({
               strokeLinecap="round"
             />
             {balances.map((value, i) => (
-              <Circle key={i} cx={groupW * i + groupW / 2} cy={balanceY(value)} r={3} fill={palette.warning} />
+              <Circle key={i} cx={axisW + groupW * i + groupW / 2} cy={balanceY(value)} r={3} fill={palette.warning} />
             ))}
           </Svg>
-          <View style={styles.trendLabels}>
+          <View style={[styles.trendLabels, { paddingLeft: axisW }]}>
             {series.map((s, i) => (
               <Text
                 key={i}
@@ -363,11 +453,32 @@ export function IncomeExpenseCard({
             ))}
           </View>
           <ThemedText style={[styles.cumCaption, { color: palette.textSecondary }]}>
-            {currentPeriod ? '斜纹为当月，数据为月度累计（进行中）' : '本期结余'}
-            {!currentPeriod ? ' ' : null}
-            <Text style={{ color: balance < 0 ? palette.danger : palette.textPrimary, fontWeight: '600' }}>
-              {!currentPeriod ? maskAmount(formatAmount(balance, signForNet(balance)), !!hidden) : ''}
-            </Text>
+            {selectedIndex == null && currentPeriod
+              ? '斜纹为当前期，数据为累计值；点按柱形查看精确值。'
+              : `${focused.label}：收入 `}
+            {selectedIndex == null && currentPeriod ? null : (
+              <Text style={{ color: palette.income, fontWeight: '600' }}>
+                {maskAmount(formatAmount(focused.income, '+'), !!hidden)}
+              </Text>
+            )}
+            {selectedIndex == null && currentPeriod ? null : ' · 支出 '}
+            {selectedIndex == null && currentPeriod ? null : (
+              <Text style={{ color: palette.expense, fontWeight: '600' }}>
+                {maskAmount(formatAmount(focused.expense, '-'), !!hidden)}
+              </Text>
+            )}
+            {selectedIndex == null && currentPeriod ? null : ' · 结余 '}
+            {selectedIndex == null && currentPeriod ? null : (
+              <Text style={{ color: focusedBalance < 0 ? palette.danger : palette.textPrimary, fontWeight: '600' }}>
+                {maskAmount(formatAmount(focusedBalance, signForNet(focusedBalance)), !!hidden)}
+              </Text>
+            )}
+            {selectedIndex == null && !currentPeriod ? '本期结余 ' : null}
+            {selectedIndex == null && !currentPeriod ? (
+              <Text style={{ color: balance < 0 ? palette.danger : palette.textPrimary, fontWeight: '600' }}>
+                {maskAmount(formatAmount(balance, signForNet(balance)), !!hidden)}
+              </Text>
+            ) : null}
           </ThemedText>
         </>
       )}

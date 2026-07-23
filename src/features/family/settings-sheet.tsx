@@ -1,7 +1,8 @@
 /**
- * 家庭设置（流程 1 §3.5）：户主可改家庭名 + 封面；普通成员只读。
- * 封面走「即时上传」（同 Hero 头像，复用 useUpdateFamilyCover）；家庭名经顶栏「保存」提交。
- * 入口：家庭页 → 家庭管理 → 家庭设置。后续可在此追加「卡片背景图」等设置项。
+ * 家庭设置（流程 1 §3.5）：户主可改家庭名 + 家庭头像（avatar_url，方块小图）+
+ * 家庭封面（cover_url，hero 背景 / 加入预览卡大图）；普通成员只读。
+ * 头像 / 封面走「即时上传」；家庭名经顶栏「保存」提交。
+ * 入口：家庭页 → 家庭管理 → 家庭设置。
  */
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
@@ -19,7 +20,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useMyFamily, useMyProfile, useUpdateFamilyCover, useUpdateFamilyName } from '@/api';
+import { useMyFamily, useMyProfile, useUpdateFamilyAvatar, useUpdateFamilyCover, useUpdateFamilyName } from '@/api';
+import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, usePalette } from '@/constants/design';
 
 /** 家庭名长度上限（与创建家庭保持宽松一致）。 */
@@ -38,6 +40,7 @@ function Body({ onClose }: { onClose: () => void }) {
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
   const updateNameM = useUpdateFamilyName();
+  const updateAvatarM = useUpdateFamilyAvatar();
   const updateCoverM = useUpdateFamilyCover();
 
   const family = familyQ.data;
@@ -50,7 +53,15 @@ function Body({ onClose }: { onClose: () => void }) {
   const dirty = !!family && trimmed !== family.name;
   const canSave = isOwner && dirty && trimmed.length > 0 && !updateNameM.isPending;
 
-  // 户主点封面：选图 → 压缩 → 上传 → 写回 cover_url（取消则静默）。
+  // 户主点头像：方形裁 → 压缩 → 上传 → 写回 avatar_url（取消则静默）。
+  const onChangeAvatar = () => {
+    if (!family || !isOwner || updateAvatarM.isPending) return;
+    updateAvatarM.mutate(family.id, {
+      onError: (e) => Alert.alert('头像更新失败', (e as Error).message ?? String(e)),
+    });
+  };
+
+  // 户主点封面：宽幅原图 → 压缩 → 上传 → 写回 cover_url（取消则静默）。
   const onChangeCover = () => {
     if (!family || !isOwner || updateCoverM.isPending) return;
     updateCoverM.mutate(family.id, {
@@ -71,29 +82,45 @@ function Body({ onClose }: { onClose: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView style={styles.flex}>
-        <View style={styles.topBar}>
-          <Pressable hitSlop={8} onPress={onClose}>
-            <Text style={[styles.action, { color: palette.textSecondary }]}>取消</Text>
-          </Pressable>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>家庭设置</Text>
-          {isOwner ? (
-            <Pressable hitSlop={8} onPress={onSave} disabled={!canSave}>
-              <Text style={[styles.action, { color: canSave ? palette.accent : palette.textTertiary }]}>保存</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.actionGap} />
-          )}
-        </View>
+        {/* 显式保存型：✕ 放弃并关闭 + ✓ 保存（DESIGN §9.9）；非户主无 ✓ */}
+        <SheetHeader
+          title="家庭设置"
+          onClose={onClose}
+          onConfirm={isOwner ? onSave : undefined}
+          confirmDisabled={!canSave}
+        />
 
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          {/* 家庭封面（即时上传，不经「保存」） */}
+          {/* 家庭头像（avatar_url，方块小图；即时上传，不经「保存」） */}
+          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>家庭头像</Text>
+          <Pressable onPress={onChangeAvatar} disabled={!isOwner || updateAvatarM.isPending} style={styles.avatarWrap}>
+            {family?.avatar_url ? (
+              <Image source={family.avatar_url} style={styles.avatar} contentFit="cover" transition={150} />
+            ) : (
+              <View style={[styles.avatar, styles.coverFallback, { backgroundColor: palette.accent }]}>
+                <Text style={[styles.avatarFallbackText, { color: palette.onAccent }]}>家</Text>
+              </View>
+            )}
+            {updateAvatarM.isPending ? (
+              <View style={[styles.avatar, styles.coverOverlay]}>
+                <ActivityIndicator color="#fff" />
+              </View>
+            ) : isOwner ? (
+              <View style={[styles.coverEdit, styles.avatarEdit]}>
+                <SymbolView name="camera.fill" tintColor="#fff" size={11} />
+              </View>
+            ) : null}
+          </Pressable>
+
+          {/* 家庭封面（cover_url，家庭页 hero 背景 / 加入预览卡大图；即时上传） */}
           <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>家庭封面</Text>
           <Pressable onPress={onChangeCover} disabled={!isOwner || updateCoverM.isPending} style={styles.coverWrap}>
             {family?.cover_url ? (
               <Image source={family.cover_url} style={styles.cover} contentFit="cover" transition={150} />
             ) : (
-              <View style={[styles.cover, styles.coverFallback, { backgroundColor: palette.accent }]}>
-                <Text style={[styles.coverFallbackText, { color: palette.onAccent }]}>家</Text>
+              // 未设置：预览与家庭页 hero 兜底一致的品牌蓝渐变
+              <View style={[styles.cover, styles.coverFallback, styles.coverGradient]}>
+                <Text style={styles.coverHintText}>未设置 · 默认蓝色渐变</Text>
               </View>
             )}
             {updateCoverM.isPending ? (
@@ -132,7 +159,7 @@ function Body({ onClose }: { onClose: () => void }) {
           )}
 
           {!isOwner ? (
-            <Text style={[styles.hint, { color: palette.textTertiary }]}>仅户主可修改家庭名称与封面</Text>
+            <Text style={[styles.hint, { color: palette.textTertiary }]}>仅户主可修改家庭名称、头像与封面</Text>
           ) : null}
         </ScrollView>
       </SafeAreaView>
@@ -147,13 +174,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[3],
+    paddingHorizontal: Space[6],
+    paddingTop: Space[5],
+    paddingBottom: Space[4],
   },
-  title: { fontSize: 17, fontWeight: '700' },
+  title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   action: { fontSize: 16, minWidth: 36 },
   actionGap: { minWidth: 36 },
-  content: { paddingHorizontal: Space[4], paddingBottom: Space[12], gap: Space[2] },
+  content: {
+    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingHorizontal: Space[6],
+    paddingBottom: Space[12],
+    gap: Space[2],
+  },
   groupTitle: { fontSize: 13, paddingHorizontal: Space[1], marginTop: Space[3] },
 
   // 封面
@@ -182,6 +215,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   coverEditText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  // 封面未设置时的兜底预览：与家庭页 hero 相同的品牌蓝渐变
+  coverGradient: { experimental_backgroundImage: 'linear-gradient(145deg, #3C9FFE, #0169D4)' },
+  coverHintText: { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '500' },
+
+  // 家庭头像（方块小图）
+  avatarWrap: { width: 88, height: 88, borderRadius: Radius.lg, overflow: 'hidden' },
+  avatar: { width: '100%', height: '100%' },
+  avatarFallbackText: { fontSize: 36, fontWeight: '700' },
+  avatarEdit: { right: Space[1], bottom: Space[1], paddingHorizontal: Space[2] },
 
   // 家庭名
   inputWrap: {

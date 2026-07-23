@@ -68,7 +68,9 @@ export function SlideToConfirm({
     onPanResponderTerminate: () => settle(0),
   });
 
-  const thumbColor = danger ? palette.danger : palette.accent;
+  const thumbColor = danger ? palette.danger : palette.ink;
+  // danger 红底恒配白（onAccent 两模式皆 #FFFFFF）；墨底配随主题反相的 onInk。
+  const onThumb = danger ? palette.onAccent : palette.onInk;
 
   return (
     <View
@@ -87,11 +89,7 @@ export function SlideToConfirm({
         {...pan.panHandlers}
         style={[styles.thumb, { backgroundColor: thumbColor, transform: [{ translateX }] }]}
       >
-        {busy ? (
-          <ActivityIndicator color={palette.onAccent} />
-        ) : (
-          <Text style={[styles.thumbArrow, { color: palette.onAccent }]}>›</Text>
-        )}
+        {busy ? <ActivityIndicator color={onThumb} /> : <Text style={[styles.thumbArrow, { color: onThumb }]}>›</Text>}
       </Animated.View>
     </View>
   );

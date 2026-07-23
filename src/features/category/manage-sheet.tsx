@@ -25,6 +25,7 @@ import {
   type Category,
   type CategoryType,
 } from '@/api';
+import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { categoryColorKey } from '@/lib/category-style';
 
@@ -259,12 +260,12 @@ const PROTECTED_SYSTEM_NAMES = new Set(['其他支出', '其他收入']);
 export function CategoryManageSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <Body onClose={onClose} /> : null}
+      {visible ? <Body /> : null}
     </Modal>
   );
 }
 
-function Body({ onClose }: { onClose: () => void }) {
+function Body() {
   const palette = usePalette();
   const [view, setView] = useState<ViewState>({ mode: 'list' });
 
@@ -272,19 +273,11 @@ function Body({ onClose }: { onClose: () => void }) {
   if (view.mode !== 'list') {
     return <Editor view={view} onBack={() => setView({ mode: 'list' })} />;
   }
-  return <List palette={palette} onClose={onClose} setView={setView} />;
+  return <List palette={palette} setView={setView} />;
 }
 
 // ── 列表 ─────────────────────────────────────────────────────────────────────
-function List({
-  palette,
-  onClose,
-  setView,
-}: {
-  palette: ReturnType<typeof usePalette>;
-  onClose: () => void;
-  setView: (v: ViewState) => void;
-}) {
+function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; setView: (v: ViewState) => void }) {
   const catColors = useCategoryColors();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
@@ -395,12 +388,8 @@ function List({
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView style={styles.flex}>
-        <View style={styles.topBar}>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>分类管理</Text>
-          <Pressable hitSlop={8} onPress={onClose}>
-            <Text style={[styles.action, { color: palette.textSecondary }]}>完成</Text>
-          </Pressable>
-        </View>
+        {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
+        <SheetHeader title="分类管理" />
 
         {/* 支出 / 收入：iOS 原生分段控件（SwiftUI Picker.segmented） */}
         <Host style={styles.segmentHost}>
@@ -551,22 +540,13 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
-        <View style={styles.topBar}>
-          <Pressable hitSlop={8} onPress={onBack}>
-            <Text style={[styles.action, { color: palette.textSecondary }]}>取消</Text>
-          </Pressable>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>{isEdit ? '编辑分类' : '新增分类'}</Text>
-          <Pressable hitSlop={8} onPress={handleSave} disabled={!trimmed || nameTooLong || saving}>
-            <Text
-              style={[
-                styles.action,
-                { color: trimmed && !nameTooLong && !saving ? palette.accent : palette.textTertiary },
-              ]}
-            >
-              保存
-            </Text>
-          </Pressable>
-        </View>
+        {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
+        <SheetHeader
+          title={isEdit ? '编辑分类' : '新增分类'}
+          onBack={onBack}
+          onConfirm={handleSave}
+          confirmDisabled={!trimmed || nameTooLong || saving}
+        />
 
         <View style={styles.editorContent}>
           {/* 预览 + 名称 */}
@@ -624,13 +604,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[3],
+    paddingHorizontal: Space[6],
+    paddingTop: Space[5],
+    paddingBottom: Space[4],
   },
-  title: { fontSize: 17, fontWeight: '700' },
+  title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   action: { fontSize: 16 },
-  segmentHost: { height: 34, marginTop: Space[2], marginHorizontal: Space[4] },
-  content: { paddingHorizontal: Space[4], paddingTop: Space[4], paddingBottom: Space[12], gap: Space[5] },
+  segmentHost: { height: 34, marginTop: SHEET_HEADER_HEIGHT + Space[2], marginHorizontal: Space[4] },
+  content: { paddingHorizontal: Space[6], paddingTop: Space[4], paddingBottom: Space[12], gap: Space[5] },
   addRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -652,7 +633,7 @@ const styles = StyleSheet.create({
   rowName: { fontSize: 16, fontWeight: '500' },
   sysTag: { fontSize: 13 },
   archiveBtn: { padding: Space[1] },
-  editorContent: { flex: 1, paddingHorizontal: Space[4], gap: Space[4] },
+  editorContent: { flex: 1, paddingTop: SHEET_HEADER_HEIGHT, paddingHorizontal: Space[6], gap: Space[4] },
   preview: { alignItems: 'center', gap: Space[2], paddingVertical: Space[4] },
   previewDot: { width: 64, height: 64, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
   previewType: { fontSize: 13 },

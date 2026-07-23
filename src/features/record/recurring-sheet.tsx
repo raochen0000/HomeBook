@@ -343,12 +343,12 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
         <Pressable
           disabled={!canSave}
           onPress={handleSave}
-          style={[styles.save, { backgroundColor: palette.accent, opacity: canSave ? 1 : 0.35 }]}
+          style={[styles.save, { backgroundColor: palette.ink, opacity: canSave ? 1 : 0.35 }]}
         >
           {saving ? (
-            <ActivityIndicator color={palette.onAccent} />
+            <ActivityIndicator color={palette.onInk} />
           ) : (
-            <Text style={[styles.saveText, { color: palette.onAccent }]}>保存</Text>
+            <Text style={[styles.saveText, { color: palette.onInk }]}>保存</Text>
           )}
         </Pressable>
       </View>

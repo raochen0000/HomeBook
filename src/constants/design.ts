@@ -56,6 +56,8 @@ type Palette = {
   warning: string;
   danger: string;
   info: string;
+  /** 成功：绿（DESIGN §2.7 state/success）。与 expense 同色值，但语义独立——成功提示的绿勾不应复用「支出绿」令牌。 */
+  success: string;
   /** 页面底 */
   base: string;
   /** 卡片底 */
@@ -70,8 +72,12 @@ type Palette = {
   accent: string;
   onAccent: string;
   /**
-   * 墨色：**仅限**品牌 / 登录 surface 上「用户的确认动作」（主 CTA 实底、勾选态）。
-   * app 内 chrome 的主 CTA 一律仍用 accent（蓝），别拿 ink 去替换——见 DESIGN §2.5 例外。
+   * 墨色：**全局**「用户的确认 / 主操作」色（v0.6.5 起，不再限登录 surface）。用于：主 CTA 实底、
+   * ➕ 记一笔 FAB 实底、Sheet 顶部的确认文字动作（完成 / 保存 / 应用 / 获取验证码，加粗）、
+   * 勾选态、滑动确认。蓝（accent）退回「跳转 / 链接 + 系统交互」——可点文字与链接、列表选中态、
+   * 开关 on、进度、聚焦框——不再做按钮实底。见 DESIGN §2.5 / §9.5。
+   *
+   * 组织原则：**墨 = 你的确认动作，蓝 = 跳转 / 链接，红 = 破坏**。
    *
    * 随主题反相（浅色近黑 / 深色近白），所以永远和所在表面拉开对比；写死的 hex 做不到这点，
    * 旧登录页正是写死 #1C1C1E 撞上 dark.card 才整个消失。
@@ -96,6 +102,7 @@ const light: Palette = {
   warning: '#F5A623',
   danger: '#E2563D',
   info: '#007AFF',
+  success: '#2FA36B',
   base: '#F2F1F5',
   card: '#FFFFFF',
   elevated: '#F2F1F5',
@@ -118,6 +125,7 @@ const dark: Palette = {
   warning: '#FFB84D',
   danger: '#FF7461',
   info: '#0A84FF',
+  success: '#46C98A',
   base: '#000000',
   card: '#1C1C1E',
   elevated: '#2C2C2E',
