@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   useBudget,
+  useCategories,
   useCreateFamily,
   useDissolveFamily,
   useLeaveFamily,
@@ -24,7 +25,9 @@ import {
   useSavingsGoals,
   useTransactions,
   useUnreadNotifications,
+  type FamilyMembership,
   type SavingsGoal,
+  type Transaction,
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
@@ -37,7 +40,9 @@ import { InviteSheet } from '@/features/family/invite-sheet';
 import { MemberManageSheet } from '@/features/family/member-manage-sheet';
 import { ScanSheet } from '@/features/family/scan-sheet';
 import { FamilySettingsSheet } from '@/features/family/settings-sheet';
+import { TransactionDetailSheet } from '@/features/home/transaction-detail-sheet';
 import { NotificationCenterSheet } from '@/features/notifications/center-sheet';
+import { RecordSheet } from '@/features/record/record-sheet';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
@@ -47,6 +52,19 @@ import { currentPeriod, formatAmount } from '@/lib/format';
 /** 本地「年-月-日」key（用于连续记账判断，须与游标同构造）。 */
 function localDayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+/** 连续有流水的自然日数；今天未记时从昨天开始，避免当天尚未记账就提前断签。 */
+function consecutiveRecordedDays(recordedDays: Set<string>): number {
+  let streak = 0;
+  const cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+  if (!recordedDays.has(localDayKey(cursor))) cursor.setDate(cursor.getDate() - 1);
+  while (recordedDays.has(localDayKey(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
 }
 
 /** 瓦片角标用的紧凑金额：分 → 「¥1,280」（取整到元，带千分位）。 */
@@ -64,6 +82,7 @@ export default function FamilyScreen() {
   const familyQ = useMyFamily();
   const membershipsQ = useMemberships();
   const transactionsQ = useTransactions();
+  const categoriesQ = useCategories();
   const budgetQ = useBudget(period);
   const savingsQ = useSavingsGoals();
   const unreadQ = useUnreadNotifications();
@@ -81,47 +100,59 @@ export default function FamilyScreen() {
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [detailTransaction, setDetailTransaction] = useState<Transaction | null>(null);
   const [dissolveOpen, setDissolveOpen] = useState(false);
   // 成员管理页请求打开邀请页的待办标记（先关成员管理，其 dismiss 后再开邀请页）。
   const pendingInviteRef = useRef(false);
 
   const myId = profileQ.data?.id;
   const family = familyQ.data;
-  const members = membershipsQ.data ?? [];
+  const members = useMemo(() => membershipsQ.data ?? [], [membershipsQ.data]);
   const isOwner = !!family && family.owner_user_id === myId;
 
   // 家庭头像（avatar_url）与封面（cover_url）的更换入口在「家庭设置」，本页只读展示。
 
-  // ── 家庭活跃度：本月总笔数、连续记账天数、各成员今日笔数（聚合/对比类留给报表）──
+  // ── 家庭活跃度：首页只呈现协作状态；金额贡献、成员比较仍归报表。──
   const stats = useMemo(() => {
     const txns = transactionsQ.data ?? [];
     const todayKey = localDayKey(new Date());
 
     let monthCount = 0;
     const byMemberToday = new Map<string, number>();
+    const byMemberMonth = new Map<string, number>();
     const recordedDays = new Set<string>();
+    const myRecordedDays = new Set<string>();
+    let latestMonthTransaction: Transaction | null = null;
 
     for (const t of txns) {
       const occurred = new Date(t.occurred_at);
       recordedDays.add(localDayKey(occurred));
-      if (currentPeriod(occurred) === period) monthCount += 1;
+      if (t.recorder_user_id === myId) myRecordedDays.add(localDayKey(occurred));
+      if (currentPeriod(occurred) === period) {
+        monthCount += 1;
+        byMemberMonth.set(t.recorder_user_id, (byMemberMonth.get(t.recorder_user_id) ?? 0) + 1);
+        if (!latestMonthTransaction || occurred > new Date(latestMonthTransaction.occurred_at)) {
+          latestMonthTransaction = t;
+        }
+      }
       if (localDayKey(occurred) === todayKey) {
         byMemberToday.set(t.recorder_user_id, (byMemberToday.get(t.recorder_user_id) ?? 0) + 1);
       }
     }
 
-    // 连续记账：从今天起向前数有账的天数；今天未记则从昨天起算（当日尚未断签）。
-    let streak = 0;
-    const cursor = new Date();
-    cursor.setHours(0, 0, 0, 0);
-    if (!recordedDays.has(localDayKey(cursor))) cursor.setDate(cursor.getDate() - 1);
-    while (recordedDays.has(localDayKey(cursor))) {
-      streak += 1;
-      cursor.setDate(cursor.getDate() - 1);
-    }
-
-    return { monthCount, streak, byMemberToday };
-  }, [transactionsQ.data, period]);
+    const todayCount = [...byMemberToday.values()].reduce((sum, count) => sum + count, 0);
+    return {
+      monthCount,
+      streak: consecutiveRecordedDays(recordedDays),
+      myMonthCount: myId ? (byMemberMonth.get(myId) ?? 0) : 0,
+      myStreak: consecutiveRecordedDays(myRecordedDays),
+      byMemberToday,
+      byMemberMonth,
+      todayCount,
+      latestMonthTransaction,
+    };
+  }, [myId, transactionsQ.data, period]);
 
   // ── 预算执行（口径同预算页：仅日常支出，排除储蓄流水）──
   const budgetTotal = budgetQ.data?.budget?.total_amount ?? null;
@@ -148,6 +179,22 @@ export default function FamilyScreen() {
   const activeGoalCount = useMemo(() => goals.filter((g) => g.saved_amount < g.target_amount).length, [goals]);
 
   const unreadCount = unreadQ.data?.length ?? 0;
+  const latestMonthCategory = useMemo(
+    () =>
+      stats.latestMonthTransaction
+        ? ((categoriesQ.data ?? []).find((category) => category.id === stats.latestMonthTransaction?.category_id)
+            ?.name ?? '未分类')
+        : null,
+    [categoriesQ.data, stats.latestMonthTransaction],
+  );
+  const latestMonthRecorder = useMemo(
+    () =>
+      stats.latestMonthTransaction
+        ? (members.find((member) => member.userId === stats.latestMonthTransaction?.recorder_user_id)?.nickname ??
+          '家人')
+        : null,
+    [members, stats.latestMonthTransaction],
+  );
   // 单人家庭：隐藏成员列表与「家庭当下」，聚焦邀请转化（PRD F1 关键态）。
   const singlePerson = (family?.member_count ?? members.length) <= 1;
 
@@ -337,70 +384,22 @@ export default function FamilyScreen() {
                   onGoalDetail={openGoalDetail}
                 />
 
-                {/* 家庭成员 */}
-                <View style={styles.section}>
-                  <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>
-                    家庭成员{' '}
-                    <ThemedText style={{ color: palette.textTertiary, fontSize: 15 }}>
-                      （{members.length}/{MAX_FAMILY_MEMBERS}）
-                    </ThemedText>
-                  </ThemedText>
-                  <View style={[styles.card, { backgroundColor: palette.card }]}>
-                    {members.map((m, i) => {
-                      const todayN = stats.byMemberToday.get(m.userId) ?? 0;
-                      const tint = avatarTints[i % avatarTints.length];
-                      return (
-                        <View key={m.id}>
-                          {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
-                          <View style={styles.memberRow}>
-                            {m.avatarUrl ? (
-                              <Image
-                                source={m.avatarUrl}
-                                style={styles.memberAvatar}
-                                contentFit="cover"
-                                transition={120}
-                              />
-                            ) : (
-                              <View
-                                style={[styles.memberAvatar, styles.memberAvatarFallback, { backgroundColor: tint }]}
-                              >
-                                <SymbolView name="person.fill" tintColor="#FFFFFF" size={20} />
-                              </View>
-                            )}
-                            <View style={styles.flex}>
-                              <View style={styles.memberNameRow}>
-                                <ThemedText style={[styles.memberName, { color: palette.textPrimary }]}>
-                                  {m.nickname}
-                                  {m.userId === myId ? '（我）' : ''}
-                                </ThemedText>
-                                <View style={[styles.roleBadge, { backgroundColor: palette.bannerTint }]}>
-                                  <ThemedText
-                                    style={[
-                                      styles.roleBadgeText,
-                                      { color: m.role === 'owner' ? palette.textPrimary : palette.textSecondary },
-                                    ]}
-                                  >
-                                    {m.role === 'owner' ? '户主' : '成员'}
-                                  </ThemedText>
-                                </View>
-                              </View>
-                              <View style={styles.memberActivity}>
-                                <SymbolView
-                                  name={todayN > 0 ? 'checkmark.circle.fill' : 'circle'}
-                                  tintColor={todayN > 0 ? palette.accent : palette.textTertiary}
-                                  size={12}
-                                />
-                                <ThemedText style={[styles.memberSub, { color: palette.textSecondary }]}>
-                                  {todayN > 0 ? `今日已记 ${todayN} 笔` : '今日未记账'}
-                                </ThemedText>
-                              </View>
-                            </View>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
+                <FamilyCollaborationCard
+                  members={members}
+                  avatarTints={avatarTints}
+                  todayCount={stats.todayCount}
+                  monthParticipantCount={stats.byMemberMonth.size}
+                  myMonthCount={stats.myMonthCount}
+                  myStreak={stats.myStreak}
+                  latestTransaction={stats.latestMonthTransaction}
+                  latestCategoryName={latestMonthCategory}
+                  latestRecorderName={latestMonthRecorder}
+                  canInvite={isOwner && members.length < MAX_FAMILY_MEMBERS}
+                  onManage={() => setMemberManageOpen(true)}
+                  onRecord={() => setRecordOpen(true)}
+                  onInvite={onInvite}
+                  onViewLatest={() => setDetailTransaction(stats.latestMonthTransaction)}
+                />
               </>
             )}
 
@@ -433,13 +432,6 @@ export default function FamilyScreen() {
               <View style={[styles.card, { backgroundColor: palette.card }]}>
                 {isOwner ? (
                   <>
-                    <ManageRow
-                      icon="person.2"
-                      title="成员管理"
-                      sub="查看成员、转让户主、移除成员"
-                      onPress={() => setMemberManageOpen(true)}
-                    />
-                    <View style={[styles.divider, { backgroundColor: palette.separator }]} />
                     <ManageRow
                       icon="gearshape"
                       title="家庭设置"
@@ -510,6 +502,18 @@ export default function FamilyScreen() {
         onClose={() => setDissolveOpen(false)}
       />
       <BudgetSheet visible={budgetOpen} onClose={() => setBudgetOpen(false)} />
+      <RecordSheet
+        visible={recordOpen}
+        editing={null}
+        familyId={family?.id ?? ''}
+        recorderId={myId ?? ''}
+        onClose={() => setRecordOpen(false)}
+      />
+      <TransactionDetailSheet
+        visible={detailTransaction != null}
+        transaction={detailTransaction}
+        onClose={() => setDetailTransaction(null)}
+      />
       <SavingsSheet
         visible={savingsOpen}
         initialGoalId={savingsGoalId}
@@ -553,6 +557,189 @@ function HeroStat({
           {label}
         </ThemedText>
       </View>
+    </View>
+  );
+}
+
+// ── 多人家庭：首页协作概览（名册与权限操作下沉至成员管理 Sheet）──
+function FamilyCollaborationCard({
+  members,
+  avatarTints,
+  todayCount,
+  monthParticipantCount,
+  myMonthCount,
+  myStreak,
+  latestTransaction,
+  latestCategoryName,
+  latestRecorderName,
+  canInvite,
+  onManage,
+  onRecord,
+  onInvite,
+  onViewLatest,
+}: {
+  members: FamilyMembership[];
+  avatarTints: readonly string[];
+  todayCount: number;
+  monthParticipantCount: number;
+  myMonthCount: number;
+  myStreak: number;
+  latestTransaction: Transaction | null;
+  latestCategoryName: string | null;
+  latestRecorderName: string | null;
+  canInvite: boolean;
+  onManage: () => void;
+  onRecord: () => void;
+  onInvite: () => void;
+  onViewLatest: () => void;
+}) {
+  const palette = usePalette();
+  const hasTodayActivity = todayCount > 0 && latestTransaction != null;
+  const hasMonthActivity = latestTransaction != null;
+  const latestText = latestTransaction
+    ? `${latestRecorderName ?? '家人'}刚记了一笔${latestCategoryName ?? '流水'}`
+    : '暂无最近记录';
+
+  return (
+    <View style={styles.section}>
+      <View style={[styles.card, styles.collaborationCard, { backgroundColor: palette.card }]}>
+        {/* 标题区是唯一的成员管理入口，避免与卡内主 CTA 发生嵌套点击冲突。 */}
+        <Pressable
+          onPress={onManage}
+          style={styles.collaborationHeader}
+          accessibilityRole="button"
+          accessibilityLabel="打开成员管理"
+          accessibilityHint="查看成员资料和家庭成员管理操作"
+        >
+          <View style={styles.collaborationTitleRow}>
+            <ThemedText style={[styles.collaborationTitle, { color: palette.textPrimary }]}>家庭协作</ThemedText>
+            <ThemedText style={[styles.collaborationCount, { color: palette.textTertiary }]}>
+              {members.length}/{MAX_FAMILY_MEMBERS}
+            </ThemedText>
+          </View>
+          <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={16} />
+        </Pressable>
+
+        <View style={styles.collaborationAvatars} accessibilityLabel={`家庭成员，共 ${members.length} 人`} accessible>
+          {members.map((member, index) => {
+            const tint = avatarTints[index % avatarTints.length];
+            return member.avatarUrl ? (
+              <Image
+                key={member.id}
+                source={member.avatarUrl}
+                style={styles.collaborationAvatar}
+                contentFit="cover"
+                transition={120}
+              />
+            ) : (
+              <View
+                key={member.id}
+                style={[styles.collaborationAvatar, styles.memberAvatarFallback, { backgroundColor: tint }]}
+              >
+                <SymbolView name="person.fill" tintColor="#FFFFFF" size={20} />
+              </View>
+            );
+          })}
+        </View>
+
+        {!hasTodayActivity ? (
+          <View style={styles.collaborationEmpty}>
+            <View style={styles.collaborationEmptyHeadline}>
+              <Image
+                source={require('@/assets/images/family-records-empty.svg')}
+                style={styles.collaborationEmptyIcon}
+                contentFit="contain"
+                accessible={false}
+              />
+              <ThemedText style={[styles.collaborationEmptyTitle, { color: palette.textPrimary }]}>
+                今天还没有家庭流水
+              </ThemedText>
+            </View>
+          </View>
+        ) : null}
+
+        {hasMonthActivity ? (
+          <>
+            <View style={[styles.collaborationStats, { backgroundColor: palette.elevated }]}>
+              <CollaborationStat label="本月参与" value={`${monthParticipantCount} 人`} color={palette.success} />
+              <View style={[styles.collaborationStatDivider, { backgroundColor: palette.separator }]} />
+              <CollaborationStat label="连续记账" value={`${myStreak} 天`} color={palette.warning} />
+              <View style={[styles.collaborationStatDivider, { backgroundColor: palette.separator }]} />
+              <CollaborationStat label="本月笔数" value={`${myMonthCount} 笔`} color={palette.accent} />
+            </View>
+            <View style={styles.collaborationRecentRow}>
+              <View style={[styles.collaborationRecentDot, { backgroundColor: palette.accent }]} />
+              <View style={styles.collaborationRecentText}>
+                <ThemedText
+                  style={[styles.collaborationRecentTitle, { color: palette.textSecondary }]}
+                  numberOfLines={1}
+                >
+                  {latestText}
+                </ThemedText>
+                <ThemedText
+                  style={[styles.collaborationRecentAmount, { color: palette.textPrimary }]}
+                  numberOfLines={1}
+                >
+                  {formatAmount(latestTransaction.amount)}
+                </ThemedText>
+              </View>
+              <Pressable
+                onPress={onViewLatest}
+                style={styles.collaborationViewAction}
+                accessibilityRole="button"
+                accessibilityLabel="查看最近一笔动态"
+                accessibilityHint="打开该笔家庭流水的详情"
+              >
+                <ThemedText style={[styles.collaborationViewActionText, { color: palette.accent }]}>
+                  查看动态
+                </ThemedText>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
+
+        {!hasMonthActivity ? (
+          <ThemedText style={[styles.collaborationEmptyDetail, { color: palette.textSecondary }]}>
+            这个月还没有记录，从今天开始吧
+          </ThemedText>
+        ) : null}
+
+        {/* 记账是可连续完成的主任务；成功后更新内容，不撤走入口。邀请只由户主权限与人数上限决定。 */}
+        <View style={styles.collaborationActions}>
+          <Pressable
+            onPress={onRecord}
+            style={[styles.collaborationAction, { backgroundColor: palette.ink }]}
+            accessibilityRole="button"
+            accessibilityLabel="记一笔"
+            accessibilityHint="打开记账面板，为家庭账本添加一笔流水"
+          >
+            <SymbolView name="square.and.pencil" tintColor={palette.onInk} size={17} />
+            <ThemedText style={[styles.collaborationActionText, { color: palette.onInk }]}>记一笔</ThemedText>
+          </Pressable>
+          {canInvite ? (
+            <Pressable
+              onPress={onInvite}
+              style={[styles.collaborationInviteAction, { borderColor: palette.separator }]}
+              accessibilityRole="button"
+              accessibilityLabel="邀请家人"
+              accessibilityHint="生成家庭邀请码"
+            >
+              <SymbolView name="person.crop.circle.badge.plus" tintColor={palette.textPrimary} size={17} />
+              <ThemedText style={[styles.collaborationInviteActionText, { color: palette.textPrimary }]}>
+                邀请家人
+              </ThemedText>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function CollaborationStat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <View style={styles.collaborationStat}>
+      <ThemedText style={[styles.collaborationStatText, { color }]}>{`${label} ${value}`}</ThemedText>
     </View>
   );
 }
@@ -881,22 +1068,68 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: '600' },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: Space[4] },
 
-  // 成员
-  memberRow: {
+  // 家庭协作：首页用「状态 + 行动」代替逐行成员名册，完整名册下沉至成员管理。
+  collaborationCard: { paddingHorizontal: Space[4], paddingVertical: Space[3], gap: Space[3] },
+  collaborationHeader: {
+    minHeight: 38,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space[3],
-    paddingVertical: Space[3],
-    paddingHorizontal: Space[4],
+    justifyContent: 'space-between',
   },
-  memberAvatar: { width: 44, height: 44, borderRadius: Radius.full },
+  collaborationTitleRow: { flexDirection: 'row', alignItems: 'baseline', gap: Space[2] },
+  collaborationTitle: { fontSize: 17, lineHeight: 22, fontWeight: '600' },
+  collaborationCount: { fontSize: 14, lineHeight: 20, fontWeight: '500' },
+  collaborationAvatars: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Space[3] },
+  collaborationAvatar: { width: 44, height: 44, borderRadius: Radius.full },
   memberAvatarFallback: { alignItems: 'center', justifyContent: 'center' },
-  memberNameRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
-  memberName: { fontSize: 16, fontWeight: '600' },
-  roleBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: Radius.sm },
-  roleBadgeText: { fontSize: 12, lineHeight: 16, fontWeight: '600' },
-  memberActivity: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  memberSub: { fontSize: 13, lineHeight: 16 },
+  collaborationStats: {
+    minHeight: 28,
+    borderRadius: Radius.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingHorizontal: Space[2],
+  },
+  collaborationStat: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  collaborationStatText: { fontSize: 13, lineHeight: 18, fontWeight: '500' },
+  collaborationStatDivider: { width: StyleSheet.hairlineWidth, height: 22 },
+  collaborationRecentRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Space[2] },
+  collaborationRecentDot: { width: 8, height: 8, borderRadius: Radius.full, flexShrink: 0 },
+  collaborationRecentText: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'baseline', gap: Space[2] },
+  collaborationRecentTitle: { flexShrink: 1, fontSize: 14, lineHeight: 19, fontWeight: '500' },
+  collaborationRecentAmount: { flexShrink: 0, fontSize: 14, lineHeight: 19, fontWeight: '600' },
+  collaborationViewAction: { minHeight: 44, justifyContent: 'center', paddingHorizontal: Space[1] },
+  collaborationViewActionText: { fontSize: 15, lineHeight: 21, fontWeight: '600' },
+  collaborationEmpty: { alignItems: 'center', gap: Space[1], paddingTop: Space[1] },
+  collaborationEmptyHeadline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Space[2] },
+  collaborationEmptyIcon: {
+    width: 34,
+    height: 34,
+  },
+  collaborationEmptyTitle: { fontSize: 16, lineHeight: 22, fontWeight: '600' },
+  collaborationEmptyDetail: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  collaborationActions: { flexDirection: 'row', alignSelf: 'stretch', gap: Space[2], marginBottom: Space[2] },
+  collaborationAction: {
+    height: 44,
+    borderRadius: Radius.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  collaborationActionText: { fontSize: 16, lineHeight: 22, fontWeight: '600' },
+  collaborationInviteAction: {
+    height: 44,
+    borderRadius: Radius.md,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  collaborationInviteActionText: { fontSize: 15, lineHeight: 21, fontWeight: '600' },
 
   // 家庭当下（预算 / 储蓄）
   nowBlock: { paddingVertical: Space[3], paddingHorizontal: Space[4], gap: 7 },

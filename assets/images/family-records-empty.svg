@@ -1,0 +1,18 @@
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g stroke="#9A9A9E" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 25H132C140.837 25 148 32.1634 148 41V91" />
+    <path d="M38 25C29.1634 25 22 32.1634 22 41V143C22 151.837 29.1634 159 38 159H108" />
+    <path d="M22 41V41C22 32.1634 29.1634 25 38 25" />
+    <path d="M58 10V28" />
+    <path d="M88 10V28" />
+    <path d="M118 10V28" />
+  </g>
+  <circle cx="58" cy="58" r="7" fill="#9A9A9E" />
+  <path d="M83 58H126" stroke="#B6B6BA" stroke-width="7" stroke-linecap="round" />
+  <circle cx="58" cy="89" r="7" fill="#9A9A9E" />
+  <path d="M83 89H126" stroke="#B6B6BA" stroke-width="7" stroke-linecap="round" />
+  <circle cx="58" cy="120" r="7" fill="#9A9A9E" />
+  <path d="M83 120H108" stroke="#B6B6BA" stroke-width="7" stroke-linecap="round" />
+  <circle cx="145" cy="143" r="36" fill="#9A9A9E" />
+  <text x="145" y="160" fill="white" font-family="Arial, sans-serif" font-size="52" font-weight="600" text-anchor="middle">¥</text>
+</svg>
