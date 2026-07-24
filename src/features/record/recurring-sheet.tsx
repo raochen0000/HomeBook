@@ -33,7 +33,7 @@ import {
   type FamilyMembership,
   type RecurringRule,
 } from '@/api';
-import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
+import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 
 type TxnType = 'expense' | 'income';
@@ -91,7 +91,7 @@ export function RecurringSheet({ visible, onClose, familyId, recorderId, editing
 }
 
 function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<RecurringSheetProps, 'visible'>) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const catColors = useCategoryColors();
 
   const categoriesQ = useCategories();

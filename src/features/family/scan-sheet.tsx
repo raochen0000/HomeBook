@@ -28,9 +28,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { type FamilyPreview, type JoinImpact, usePreviewFamily, useJoinFamily } from '@/api';
+import { type FamilyPreview, type JoinImpact, useJoinFamily, usePreviewFamily } from '@/api';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
-import { Radius, Space, useAvatarTints, usePalette } from '@/constants/design';
+import { Radius, Space, useAvatarTints, usePalette, useSheetPalette } from '@/constants/design';
 import { MAX_FAMILY_MEMBERS } from '@/constants/family';
 
 /** 邀请码异常态 → 人话提示（status=ok 不在此列）。 */
@@ -50,7 +50,7 @@ export function ScanSheet({ visible, onClose }: { visible: boolean; onClose: () 
 }
 
 function ScanBody({ onClose }: { onClose: () => void }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const [permission, requestPermission] = useCameraPermissions();
   const previewM = usePreviewFamily();
   const joinM = useJoinFamily();
@@ -234,7 +234,7 @@ function PreviewCard({
   error: string | null;
   onJoin: () => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const avatarTints = useAvatarTints();
   const family = preview.family!;
   const banner = impactBanner(preview.impact);
@@ -249,9 +249,17 @@ function PreviewCard({
         ) : (
           <Text style={[styles.coverPlaceholder, { color: palette.textTertiary }]}>{family.name.slice(0, 1)}</Text>
         )}
+        {family.avatar_url ? (
+          <Image source={family.avatar_url} style={styles.familyAvatar} contentFit="cover" transition={120} />
+        ) : (
+          <View style={[styles.familyAvatar, styles.avatarFallback, { backgroundColor: palette.accent }]}>
+            <Text style={[styles.familyAvatarText, { color: palette.onAccent }]}>{family.name.slice(0, 1)}</Text>
+          </View>
+        )}
       </View>
 
       <Text style={[styles.familyName, { color: palette.textPrimary }]}>{family.name}</Text>
+      <Text style={[styles.familySlogan, { color: palette.textSecondary }]}>{family.slogan}</Text>
 
       {/* 户主 */}
       <View style={styles.ownerRow}>
@@ -375,7 +383,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   coverPlaceholder: { fontSize: 48, fontWeight: '300' },
+  familyAvatar: {
+    position: 'absolute',
+    top: Space[3],
+    left: Space[3],
+    width: 50,
+    height: 50,
+    borderRadius: Radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.5)',
+  },
+  familyAvatarText: { fontSize: 24, lineHeight: 30, fontWeight: '700' },
   familyName: { fontSize: 24, fontWeight: '700', textAlign: 'center' },
+  familySlogan: { fontSize: 14, lineHeight: 20, marginTop: -Space[3], textAlign: 'center' },
   ownerRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
   ownerText: { fontSize: 15 },
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: Space[3] },

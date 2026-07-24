@@ -10,10 +10,9 @@
 import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { type Href, useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { Fragment, type ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,9 +32,9 @@ import {
   type Transaction,
   type TxnRange,
 } from '@/api';
-import { ThemedText } from '@/components/themed-text';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
-import { Radius, Space, TabBarInset, useCategoryColors, usePalette } from '@/constants/design';
+import { ThemedText } from '@/components/themed-text';
+import { Radius, Space, TabBarInset, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import {
   CategoryMomCard,
@@ -50,9 +49,9 @@ import { Donut } from '@/features/report/donut';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
+import { daysToMonthEnd } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { currentPeriod, formatAmount, maskAmount, signForNet } from '@/lib/format';
-import { daysToMonthEnd } from '@/lib/budget';
 import {
   balanceRate,
   equalPeriodIncomeExpenseSeries,
@@ -999,7 +998,7 @@ function ReportFilterSheet({
   onChange: (filters: ReportFilters) => void;
   onClose: () => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const expenseCategories = categories.filter((c) => c.type === 'expense');
   const incomeCategories = categories.filter((c) => c.type === 'income');
   const setMember = (id: string) => onChange({ ...filters, memberIds: arrayToggle(filters.memberIds, id) });
@@ -1287,7 +1286,7 @@ function IncomeTargetSheet({
   onSave: (targets: IncomeTargets) => void;
   onClose: () => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const [annual, setAnnual] = useState(() => centsToYuanText(targets.annual));
   const [custom, setCustom] = useState(() => centsToYuanText(targets.custom));
   const [activeRatio, setActiveRatio] = useState(() => String(targets.activeRatio));
@@ -1568,7 +1567,7 @@ function FinancialInsightsDetailSheet({
   hidden: boolean;
   onClose: () => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const [nowMs] = useState(() => Date.now());
   const insights = buildFinancialInsights({
     income,
@@ -1651,7 +1650,7 @@ function MoreStatsSheet({
   hidden: boolean;
   onClose: () => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
@@ -2912,7 +2911,7 @@ function CustomRangeSheet({
   onChangeEnd: (date: Date) => void;
   onClose: () => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const selectedDays = Math.max(1, Math.abs(Math.round((start.getTime() - end.getTime()) / 86400000)) + 1);
   const resetLast30Days = () => {
     const today = startOfLocalDay(new Date());
@@ -2991,7 +2990,7 @@ function CategoryDetailSheet({
   hidden: boolean;
   onClose: () => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const { rows, periodExpense, totalExpense, noteGroups, trend } = useMemo(() => {
     const empty = {
       rows: [] as Transaction[],
@@ -3242,7 +3241,7 @@ function MemberAnalysisSheet({
   hidden: boolean;
   onClose: () => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const catColors = useCategoryColors();
   const { rows, totalCount, totalIncome, totalExpense } = useMemo(() => {
     const catById = new Map(categories.map((category) => [category.id, category]));

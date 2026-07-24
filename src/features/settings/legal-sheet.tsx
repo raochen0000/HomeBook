@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { ThemedText } from '@/components/themed-text';
-import { Space, usePalette } from '@/constants/design';
+import { Space, useSheetPalette } from '@/constants/design';
 
 export type LegalKind = 'terms' | 'privacy';
 
@@ -39,7 +39,7 @@ export function LegalSheet({ kind, onClose }: { kind: LegalKind | null; onClose:
 }
 
 function Body({ kind }: { kind: LegalKind }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>

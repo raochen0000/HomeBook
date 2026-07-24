@@ -60,6 +60,8 @@ type Palette = {
   success: string;
   /** 页面底 */
   base: string;
+  /** 系统 pageSheet 的容器底；深色模式比页面底抬高一层。 */
+  sheet: string;
   /** 卡片底 */
   card: string;
   /** 浮层 / 分组 */
@@ -104,6 +106,7 @@ const light: Palette = {
   info: '#007AFF',
   success: '#2FA36B',
   base: '#F2F1F5',
+  sheet: '#F2F1F5',
   card: '#FFFFFF',
   elevated: '#F2F1F5',
   textPrimary: '#1C1C1E',
@@ -127,6 +130,7 @@ const dark: Palette = {
   info: '#0A84FF',
   success: '#46C98A',
   base: '#000000',
+  sheet: '#1C1C1E',
   card: '#1C1C1E',
   elevated: '#2C2C2E',
   textPrimary: '#FFFFFF',
@@ -177,6 +181,15 @@ export type CategoryColorKey = keyof typeof CategoryColors.light;
 export function usePalette(): Palette {
   const scheme = useColorScheme();
   return scheme === 'dark' ? dark : light;
+}
+
+/**
+ * pageSheet 内部的语义调色板：Sheet 自身成为独立表面，内容卡片再抬高一层。
+ * 仅用于 `presentationStyle="pageSheet"` 的内容树，避免影响普通页面的层级。
+ */
+export function useSheetPalette(): Palette {
+  const palette = usePalette();
+  return { ...palette, base: palette.sheet, card: palette.elevated };
 }
 
 export function useCategoryColors() {

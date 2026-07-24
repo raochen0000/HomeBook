@@ -5,8 +5,9 @@
  *
  * 约定（与迁移 0022 的 RLS 一致）：
  *   - public 桶读走公开 CDN，写受 RLS 管控（不开放客户端删除）。
- *   - 用户头像路径 {userId}.jpg、家庭头像 {familyId}.jpg、家庭背景 {familyId}.jpg ——
- *     文件名首段（split_part(name,'.',1)）即归属 id，共用 owner 写策略。
+ *   - 用户头像路径 {userId}.jpg；家庭头像 / 家庭背景使用 {familyId}.{version}.jpg ——
+ *     文件名首段（split_part(name,'.',1)）即归属 id，共用 owner 写策略。家庭图片使用版本化
+ *     路径，设置页可先上传草稿、确认保存后才替换数据库 URL，关闭时不会覆盖当前已生效图片。
  *     刻意放在桶根目录、不建子文件夹：本自托管实例的 storage.prefixes 表开了 RLS，却归
  *     supabase_storage_admin 独占、postgres 无权加策略；一旦路径含子文件夹，上传会因触发器
  *     向 prefixes 插行被 RLS 拒而失败（报 new row violates row-level security policy）。
@@ -121,7 +122,7 @@ export async function pickAndUploadFamilyAvatar(familyId: string): Promise<strin
     throw e;
   }
   const base64 = await compressToBase64(uri);
-  return uploadPublic(FAMILY_AVATAR_BUCKET, `${familyId}.jpg`, base64);
+  return uploadPublic(FAMILY_AVATAR_BUCKET, `${familyId}.${imageVersion()}.jpg`, base64);
 }
 
 /** 封面：不裁剪（iOS 编辑器只支持方裁，封面要宽幅原图），宽压到 1280 保比例。 */
@@ -149,7 +150,7 @@ async function compressWideToBase64(uri: string): Promise<string> {
 
 /**
  * 选图并上传为「家庭背景封面」（宽幅大图，家庭页 hero 背景 / 加入预览卡），返回公开 URL；取消返回 null。
- * 路径 {familyId}.jpg：split_part(name,'.',1) 是家庭 id，复用家庭背景桶的户主写策略。
+ * 路径 {familyId}.{version}.jpg：split_part(name,'.',1) 是家庭 id，复用家庭背景桶的户主写策略。
  */
 export async function pickAndUploadFamilyCover(familyId: string): Promise<string | null> {
   let uri: string;
@@ -160,7 +161,12 @@ export async function pickAndUploadFamilyCover(familyId: string): Promise<string
     throw e;
   }
   const base64 = await compressWideToBase64(uri);
-  return uploadPublic(FAMILY_BACKGROUND_BUCKET, `${familyId}.jpg`, base64);
+  return uploadPublic(FAMILY_BACKGROUND_BUCKET, `${familyId}.${imageVersion()}.jpg`, base64);
+}
+
+/** 家庭图片草稿用不可预测版本后缀，既避缓存也避免关闭设置时覆盖当前公开对象。 */
+function imageVersion(): string {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
 // ── 意见反馈截图（多选、保宽高比、压到 2MB 内）──────────────────────────────────

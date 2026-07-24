@@ -26,7 +26,7 @@ import {
   type CategoryType,
 } from '@/api';
 import { SHEET_CONTENT_TOP_PADDING, SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
-import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
+import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { categoryColorKey } from '@/lib/category-style';
 
 type SymbolName = Extract<SymbolViewProps['name'], string>;
@@ -266,7 +266,7 @@ export function CategoryManageSheet({ visible, onClose }: { visible: boolean; on
 }
 
 function Body() {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const [view, setView] = useState<ViewState>({ mode: 'list' });
 
   // 单壳内切换「列表 / 编辑器」，不再嵌套第二层 pageSheet（DESIGN §9.9：pageSheet 不叠加）。
@@ -440,7 +440,7 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
 
 // ── 新增 / 编辑 ───────────────────────────────────────────────────────────────
 function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; onBack: () => void }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const catColors = useCategoryColors();
   const familyQ = useMyFamily();
   const catsQ = useCategories();

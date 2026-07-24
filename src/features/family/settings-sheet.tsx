@@ -1,8 +1,6 @@
 /**
- * 家庭设置（流程 1 §3.5）：户主可改家庭名 + 家庭头像（avatar_url，方块小图）+
- * 家庭封面（cover_url，hero 背景 / 加入预览卡大图）；普通成员只读。
- * 头像 / 封面走「即时上传」；家庭名经顶栏「保存」提交。
- * 入口：家庭页 → 家庭管理 → 家庭设置。
+ * 家庭设置：户主在一个显式保存的 pageSheet 中统一编辑家庭名称、口号、头像和封面。
+ * 图片先上传为版本化草稿 URL，只有点 ✓ 后才与文字资料一起写入 families；账期时区固定只读。
  */
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
@@ -20,12 +18,25 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useMyFamily, useMyProfile, useUpdateFamilyAvatar, useUpdateFamilyCover, useUpdateFamilyName } from '@/api';
+import {
+  type Family,
+  useMyFamily,
+  useMyProfile,
+  useUpdateFamilySettings,
+  useUploadFamilyAvatar,
+  useUploadFamilyCover,
+} from '@/api';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
-import { Radius, Space, usePalette } from '@/constants/design';
+import { Radius, Space, useSheetPalette } from '@/constants/design';
 
-/** 家庭名长度上限（与创建家庭保持宽松一致）。 */
-const NAME_MAX = 20;
+const NAME_MIN = 2;
+const NAME_MAX = 12;
+const SLOGAN_MIN = 2;
+const SLOGAN_MAX = 24;
+
+function compactTimezone(timezone: string | null | undefined): string {
+  return timezone === 'Asia/Shanghai' || !timezone ? '中国标准时间 · UTC+8' : timezone;
+}
 
 export function FamilySettingsSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
@@ -36,133 +47,277 @@ export function FamilySettingsSheet({ visible, onClose }: { visible: boolean; on
 }
 
 function Body({ onClose }: { onClose: () => void }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
-  const updateNameM = useUpdateFamilyName();
-  const updateAvatarM = useUpdateFamilyAvatar();
-  const updateCoverM = useUpdateFamilyCover();
-
   const family = familyQ.data;
   const isOwner = !!family && family.owner_user_id === profileQ.data?.id;
 
-  // family 已在父页加载（缓存命中），Body 每次打开重新挂载即取到当前名。
-  const [name, setName] = useState(family?.name ?? '');
+  if (!family) {
+    return (
+      <View style={[styles.loadingRoot, { backgroundColor: palette.base }]}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
 
-  const trimmed = name.trim();
-  const dirty = !!family && trimmed !== family.name;
-  const canSave = isOwner && dirty && trimmed.length > 0 && !updateNameM.isPending;
+  return <SettingsForm key={family.id} family={family} isOwner={isOwner} onClose={onClose} />;
+}
 
-  // 户主点头像：方形裁 → 压缩 → 上传 → 写回 avatar_url（取消则静默）。
-  const onChangeAvatar = () => {
-    if (!family || !isOwner || updateAvatarM.isPending) return;
-    updateAvatarM.mutate(family.id, {
-      onError: (e) => Alert.alert('头像更新失败', (e as Error).message ?? String(e)),
-    });
-  };
+function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: boolean; onClose: () => void }) {
+  const palette = useSheetPalette();
+  const saveSettingsM = useUpdateFamilySettings();
+  const uploadAvatarM = useUploadFamilyAvatar();
+  const uploadCoverM = useUploadFamilyCover();
+  const [name, setName] = useState(family.name);
+  const [slogan, setSlogan] = useState(family.slogan);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(family.avatar_url);
+  const [coverUrl, setCoverUrl] = useState<string | null>(family.cover_url);
+  const [nameTouched, setNameTouched] = useState(false);
+  const [sloganTouched, setSloganTouched] = useState(false);
 
-  // 户主点封面：宽幅原图 → 压缩 → 上传 → 写回 cover_url（取消则静默）。
-  const onChangeCover = () => {
-    if (!family || !isOwner || updateCoverM.isPending) return;
-    updateCoverM.mutate(family.id, {
-      onError: (e) => Alert.alert('封面更新失败', (e as Error).message ?? String(e)),
-    });
-  };
+  const nextName = name.trim();
+  const nextSlogan = slogan.trim();
+  const nameValid = nextName.length >= NAME_MIN && nextName.length <= NAME_MAX;
+  const sloganValid = nextSlogan.length >= SLOGAN_MIN && nextSlogan.length <= SLOGAN_MAX;
+  const uploading = uploadAvatarM.isPending || uploadCoverM.isPending;
+  const dirty =
+    nextName !== family.name ||
+    nextSlogan !== family.slogan ||
+    avatarUrl !== family.avatar_url ||
+    coverUrl !== family.cover_url;
+  const canSave = isOwner && dirty && nameValid && sloganValid && !uploading && !saveSettingsM.isPending;
 
-  const onSave = async () => {
-    if (!family || !canSave) return;
+  const changeAvatar = async () => {
+    if (!isOwner || uploading) return;
     try {
-      await updateNameM.mutateAsync({ familyId: family.id, name: trimmed });
+      const url = await uploadAvatarM.mutateAsync(family.id);
+      if (url) setAvatarUrl(url);
+    } catch (error) {
+      Alert.alert('头像上传失败', (error as Error).message ?? String(error));
+    }
+  };
+
+  const changeCover = async () => {
+    if (!isOwner || uploading) return;
+    try {
+      const url = await uploadCoverM.mutateAsync(family.id);
+      if (url) setCoverUrl(url);
+    } catch (error) {
+      Alert.alert('封面上传失败', (error as Error).message ?? String(error));
+    }
+  };
+
+  const save = async () => {
+    if (!canSave) return;
+    try {
+      await saveSettingsM.mutateAsync({
+        familyId: family.id,
+        input: { name: nextName, slogan: nextSlogan, avatarUrl, coverUrl },
+      });
       onClose();
-    } catch (e) {
-      Alert.alert('保存失败', (e as Error).message ?? String(e));
+    } catch (error) {
+      Alert.alert('保存失败', (error as Error).message ?? String(error));
     }
   };
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
-        {/* 显式保存型：✕ 放弃并关闭 + ✓ 保存（DESIGN §9.9）；非户主无 ✓ */}
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          contentInsetAdjustmentBehavior="automatic"
+        >
+          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>家庭资料</Text>
+
+          <View style={styles.identityPreview}>
+            {coverUrl ? (
+              <Image source={coverUrl} style={styles.cover} contentFit="cover" transition={150} />
+            ) : (
+              <View style={[styles.cover, styles.coverFallback, { backgroundColor: palette.accent }]}>
+                <SymbolView name="house.fill" tintColor={palette.onAccent} size={42} />
+              </View>
+            )}
+
+            {isOwner ? (
+              <Pressable
+                onPress={() => void changeCover()}
+                disabled={uploading}
+                style={({ pressed }) => [styles.coverAction, pressed ? styles.pressed : null]}
+                accessibilityRole="button"
+                accessibilityLabel="更换家庭封面"
+                accessibilityHint="从相册选择家庭封面图片"
+              >
+                {uploadCoverM.isPending ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <SymbolView name="camera.fill" tintColor="#FFFFFF" size={14} />
+                    <Text style={styles.coverActionText}>更换封面</Text>
+                  </>
+                )}
+              </Pressable>
+            ) : null}
+
+            <Pressable
+              onPress={() => void changeAvatar()}
+              disabled={!isOwner || uploading}
+              style={({ pressed }) => [styles.avatarButton, pressed ? styles.pressed : null]}
+              accessibilityRole="button"
+              accessibilityLabel="更换家庭头像"
+              accessibilityHint="从相册选择方形家庭头像"
+            >
+              {avatarUrl ? (
+                <Image source={avatarUrl} style={styles.avatar} contentFit="cover" transition={150} />
+              ) : (
+                <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: palette.accent }]}>
+                  <Text style={[styles.avatarFallbackText, { color: palette.onAccent }]}>家</Text>
+                </View>
+              )}
+              {uploadAvatarM.isPending ? (
+                <View style={styles.avatarLoading}>
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                </View>
+              ) : isOwner ? (
+                <View style={styles.avatarCamera}>
+                  <SymbolView name="camera.fill" tintColor="#FFFFFF" size={10} />
+                </View>
+              ) : null}
+            </Pressable>
+          </View>
+
+          <View style={[styles.formCard, { backgroundColor: palette.card }]}>
+            <EditableRow
+              label="家庭名称"
+              value={name}
+              onChangeText={setName}
+              onBlur={() => setNameTouched(true)}
+              editable={isOwner && !uploading}
+              maxLength={NAME_MAX}
+              count={nextName.length}
+              max={NAME_MAX}
+              accessibilityLabel="家庭名称"
+              placeholder="给这个家起个名字"
+              palette={palette}
+              invalid={nameTouched && !nameValid}
+            />
+            <View style={[styles.formDivider, { backgroundColor: palette.separator }]} />
+            <EditableRow
+              label="家庭口号"
+              value={slogan}
+              onChangeText={setSlogan}
+              onBlur={() => setSloganTouched(true)}
+              editable={isOwner && !uploading}
+              maxLength={SLOGAN_MAX}
+              count={nextSlogan.length}
+              max={SLOGAN_MAX}
+              accessibilityLabel="家庭口号"
+              placeholder="写一句属于你们的话"
+              palette={palette}
+              invalid={sloganTouched && !sloganValid}
+            />
+          </View>
+
+          {nameTouched && !nameValid ? (
+            <Text style={[styles.validation, { color: palette.danger }]}>
+              家庭名称需为 {NAME_MIN}–{NAME_MAX} 个字符
+            </Text>
+          ) : null}
+          {sloganTouched && !sloganValid ? (
+            <Text style={[styles.validation, { color: palette.danger }]}>
+              家庭口号需为 {SLOGAN_MIN}–{SLOGAN_MAX} 个字符
+            </Text>
+          ) : null}
+
+          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>账本规则</Text>
+          <View style={[styles.ruleCard, { backgroundColor: palette.card }]}>
+            <SymbolView name="calendar" tintColor={palette.textPrimary} size={22} />
+            <Text style={[styles.ruleLabel, { color: palette.textPrimary }]}>家庭账期时区</Text>
+            <Text style={[styles.ruleValue, { color: palette.textSecondary }]} numberOfLines={1}>
+              {compactTimezone(family?.timezone)}
+            </Text>
+          </View>
+          <View
+            style={styles.ruleHint}
+            accessible
+            accessibilityLabel="月度预算、报表与目标均按此时区归属，创建后不可修改"
+          >
+            <SymbolView name="info.circle" tintColor={palette.textTertiary} size={15} />
+            <Text style={[styles.ruleHintText, { color: palette.textTertiary }]} numberOfLines={1}>
+              月度预算、报表与目标均按此时区归属 · 创建后不可修改
+            </Text>
+          </View>
+
+          {!isOwner ? (
+            <Text style={[styles.readOnlyHint, { color: palette.textTertiary }]}>仅户主可修改家庭资料</Text>
+          ) : null}
+        </ScrollView>
         <SheetHeader
           title="家庭设置"
           onClose={onClose}
-          onConfirm={isOwner ? onSave : undefined}
+          onConfirm={isOwner ? save : undefined}
           confirmDisabled={!canSave}
         />
-
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          {/* 家庭头像（avatar_url，方块小图；即时上传，不经「保存」） */}
-          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>家庭头像</Text>
-          <Pressable onPress={onChangeAvatar} disabled={!isOwner || updateAvatarM.isPending} style={styles.avatarWrap}>
-            {family?.avatar_url ? (
-              <Image source={family.avatar_url} style={styles.avatar} contentFit="cover" transition={150} />
-            ) : (
-              <View style={[styles.avatar, styles.coverFallback, { backgroundColor: palette.accent }]}>
-                <Text style={[styles.avatarFallbackText, { color: palette.onAccent }]}>家</Text>
-              </View>
-            )}
-            {updateAvatarM.isPending ? (
-              <View style={[styles.avatar, styles.coverOverlay]}>
-                <ActivityIndicator color="#fff" />
-              </View>
-            ) : isOwner ? (
-              <View style={[styles.coverEdit, styles.avatarEdit]}>
-                <SymbolView name="camera.fill" tintColor="#fff" size={11} />
-              </View>
-            ) : null}
-          </Pressable>
-
-          {/* 家庭封面（cover_url，家庭页 hero 背景 / 加入预览卡大图；即时上传） */}
-          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>家庭封面</Text>
-          <Pressable onPress={onChangeCover} disabled={!isOwner || updateCoverM.isPending} style={styles.coverWrap}>
-            {family?.cover_url ? (
-              <Image source={family.cover_url} style={styles.cover} contentFit="cover" transition={150} />
-            ) : (
-              // 未设置：预览与家庭页 hero 兜底一致的品牌蓝渐变
-              <View style={[styles.cover, styles.coverFallback, styles.coverGradient]}>
-                <Text style={styles.coverHintText}>未设置 · 默认蓝色渐变</Text>
-              </View>
-            )}
-            {updateCoverM.isPending ? (
-              <View style={[styles.cover, styles.coverOverlay]}>
-                <ActivityIndicator color="#fff" />
-              </View>
-            ) : isOwner ? (
-              <View style={styles.coverEdit}>
-                <SymbolView name="camera.fill" tintColor="#fff" size={13} />
-                <Text style={styles.coverEditText}>更换封面</Text>
-              </View>
-            ) : null}
-          </Pressable>
-
-          {/* 家庭名称 */}
-          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>家庭名称</Text>
-          {isOwner ? (
-            <View style={[styles.inputWrap, { backgroundColor: palette.card }]}>
-              <TextInput
-                style={[styles.input, { color: palette.textPrimary }]}
-                value={name}
-                onChangeText={setName}
-                placeholder="给这个家起个名字"
-                placeholderTextColor={palette.textTertiary}
-                maxLength={NAME_MAX}
-                returnKeyType="done"
-              />
-              <Text style={[styles.counter, { color: palette.textTertiary }]}>
-                {trimmed.length}/{NAME_MAX}
-              </Text>
-            </View>
-          ) : (
-            <View style={[styles.inputWrap, { backgroundColor: palette.card }]}>
-              <Text style={{ color: palette.textPrimary, fontSize: 16 }}>{family?.name ?? '—'}</Text>
-            </View>
-          )}
-
-          {!isOwner ? (
-            <Text style={[styles.hint, { color: palette.textTertiary }]}>仅户主可修改家庭名称、头像与封面</Text>
-          ) : null}
-        </ScrollView>
       </SafeAreaView>
+    </View>
+  );
+}
+
+function EditableRow({
+  label,
+  value,
+  onChangeText,
+  onBlur,
+  editable,
+  maxLength,
+  count,
+  max,
+  accessibilityLabel,
+  placeholder,
+  palette,
+  invalid,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  onBlur: () => void;
+  editable: boolean;
+  maxLength: number;
+  count: number;
+  max: number;
+  accessibilityLabel: string;
+  placeholder: string;
+  palette: ReturnType<typeof useSheetPalette>;
+  invalid: boolean;
+}) {
+  return (
+    <View style={styles.fieldRow}>
+      <Text style={[styles.fieldLabel, { color: palette.textPrimary }]}>{label}</Text>
+      <View style={styles.fieldValue}>
+        {editable ? (
+          <TextInput
+            value={value}
+            onChangeText={onChangeText}
+            onBlur={onBlur}
+            editable={editable}
+            maxLength={maxLength}
+            placeholder={placeholder}
+            placeholderTextColor={palette.textTertiary}
+            style={[styles.fieldInput, { color: palette.textPrimary }]}
+            textAlign="right"
+            returnKeyType="done"
+            accessibilityLabel={accessibilityLabel}
+          />
+        ) : (
+          <Text style={[styles.fieldReadOnly, { color: palette.textPrimary }]} numberOfLines={1}>
+            {value || '—'}
+          </Text>
+        )}
+        <Text
+          style={[styles.counter, { color: invalid ? palette.danger : palette.textTertiary }]}
+        >{`${count}/${max}`}</Text>
+      </View>
     </View>
   );
 }
@@ -170,72 +325,77 @@ function Body({ onClose }: { onClose: () => void }) {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Space[6],
-    paddingTop: Space[5],
-    paddingBottom: Space[4],
-  },
-  title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
-  action: { fontSize: 16, minWidth: 36 },
-  actionGap: { minWidth: 36 },
+  loadingRoot: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: {
     paddingTop: SHEET_CONTENT_TOP_PADDING,
     paddingHorizontal: Space[6],
     paddingBottom: Space[12],
     gap: Space[2],
   },
-  groupTitle: { fontSize: 13, paddingHorizontal: Space[1], marginTop: Space[3] },
-
-  // 封面
-  coverWrap: { width: '100%', aspectRatio: 16 / 9, borderRadius: Radius.lg, overflow: 'hidden' },
+  groupTitle: { fontSize: 13, lineHeight: 18, marginTop: Space[3], paddingHorizontal: Space[1] },
+  identityPreview: { width: '100%', aspectRatio: 3, borderRadius: Radius.lg, overflow: 'hidden' },
   cover: { width: '100%', height: '100%' },
   coverFallback: { alignItems: 'center', justifyContent: 'center' },
-  coverFallbackText: { fontSize: 48, fontWeight: '700' },
-  coverOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  coverEdit: {
+  coverAction: {
     position: 'absolute',
     right: Space[3],
     bottom: Space[3],
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space[1],
     paddingHorizontal: Space[3],
-    paddingVertical: Space[1],
     borderRadius: Radius.full,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(0,0,0,0.48)',
   },
-  coverEditText: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  // 封面未设置时的兜底预览：与家庭页 hero 相同的品牌蓝渐变
-  coverGradient: { experimental_backgroundImage: 'linear-gradient(145deg, #3C9FFE, #0169D4)' },
-  coverHintText: { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '500' },
-
-  // 家庭头像（方块小图）
-  avatarWrap: { width: 88, height: 88, borderRadius: Radius.lg, overflow: 'hidden' },
-  avatar: { width: '100%', height: '100%' },
-  avatarFallbackText: { fontSize: 36, fontWeight: '700' },
-  avatarEdit: { right: Space[1], bottom: Space[1], paddingHorizontal: Space[2] },
-
-  // 家庭名
-  inputWrap: {
+  coverActionText: { color: '#FFFFFF', fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  avatarButton: { position: 'absolute', top: Space[3], left: Space[3], width: 50, height: 50, borderRadius: Radius.md },
+  avatar: { width: 50, height: 50, borderRadius: Radius.md },
+  avatarFallback: { alignItems: 'center', justifyContent: 'center' },
+  avatarFallbackText: { fontSize: 24, lineHeight: 30, fontWeight: '700' },
+  avatarCamera: {
+    position: 'absolute',
+    right: -4,
+    bottom: -4,
+    width: 22,
+    height: 22,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.64)',
+  },
+  avatarLoading: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.38)',
+  },
+  pressed: { opacity: 0.72, transform: [{ scale: 0.97 }] },
+  formCard: { borderRadius: Radius.lg, overflow: 'hidden' },
+  fieldRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: Space[3], paddingHorizontal: Space[4] },
+  fieldLabel: { flexShrink: 0, fontSize: 16, lineHeight: 22, fontWeight: '500' },
+  fieldValue: { flex: 1, minWidth: 0, alignItems: 'stretch', gap: 1 },
+  fieldInput: { minHeight: 24, padding: 0, fontSize: 16, lineHeight: 22 },
+  fieldReadOnly: { minHeight: 22, fontSize: 16, lineHeight: 22, textAlign: 'right' },
+  counter: { fontSize: 13, lineHeight: 17, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  formDivider: { height: StyleSheet.hairlineWidth, marginLeft: Space[4] },
+  validation: { fontSize: 13, lineHeight: 18, paddingHorizontal: Space[1] },
+  ruleCard: {
+    minHeight: 66,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space[2],
-    minHeight: 52,
+    gap: Space[3],
+    borderRadius: Radius.lg,
     paddingHorizontal: Space[4],
-    paddingVertical: Space[2],
-    borderRadius: Radius.md,
   },
-  input: { flex: 1, fontSize: 16 },
-  counter: { fontSize: 13, fontVariant: ['tabular-nums'] },
-  hint: { fontSize: 13, paddingHorizontal: Space[1], marginTop: Space[1] },
+  ruleLabel: { flexShrink: 0, fontSize: 16, lineHeight: 22, fontWeight: '500' },
+  ruleValue: { flex: 1, minWidth: 0, fontSize: 15, lineHeight: 21, textAlign: 'right' },
+  ruleHint: { minHeight: 24, flexDirection: 'row', alignItems: 'center', gap: Space[2], paddingHorizontal: Space[2] },
+  ruleHintText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  readOnlyHint: { fontSize: 13, lineHeight: 18, paddingHorizontal: Space[1], marginTop: Space[2] },
 });

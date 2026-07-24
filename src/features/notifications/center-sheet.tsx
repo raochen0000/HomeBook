@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAllNotifications, useMarkAllNotificationsRead, useMarkNotificationRead, type Notification } from '@/api';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
-import { Radius, Space, usePalette } from '@/constants/design';
+import { Radius, Space, useSheetPalette } from '@/constants/design';
 
 type Payload = Record<string, string> | null;
 
@@ -62,7 +62,7 @@ export function NotificationCenterSheet({ visible, onClose }: { visible: boolean
 }
 
 function Body() {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const listQ = useAllNotifications();
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();

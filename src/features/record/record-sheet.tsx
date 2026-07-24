@@ -39,7 +39,7 @@ import {
   type Transaction,
 } from '@/api';
 import { toast } from '@/components/toast';
-import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
+import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 
 type TxnType = 'expense' | 'income';
@@ -97,7 +97,7 @@ export function RecordSheet({ visible, onClose, onDismiss, familyId, recorderId,
 }
 
 function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<RecordSheetProps, 'visible'>) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const catColors = useCategoryColors();
 
   const categoriesQ = useCategories();

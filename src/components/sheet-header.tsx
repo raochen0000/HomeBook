@@ -7,7 +7,7 @@
  * - 返回态（onBack）：单壳内子视图（编辑器 / 详情）左侧圆形返回按钮，语义为退回上一视图；
  * - 确认态（onConfirm）：显式保存型——左 ✕（onClose，放弃并关闭）或返回（onBack）+ 右 ✓（提交）。
  *
- * 按钮对齐原生 push 页返回头：44pt 圆形浅色底 + 轻阴影。左右各占 44pt 定宽槽位，标题保持严格居中。
+ * 按钮对齐原生 push 页返回头：38pt 圆形浅色底 + 轻阴影。左右各占 38pt 定宽槽位，标题保持严格居中。
  *
  * 使用：置于 sheet 根视图的**最后一个子元素**（浮层最后渲染）；滚动内容区需自行加
  * `paddingTop: SHEET_CONTENT_TOP_PADDING`，否则首屏内容会被标题区压住。
@@ -18,16 +18,16 @@ import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, Rect, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
 
-import { Space, usePalette } from '@/constants/design';
+import { Space, useSheetPalette } from '@/constants/design';
 
 /** 标题区总高：sheet 滚动内容应以此作顶部内边距。 */
-export const SHEET_HEADER_HEIGHT = 76;
+export const SHEET_HEADER_HEIGHT = 64;
 /** 内容区顶部避让：标题区高度 + 额外呼吸距离。 */
 export const SHEET_CONTENT_TOP_PADDING = SHEET_HEADER_HEIGHT + Space[3];
 /** 圆形按钮 / 左右槽位边长（等宽保证标题严格居中）。 */
-const SLOT_SIZE = 44;
+const SLOT_SIZE = 38;
 /** 模糊背景总高：越过标题区底边，让模糊在内容区上方渐隐收尾（无硬边界）。 */
-const BACKDROP_HEIGHT = SHEET_HEADER_HEIGHT + 28;
+const BACKDROP_HEIGHT = SHEET_HEADER_HEIGHT + 24;
 
 /**
  * 渐进式透明模糊（iOS 26 scroll-edge 观感，参考提醒事项）：
@@ -68,7 +68,7 @@ function HeaderIconButton({
   disabled?: boolean;
   onPress: () => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   return (
     <Pressable
       accessibilityRole="button"
@@ -104,7 +104,7 @@ export function SheetHeader({
   /** ✓ 禁用态（表单校验不过时置灰）。 */
   confirmDisabled?: boolean;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const onLeft = onBack ?? onClose;
   return (
     <View style={styles.wrap} pointerEvents="box-none">
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     left: 0,
-    right: 0,
+    right: 8,
     height: BACKDROP_HEIGHT,
   },
   bar: {
@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: Space[4],
-    paddingTop: 8,
+    paddingTop: 4,
     gap: Space[2],
   },
   slot: { width: SLOT_SIZE, height: SLOT_SIZE, alignItems: 'center', justifyContent: 'center' },

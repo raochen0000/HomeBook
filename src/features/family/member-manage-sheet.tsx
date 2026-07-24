@@ -19,7 +19,7 @@ import {
   type FamilyMembership,
 } from '@/api';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
-import { Radius, Space, useAvatarTints, usePalette } from '@/constants/design';
+import { Radius, Space, useAvatarTints, useSheetPalette } from '@/constants/design';
 import { MAX_FAMILY_MEMBERS } from '@/constants/family';
 
 import { DangerConfirmSheet } from './danger-confirm-sheet';
@@ -56,7 +56,7 @@ export function MemberManageSheet({
 }
 
 function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvite: () => void }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const avatarTints = useAvatarTints();
   const profileQ = useMyProfile();
   const membershipsQ = useMemberships();

@@ -80,7 +80,7 @@ export function DangerConfirmSheet({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.scrim, { backgroundColor: 'rgba(0,0,0,0.45)' }]}
       >
-        <View style={[styles.card, { backgroundColor: palette.base }]}>
+        <View style={[styles.card, { backgroundColor: palette.elevated, borderColor: palette.separator }]}>
           <Text style={[styles.title, { color: palette.danger }]}>{title}</Text>
           <Text style={[styles.message, { color: palette.textSecondary }]}>{message}</Text>
 
@@ -123,7 +123,14 @@ export function DangerConfirmSheet({
 
 const styles = StyleSheet.create({
   scrim: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Space[6] },
-  card: { width: '100%', maxWidth: 400, borderRadius: Radius.lg, padding: Space[5], gap: Space[3] },
+  card: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: Space[5],
+    gap: Space[3],
+  },
   title: { fontSize: 18, fontWeight: '700', textAlign: 'center' },
   message: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
   matchLabel: { fontSize: 13, marginTop: Space[2] },

@@ -352,7 +352,7 @@ export default function FamilyScreen() {
                     </View>
                   </View>
                 </View>
-                <ThemedText style={styles.heroTagline}>一起记录生活，温暖每一天</ThemedText>
+                <ThemedText style={styles.heroTagline}>{family.slogan}</ThemedText>
               </View>
 
               <BlurView intensity={24} tint="dark" style={styles.heroStats}>
@@ -435,7 +435,7 @@ export default function FamilyScreen() {
                     <ManageRow
                       icon="gearshape"
                       title="家庭设置"
-                      sub="家庭名称、封面"
+                      sub="名称、口号、头像与封面"
                       onPress={() => setSettingsOpen(true)}
                     />
                     <View style={[styles.divider, { backgroundColor: palette.separator }]} />

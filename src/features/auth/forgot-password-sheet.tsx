@@ -24,7 +24,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { toast } from '@/components/toast';
-import { Radius, Space, usePalette } from '@/constants/design';
+import { Radius, Space, useSheetPalette } from '@/constants/design';
 import { singleLineTextInputStyle } from '@/constants/text-input';
 import { normalizeEmail, sendPasswordResetOtp, updatePassword, verifyPasswordResetOtp } from '@/lib/auth';
 
@@ -70,7 +70,7 @@ export function ForgotPasswordSheet({
   initialEmail?: string;
   onClose: () => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
 
   const [email, setEmail] = useState(initialEmail ?? '');
   const [code, setCode] = useState('');

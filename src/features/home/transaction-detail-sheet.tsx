@@ -8,7 +8,7 @@
 import { Image } from 'expo-image';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { Animated, Pressable, Modal, StyleSheet, Text, View } from 'react-native';
+import { Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCategories, useFamilyMembers, useMyProfile, type Transaction } from '@/api';
@@ -131,7 +131,8 @@ function Body({
         style={[
           styles.sheet,
           {
-            backgroundColor: palette.base,
+            backgroundColor: palette.sheet,
+            borderTopColor: palette.separator,
             paddingBottom: Math.max(insets.bottom, Space[4]),
             transform: [{ translateY }],
           },
@@ -220,6 +221,7 @@ const styles = StyleSheet.create({
   sheet: {
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
+    borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: Space[5],
   },
   grabberArea: { alignItems: 'center', justifyContent: 'center', paddingTop: Space[2], paddingBottom: Space[1] },

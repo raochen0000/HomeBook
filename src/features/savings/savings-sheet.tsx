@@ -33,7 +33,7 @@ import {
 } from '@/api';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { toast } from '@/components/toast';
-import { Radius, Space, usePalette } from '@/constants/design';
+import { Radius, Space, usePalette, useSheetPalette } from '@/constants/design';
 import { formatAmount } from '@/lib/format';
 
 const MAX_ACTIVE = 5;
@@ -77,7 +77,7 @@ export function SavingsSheet({
 }
 
 function Body({ initialGoalId }: { initialGoalId?: string | null }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const goalsQ = useSavingsGoals();
   const [view, setView] = useState<ViewState>(
     initialGoalId ? { mode: 'detail', goalId: initialGoalId } : { mode: 'list' },
@@ -196,7 +196,7 @@ function GoalDetail({
   onBack: () => void;
   setView: (v: ViewState) => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
   const entriesQ = useSavingsEntries(goal.id);
@@ -355,7 +355,7 @@ function deadlineFromMonths(months: number | null): string | null {
 }
 
 function GoalForm({ goal, onBack }: { goal: SavingsGoal | null; onBack: () => void }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const familyQ = useMyFamily();
   const createM = useCreateGoal();
   const updateM = useUpdateGoal();
@@ -492,7 +492,7 @@ function TxnForm({
   onBack: () => void;
   onAchieved: (name: string) => void;
 }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const depositM = useSavingsDeposit();
   const withdrawM = useSavingsWithdraw();
   const isDep = dir === 'deposit';

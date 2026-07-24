@@ -125,6 +125,8 @@ export type FamilyPreview = {
   family?: {
     id: string;
     name: string;
+    slogan: string;
+    avatar_url: string | null;
     cover_url: string | null;
     member_count: number;
     max_members: number;
@@ -250,11 +252,42 @@ export async function updateFamilyName(familyId: string, name: string): Promise<
   if (error) throw error;
 }
 
+/** 家庭资料显式保存：名称、口号与两张家庭图片在一次数据库更新中生效（仅户主）。 */
+export type FamilySettingsInput = {
+  name: string;
+  slogan: string;
+  avatarUrl: string | null;
+  coverUrl: string | null;
+};
+
+export async function updateFamilySettings(familyId: string, input: FamilySettingsInput): Promise<void> {
+  const { error } = await supabase
+    .from('families')
+    .update({
+      name: input.name,
+      slogan: input.slogan,
+      avatar_url: input.avatarUrl,
+      cover_url: input.coverUrl,
+    })
+    .eq('id', familyId);
+  if (error) throw error;
+}
+
 /** 改家庭名（仅户主）。成功后刷新 family 缓存。 */
 export function useUpdateFamilyName() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ familyId, name }: { familyId: string; name: string }) => updateFamilyName(familyId, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.family }),
+  });
+}
+
+/** 保存完整家庭资料后刷新家庭信息缓存。 */
+export function useUpdateFamilySettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ familyId, input }: { familyId: string; input: FamilySettingsInput }) =>
+      updateFamilySettings(familyId, input),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.family }),
   });
 }
@@ -313,6 +346,16 @@ export function useUpdateFamilyAvatar() {
       qc.invalidateQueries({ queryKey: queryKeys.family });
     },
   });
+}
+
+/** 上传家庭头像草稿，不修改 families 表；由家庭设置确认操作统一提交 URL。 */
+export function useUploadFamilyAvatar() {
+  return useMutation({ mutationFn: (familyId: string) => pickAndUploadFamilyAvatar(familyId) });
+}
+
+/** 上传家庭封面草稿，不修改 families 表；由家庭设置确认操作统一提交 URL。 */
+export function useUploadFamilyCover() {
+  return useMutation({ mutationFn: (familyId: string) => pickAndUploadFamilyCover(familyId) });
 }
 
 /** 写回本人昵称（账号页个人资料编辑）。 */

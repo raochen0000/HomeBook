@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createInvitation, type Invitation, useMyFamily, useMyProfile } from '@/api';
 import { SheetHeader } from '@/components/sheet-header';
-import { Radius, Space, usePalette } from '@/constants/design';
+import { Radius, Space, useSheetPalette } from '@/constants/design';
 
 /** react-native-qrcode-svg 的 ref 暴露 toDataURL（回调返回 base64 PNG，无 data: 前缀）。 */
 type QRRef = { toDataURL: (cb: (data: string) => void) => void };
@@ -43,7 +43,7 @@ function fmtRemain(ms: number): string {
 }
 
 function InviteBody() {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const familyQ = useMyFamily();
   const profileQ = useMyProfile();
   const [inv, setInv] = useState<Invitation | null>(null);

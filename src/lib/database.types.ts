@@ -49,6 +49,7 @@ export type Database = {
         Row: {
           id: string;
           name: string;
+          slogan: string;
           cover_url: string | null;
           avatar_url: string | null;
           owner_user_id: string;
@@ -61,6 +62,7 @@ export type Database = {
         Insert: {
           id?: string;
           name: string;
+          slogan?: string;
           cover_url?: string | null;
           avatar_url?: string | null;
           owner_user_id: string;
@@ -73,6 +75,7 @@ export type Database = {
         Update: {
           id?: string;
           name?: string;
+          slogan?: string;
           cover_url?: string | null;
           avatar_url?: string | null;
           owner_user_id?: string;

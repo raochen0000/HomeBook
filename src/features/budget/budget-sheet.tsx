@@ -19,7 +19,7 @@ import {
   type Category,
 } from '@/api';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
-import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
+import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { budgetLevel, daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
 import { categoryColorKey } from '@/lib/category-style';
 import { currentPeriod, formatAmount, monthLabel } from '@/lib/format';
@@ -39,7 +39,7 @@ function levelColor(level: 'normal' | 'warning' | 'danger', palette: ReturnType<
 }
 
 function Body() {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const period = currentPeriod();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
@@ -204,7 +204,7 @@ function BudgetView({
 
 // ── 设置 / 调整预算（户主）──────────────────────────────────────────────────
 function Editor({ period, onBack }: { period: string; onBack: () => void }) {
-  const palette = usePalette();
+  const palette = useSheetPalette();
   const catColors = useCategoryColors();
   const familyQ = useMyFamily();
   const budgetQ = useBudget(period);

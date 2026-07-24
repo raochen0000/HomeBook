@@ -12,7 +12,7 @@ export function FirstRecordCelebration({ visible, onClose }: { visible: boolean;
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.scrim}>
-        <View style={[styles.card, { backgroundColor: palette.base }]}>
+        <View style={[styles.card, { backgroundColor: palette.elevated, borderColor: palette.separator }]}>
           <Text style={styles.emoji}>🎉</Text>
           <Text style={[styles.title, { color: palette.textPrimary }]}>记下了第一笔</Text>
           <Text style={[styles.sub, { color: palette.textSecondary }]}>往后每一笔，都是一家人生活的印记。</Text>
@@ -37,6 +37,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 360,
     borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingVertical: Space[6],
     paddingHorizontal: Space[5],
     alignItems: 'center',
