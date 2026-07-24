@@ -28,16 +28,17 @@ Studio 里点 **ApiKeys 弹窗**（或控制台右上「获取 API Key」）拿�
 
 Studio → **SQL Editor**，把 `supabase/migrations/` 下**全部 `.sql` 按文件名顺序各跑一遍**（文件名 `YYYYMMDDHHMMSS_*`，字典序即执行序）。跑完即得：全部表、约束/触发器、RLS 辅助函数与策略、所有 RPC、系统分类种子、存储桶策略、`homebook-feedback-images` 桶。
 
-> 便捷：可用 `all_migrations.sql`（31 段合并、带 `-- ===== 文件名 =====` 分隔）一次贴进跑完；报错就看最近分隔定位、从那段起单独往后跑。
+> 便捷：可用 `supabase/_bundle.sql`（由 `scripts/build-supabase-bundle.sh` 合并当前全部迁移）一次贴进跑完；报错就看最近分隔定位、从那段起单独往后跑。
 > DB 端口对外被墙，只能走 Studio SQL Editor，不能 psql/CLI（见 [[supabase-deploy-constraint]]）。
 > Studio 里除 `public` 都是系统 schema（`storage`/`auth`/… 只读，别动）；你的业务表只在 `public`，跑迁移前它是空的。
 
 ## 2. 建存储桶（迁移只建了反馈桶，头像/封面桶要手建）
 
-Studio → **Storage** → 新建两个 **Public** 桶（策略已由迁移 0020–0022 建好，桶本身要手建）：
+Studio → **Storage** → 新建这些 **Public** 桶（策略已由迁移建好，桶本身要手建；`homebook-family-background` 也可由 0033 幂等确认 public）：
 
 - `homebook-user-avatars`（public）
 - `homebook-family-covers`（public）
+- `homebook-family-background`（public）
 
 （`homebook-feedback-images` 由迁移 0025 自动建。为何 public：storage 上下文取不到 `auth.uid()`，用「公开桶 + 不可猜随机路径」，写权限由 owner 列策略兜底，见 [[supabase-storage-rls-no-identity]]。）
 
@@ -92,7 +93,7 @@ EXPO_PUBLIC_SUPABASE_KEY=<新 AnonKey>
 ## 6. 验证清单
 
 - [ ] 迁移无报错；`select count(*) from public.categories;` 有系统分类种子。
-- [ ] 两个桶 `homebook-user-avatars` / `homebook-family-covers` 已建且 public。
+- [ ] 三个桶 `homebook-user-avatars` / `homebook-family-covers` / `homebook-family-background` 已建且 public。
 - [ ] 真机手机号登录**收到验证码**（SMS Webhook + FC 通）→ 登录成功。
 - [ ] 记一笔 / 建家庭 / 报表（表 + RLS + RPC 通）。
 - [ ] 头像上传成功（storage 通）。

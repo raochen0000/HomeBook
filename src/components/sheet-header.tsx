@@ -7,23 +7,23 @@
  * - 返回态（onBack）：单壳内子视图（编辑器 / 详情）左侧圆形返回按钮，语义为退回上一视图；
  * - 确认态（onConfirm）：显式保存型——左 ✕（onClose，放弃并关闭）或返回（onBack）+ 右 ✓（提交）。
  *
- * 按钮为原生 SwiftUI 圆形玻璃按钮（buttonStyle glass / glassProminent）；✓ 用主题 `ink` 色
- * （非 iOS 蓝），禁用时由系统置灰。左右各占 44pt 定宽槽位，标题保持严格居中。
+ * 按钮对齐原生 push 页返回头：44pt 圆形浅色底 + 轻阴影。左右各占 44pt 定宽槽位，标题保持严格居中。
  *
  * 使用：置于 sheet 根视图的**最后一个子元素**（浮层最后渲染）；滚动内容区需自行加
- * `paddingTop: SHEET_HEADER_HEIGHT`，否则首屏内容会被标题区压住。
+ * `paddingTop: SHEET_CONTENT_TOP_PADDING`，否则首屏内容会被标题区压住。
  */
-import { Button, Host, Image } from '@expo/ui/swift-ui';
-import { buttonStyle, disabled as disabledModifier, tint } from '@expo/ui/swift-ui/modifiers';
 import MaskedView from '@react-native-masked-view/masked-view';
 import { BlurView } from 'expo-blur';
-import { StyleSheet, Text, View } from 'react-native';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, Rect, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
 
 import { Space, usePalette } from '@/constants/design';
 
 /** 标题区总高：sheet 滚动内容应以此作顶部内边距。 */
-export const SHEET_HEADER_HEIGHT = 64;
+export const SHEET_HEADER_HEIGHT = 76;
+/** 内容区顶部避让：标题区高度 + 额外呼吸距离。 */
+export const SHEET_CONTENT_TOP_PADDING = SHEET_HEADER_HEIGHT + Space[3];
 /** 圆形按钮 / 左右槽位边长（等宽保证标题严格居中）。 */
 const SLOT_SIZE = 44;
 /** 模糊背景总高：越过标题区底边，让模糊在内容区上方渐隐收尾（无硬边界）。 */
@@ -57,6 +57,36 @@ function ProgressiveBlur() {
   );
 }
 
+function HeaderIconButton({
+  icon,
+  tintColor,
+  disabled,
+  onPress,
+}: {
+  icon: SymbolViewProps['name'];
+  tintColor: string;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  const palette = usePalette();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      hitSlop={6}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.btn,
+        { backgroundColor: palette.card, shadowColor: palette.shadow },
+        pressed ? styles.btnPressed : null,
+        disabled ? styles.btnDisabled : null,
+      ]}
+    >
+      <SymbolView name={icon} tintColor={tintColor} size={18} weight="semibold" />
+    </Pressable>
+  );
+}
+
 export function SheetHeader({
   title,
   onClose,
@@ -82,12 +112,11 @@ export function SheetHeader({
       <View style={styles.bar}>
         <View style={styles.slot}>
           {onLeft ? (
-            <Host style={styles.btn}>
-              {/* 注意：Button.systemImage 仅在带 label 时生效，纯图标须用子元素 Image */}
-              <Button onPress={onLeft} modifiers={[buttonStyle('glass')]}>
-                <Image systemName={onBack ? 'chevron.left' : 'xmark'} size={15} color={palette.textPrimary} />
-              </Button>
-            </Host>
+            <HeaderIconButton
+              icon={onBack ? 'chevron.left' : 'xmark'}
+              tintColor={palette.textPrimary}
+              onPress={onLeft}
+            />
           ) : null}
         </View>
         <Text numberOfLines={1} style={[styles.title, { color: palette.textPrimary }]}>
@@ -95,14 +124,12 @@ export function SheetHeader({
         </Text>
         <View style={styles.slot}>
           {onConfirm ? (
-            <Host style={styles.btn}>
-              <Button
-                onPress={onConfirm}
-                modifiers={[buttonStyle('glassProminent'), tint(palette.ink), disabledModifier(!!confirmDisabled)]}
-              >
-                <Image systemName="checkmark" size={15} color={palette.onInk} />
-              </Button>
-            </Host>
+            <HeaderIconButton
+              icon="checkmark"
+              tintColor={confirmDisabled ? palette.textTertiary : palette.textPrimary}
+              disabled={confirmDisabled}
+              onPress={onConfirm}
+            />
           ) : null}
         </View>
       </View>
@@ -131,9 +158,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: Space[4],
+    paddingTop: 8,
     gap: Space[2],
   },
   slot: { width: SLOT_SIZE, height: SLOT_SIZE, alignItems: 'center', justifyContent: 'center' },
-  btn: { width: SLOT_SIZE, height: SLOT_SIZE },
+  btn: {
+    width: SLOT_SIZE,
+    height: SLOT_SIZE,
+    borderRadius: SLOT_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 1,
+    shadowRadius: 18,
+    elevation: 3,
+  },
+  btnPressed: { opacity: 0.72, transform: [{ scale: 0.97 }] },
+  btnDisabled: { opacity: 0.48 },
   title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
 });

@@ -15,7 +15,7 @@
 - [x] **`families` 表缺 `cover_url` 列** → 已由 `0017_preview_family_by_code_rpc.sql` 幂等补列并在 Studio 执行。家庭封面（阶段二 #5/#6）的 UI 仍待做。
 - [x] **邀请码与 PRD 不符** → 已由 `0018_invitation_code_6char.sql` 改为 6 位排除易混（阶段二 #7）。
 - [x] **解散家庭报 `families_member_count_check`** → `dissolve_family` 置 `member_count=0` 违反列级 `between 1 and 8` 约束；已由 [`0019_fix_dissolved_family_member_count.sql`](../supabase/migrations/20260622120019_fix_dissolved_family_member_count.sql) 放宽为「dissolved 家庭允许 0」（**需 Studio 执行**）。
-- [ ] **头像/家庭封面上传报 `new row violates row-level security policy`** → `storage.objects` 默认启用 RLS，但缺写入策略。已由 [`0020_storage_policies.sql`](../supabase/migrations/20260622120020_storage_policies.sql) 补 insert/update/delete 策略（头像=本人 uid 文件夹、封面=户主）。**需 Studio 执行**；并先在 Studio 手动创建两个 public 桶 `homebook-user-avatars`、`homebook-family-covers`。（原文件与 0019 撞了版本号，已改名 0020 避免 `db push` 漏跑）
+- [ ] **头像/家庭封面上传报 `new row violates row-level security policy`** → `storage.objects` 默认启用 RLS，但缺写入策略。已由 [`0020_storage_policies.sql`](../supabase/migrations/20260622120020_storage_policies.sql) 补 insert/update/delete 策略（头像=本人 uid 文件夹、家庭图像=户主），家庭背景图独立桶由 [`0033_family_background_bucket.sql`](../supabase/migrations/20260724120033_family_background_bucket.sql) 补策略。**需 Studio 执行**；并确认 public 桶 `homebook-user-avatars`、`homebook-family-covers`、`homebook-family-background` 已创建。（原文件与 0019 撞了版本号，已改名 0020 避免 `db push` 漏跑）
 
 ---
 
@@ -26,7 +26,7 @@
 - [x] **#1 流程 4 加入家庭：预览卡 + 加入影响确认** ✅ 2026-06-22（tsc/eslint 通过，待真机/模拟器验证）
   - 后端：`preview_family_by_code` RPC（[0017 migration](../supabase/migrations/20260622120017_preview_family_by_code_rpc.sql)，已在 Studio 执行）。
   - 前端：[scan-sheet.tsx](../src/features/family/scan-sheet.tsx) 已改为「扫码/手输 → 拉预览卡 → 确认后才 join」；API [usePreviewFamily](../src/api/families.ts)。
-  - 预览卡：封面 / 家庭名 / 户主（昵称+头像）/ 成员头像堆叠 / X·8 人。
+  - 预览卡：封面 / 家庭名 / 户主（昵称+头像）/ 成员头像堆叠 / X·5 人。
   - 影响四分支：`none` 直接加入；`delete_origin`（⚠ 删原家庭+二次确认弹窗）；`auto_leave`（⚠ 自动退出当前家庭，直接加入）；`blocked_owner`（⛔ 禁用加入）。
   - 遗留小项：`blocked_owner` 暂只给文字引导，未做「直接跳转转让/解散」按钮（依赖阶段一 #3/#4）；防枚举限频按决策暂不做。
 - [x] **#2 流程 6 移除成员二次确认** ✅ 2026-06-22：[family.tsx](../src/app/family.tsx) 改为「输入对方昵称 + 滑动确认」。

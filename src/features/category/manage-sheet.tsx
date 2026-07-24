@@ -25,7 +25,7 @@ import {
   type Category,
   type CategoryType,
 } from '@/api';
-import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
+import { SHEET_CONTENT_TOP_PADDING, SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { categoryColorKey } from '@/lib/category-style';
 
@@ -387,7 +387,7 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
         <SheetHeader title="分类管理" />
 
@@ -610,7 +610,7 @@ const styles = StyleSheet.create({
   },
   title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   action: { fontSize: 16 },
-  segmentHost: { height: 34, marginTop: SHEET_HEADER_HEIGHT + Space[2], marginHorizontal: Space[4] },
+  segmentHost: { height: 34, marginTop: SHEET_HEADER_HEIGHT, marginHorizontal: Space[4] },
   content: { paddingHorizontal: Space[6], paddingTop: Space[4], paddingBottom: Space[12], gap: Space[5] },
   addRow: {
     flexDirection: 'row',
@@ -633,7 +633,7 @@ const styles = StyleSheet.create({
   rowName: { fontSize: 16, fontWeight: '500' },
   sysTag: { fontSize: 13 },
   archiveBtn: { padding: Space[1] },
-  editorContent: { flex: 1, paddingTop: SHEET_HEADER_HEIGHT, paddingHorizontal: Space[6], gap: Space[4] },
+  editorContent: { flex: 1, paddingTop: SHEET_CONTENT_TOP_PADDING, paddingHorizontal: Space[6], gap: Space[4] },
   preview: { alignItems: 'center', gap: Space[2], paddingVertical: Space[4] },
   previewDot: { width: 64, height: 64, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
   previewType: { fontSize: 13 },

@@ -21,7 +21,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useMyFamily, useMyProfile, useUpdateFamilyAvatar, useUpdateFamilyCover, useUpdateFamilyName } from '@/api';
-import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
+import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, usePalette } from '@/constants/design';
 
 /** 家庭名长度上限（与创建家庭保持宽松一致）。 */
@@ -81,7 +81,7 @@ function Body({ onClose }: { onClose: () => void }) {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 显式保存型：✕ 放弃并关闭 + ✓ 保存（DESIGN §9.9）；非户主无 ✓ */}
         <SheetHeader
           title="家庭设置"
@@ -182,7 +182,7 @@ const styles = StyleSheet.create({
   action: { fontSize: 16, minWidth: 36 },
   actionGap: { minWidth: 36 },
   content: {
-    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingTop: SHEET_CONTENT_TOP_PADDING,
     paddingHorizontal: Space[6],
     paddingBottom: Space[12],
     gap: Space[2],

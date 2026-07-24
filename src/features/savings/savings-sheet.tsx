@@ -31,7 +31,7 @@ import {
   useUpdateGoal,
   type SavingsGoal,
 } from '@/api';
-import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
+import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { formatAmount } from '@/lib/format';
@@ -130,7 +130,7 @@ function GoalList({
   };
 
   return (
-    <SafeAreaView style={styles.flex}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
       {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
       <SheetHeader title="储蓄目标" />
 
@@ -234,7 +234,7 @@ function GoalDetail({
   };
 
   return (
-    <SafeAreaView style={styles.flex}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
       {/* 子视图：仅返回（DESIGN §9.9）；「编辑」入口移入内容区 */}
       <SheetHeader title={goal.name} onBack={onBack} />
 
@@ -411,7 +411,7 @@ function GoalForm({ goal, onBack }: { goal: SavingsGoal | null; onBack: () => vo
   };
 
   return (
-    <SafeAreaView style={styles.flex}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
       {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
       <SheetHeader
         title={isEdit ? '编辑目标' : '新建目标'}
@@ -528,7 +528,7 @@ function TxnForm({
   };
 
   return (
-    <SafeAreaView style={styles.flex}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
       {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
       <SheetHeader title={isDep ? '存入' : '取出'} onBack={onBack} onConfirm={handleSave} confirmDisabled={!canSave} />
 
@@ -608,7 +608,7 @@ const styles = StyleSheet.create({
   action: { fontSize: 16, minWidth: 36 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[2], paddingHorizontal: Space[6] },
   content: {
-    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingTop: SHEET_CONTENT_TOP_PADDING,
     paddingHorizontal: Space[6],
     paddingBottom: Space[12],
     gap: Space[3],
@@ -662,7 +662,7 @@ const styles = StyleSheet.create({
   entryRow: { flexDirection: 'row', alignItems: 'center', gap: Space[3], padding: Space[4] },
   deleteRow: { alignItems: 'center', paddingVertical: Space[4], marginTop: Space[2] },
   formContent: {
-    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingTop: SHEET_CONTENT_TOP_PADDING,
     paddingHorizontal: Space[6],
     paddingBottom: Space[12],
     gap: Space[4],

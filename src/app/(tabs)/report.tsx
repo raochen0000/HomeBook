@@ -34,7 +34,7 @@ import {
   type TxnRange,
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
-import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
+import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, TabBarInset, useCategoryColors, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import {
@@ -1009,7 +1009,7 @@ function ReportFilterSheet({
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
-        <SafeAreaView style={styles.flex}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="全局筛选" />
           <ScrollView contentContainerStyle={styles.sheetContent}>
             <View style={[styles.filterSummaryCard, { backgroundColor: palette.card }]}>
@@ -1301,7 +1301,7 @@ function IncomeTargetSheet({
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
-        <SafeAreaView style={styles.flex}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="收入目标" onClose={onClose} onConfirm={save} />
           <View style={styles.customRangeContent}>
             <TargetInputCard label="年度目标" value={annual} onChangeText={setAnnual} palette={palette} />
@@ -1588,7 +1588,7 @@ function FinancialInsightsDetailSheet({
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
-        <SafeAreaView style={styles.flex}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="财务洞察" />
           <ScrollView contentContainerStyle={styles.sheetContent}>
             <View style={[styles.detailSummaryCard, { backgroundColor: palette.card }]}>
@@ -1655,7 +1655,7 @@ function MoreStatsSheet({
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
-        <SafeAreaView style={styles.flex}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="更多统计" />
           <ScrollView contentContainerStyle={styles.sheetContent}>
             <MoreStatsCard scope={scope} transactions={transactions} range={range} palette={palette} hidden={hidden} />
@@ -2923,7 +2923,7 @@ function CustomRangeSheet({
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
-        <SafeAreaView style={styles.flex}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="自定义周期" />
           <View style={styles.customRangeContent}>
             <View style={[styles.customDateCard, { backgroundColor: palette.card }]}>
@@ -3051,7 +3051,7 @@ function CategoryDetailSheet({
   return (
     <Modal visible={!!detail} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
-        <SafeAreaView style={styles.flex}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title={detail?.name ?? ''} />
           <ScrollView contentContainerStyle={styles.sheetContent}>
             <View style={[styles.detailSummaryCard, { backgroundColor: palette.card }]}>
@@ -3318,7 +3318,7 @@ function MemberAnalysisSheet({
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
-        <SafeAreaView style={styles.flex}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="家庭成员分析" />
 
           <ScrollView contentContainerStyle={styles.sheetContent}>
@@ -3846,7 +3846,7 @@ const styles = StyleSheet.create({
   },
   newGoalRowText: { fontSize: 16, fontWeight: '600' },
   customRangeContent: {
-    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingTop: SHEET_CONTENT_TOP_PADDING,
     paddingHorizontal: Space[4],
     paddingBottom: Space[10],
     gap: Space[3],
@@ -3880,7 +3880,7 @@ const styles = StyleSheet.create({
   sheetTitle: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   sheetAction: { fontSize: 16, fontWeight: '600' },
   sheetContent: {
-    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingTop: SHEET_CONTENT_TOP_PADDING,
     paddingHorizontal: Space[6],
     paddingBottom: Space[10],
     gap: Space[3],

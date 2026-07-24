@@ -119,7 +119,7 @@ function InviteBody() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（纯预览型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
         <SheetHeader title="邀请家人" />
 

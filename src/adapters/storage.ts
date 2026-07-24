@@ -4,9 +4,9 @@
  * 切到阿里云 OSS 时，只需替换本文件实现。
  *
  * 约定（与迁移 0022 的 RLS 一致）：
- *   - 两个 public 桶；读走公开 CDN，写受 RLS 管控（不开放客户端删除）。
- *   - 用户头像路径 {userId}.jpg、家庭头像 {familyId}.jpg、家庭封面 {familyId}.cover.jpg ——
- *     文件名首段（split_part(name,'.',1)）即归属 id，三者共用 0022 的 owner 写策略。
+ *   - public 桶读走公开 CDN，写受 RLS 管控（不开放客户端删除）。
+ *   - 用户头像路径 {userId}.jpg、家庭头像 {familyId}.jpg、家庭背景 {familyId}.jpg ——
+ *     文件名首段（split_part(name,'.',1)）即归属 id，共用 owner 写策略。
  *     刻意放在桶根目录、不建子文件夹：本自托管实例的 storage.prefixes 表开了 RLS，却归
  *     supabase_storage_admin 独占、postgres 无权加策略；一旦路径含子文件夹，上传会因触发器
  *     向 prefixes 插行被 RLS 拒而失败（报 new row violates row-level security policy）。
@@ -26,7 +26,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 
 export const AVATAR_BUCKET = 'homebook-user-avatars';
-export const FAMILY_COVER_BUCKET = 'homebook-family-covers';
+export const FAMILY_AVATAR_BUCKET = 'homebook-family-covers';
+export const FAMILY_BACKGROUND_BUCKET = 'homebook-family-background';
 /** 意见反馈截图桶（public；见迁移 0025）。路径 {userId}_{rand}.jpg，写策略校验前缀=本人 uid。 */
 export const FEEDBACK_IMAGE_BUCKET = 'homebook-feedback-images';
 
@@ -120,7 +121,7 @@ export async function pickAndUploadFamilyAvatar(familyId: string): Promise<strin
     throw e;
   }
   const base64 = await compressToBase64(uri);
-  return uploadPublic(FAMILY_COVER_BUCKET, `${familyId}.jpg`, base64);
+  return uploadPublic(FAMILY_AVATAR_BUCKET, `${familyId}.jpg`, base64);
 }
 
 /** 封面：不裁剪（iOS 编辑器只支持方裁，封面要宽幅原图），宽压到 1280 保比例。 */
@@ -147,8 +148,8 @@ async function compressWideToBase64(uri: string): Promise<string> {
 }
 
 /**
- * 选图并上传为「家庭封面」（宽幅大图，家庭页 hero 背景 / 加入预览卡），返回公开 URL；取消返回 null。
- * 路径 {familyId}.cover.jpg：split_part(name,'.',1) 仍是家庭 id，天然复用 0022 的户主写策略。
+ * 选图并上传为「家庭背景封面」（宽幅大图，家庭页 hero 背景 / 加入预览卡），返回公开 URL；取消返回 null。
+ * 路径 {familyId}.jpg：split_part(name,'.',1) 是家庭 id，复用家庭背景桶的户主写策略。
  */
 export async function pickAndUploadFamilyCover(familyId: string): Promise<string | null> {
   let uri: string;
@@ -159,7 +160,7 @@ export async function pickAndUploadFamilyCover(familyId: string): Promise<string
     throw e;
   }
   const base64 = await compressWideToBase64(uri);
-  return uploadPublic(FAMILY_COVER_BUCKET, `${familyId}.cover.jpg`, base64);
+  return uploadPublic(FAMILY_BACKGROUND_BUCKET, `${familyId}.jpg`, base64);
 }
 
 // ── 意见反馈截图（多选、保宽高比、压到 2MB 内）──────────────────────────────────

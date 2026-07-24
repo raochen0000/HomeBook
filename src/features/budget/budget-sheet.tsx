@@ -18,7 +18,7 @@ import {
   useTransactions,
   type Category,
 } from '@/api';
-import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
+import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { budgetLevel, daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
 import { categoryColorKey } from '@/lib/category-style';
@@ -59,7 +59,7 @@ function Body() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（自动保存/预览型：纯标题，DESIGN §9.9）；onClose 由下滑手势承担 */}
         <SheetHeader title={`预算 · ${monthLabel(new Date())}`} />
 
@@ -267,7 +267,7 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
         <SheetHeader title="设置预算" onBack={onBack} onConfirm={handleSave} confirmDisabled={!canSave} />
 
@@ -353,7 +353,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   content: {
-    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingTop: SHEET_CONTENT_TOP_PADDING,
     paddingHorizontal: Space[6],
     paddingBottom: Space[12],
     gap: Space[3],

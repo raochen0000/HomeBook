@@ -18,13 +18,11 @@ import {
   useTransferOwnership,
   type FamilyMembership,
 } from '@/api';
-import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
+import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useAvatarTints, usePalette } from '@/constants/design';
+import { MAX_FAMILY_MEMBERS } from '@/constants/family';
 
 import { DangerConfirmSheet } from './danger-confirm-sheet';
-
-/** 家庭成员人数上限（与家庭页一致，后端未提供该配置）。 */
-const MAX_MEMBERS = 8;
 
 function joinLabel(iso: string): string {
   const d = new Date(iso);
@@ -68,7 +66,7 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
 
   const myId = profileQ.data?.id;
   const members = membershipsQ.data ?? [];
-  const full = members.length >= MAX_MEMBERS;
+  const full = members.length >= MAX_FAMILY_MEMBERS;
 
   const [removeTarget, setRemoveTarget] = useState<FamilyMembership | null>(null);
   const [transferTarget, setTransferTarget] = useState<FamilyMembership | null>(null);
@@ -112,7 +110,7 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
         <SheetHeader title="成员管理" />
 
@@ -120,7 +118,7 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
           {/* 计数 + 邀请 */}
           <View style={styles.countRow}>
             <Text style={[styles.count, { color: palette.textSecondary }]}>
-              {members.length}/{MAX_MEMBERS} 位成员
+              {members.length}/{MAX_FAMILY_MEMBERS} 位成员
             </Text>
             <Pressable
               onPress={onRequestInvite}
@@ -226,7 +224,7 @@ const styles = StyleSheet.create({
   title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   action: { fontSize: 16 },
   content: {
-    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingTop: SHEET_CONTENT_TOP_PADDING,
     paddingHorizontal: Space[6],
     paddingBottom: Space[12],
     gap: Space[3],

@@ -215,7 +215,7 @@ git --version
 
 与 AGENTS.md §4/§5 与 DATAMODEL §6 一致，**在数据库层用 RLS + 唯一约束 + RPC 事务真正强制**（规则文件管「AI 别写错」，DB 约束管「写错也拦得住」）：
 
-- 一人一家、户主唯一、成员上限 8、储蓄目标 ≤5、继任异议期单条 pending（唯一约束/部分索引）。
+- 一人一家、户主唯一、成员上限 5、储蓄目标 ≤5、继任异议期单条 pending（唯一约束/部分索引）。
 - `TRANSACTION.family_id` 创建后不可变（规则/触发器拒绝 UPDATE）。
 - 储蓄存取、户主转让、解散、加入家庭、删除目标余额回吐 → **单事务 RPC**（见 AGENTS.md §7）。
 - 每条 RLS / RPC 配 pgTAP 测试。
@@ -271,12 +271,12 @@ git --version
 | `…0003_ledger_savings_tables.sql`  | `categories` / `savings_goals` / `transactions` / `savings_entries`                                                                                                                    |
 | `…0004_budget_tables.sql`          | `budgets` / `budget_categories`                                                                                                                                                        |
 | `…0005_aux_tables.sql`             | `invitations` / `succession_requests` / `notifications` / `monthly_summaries`                                                                                                          |
-| `…0006_constraints_triggers.sql`   | `handle_new_user`、`updated_at` 触发器、`family_id` 不可变、成员 ≤8 / 目标 ≤5 计数触发器                                                                                               |
+| `…0006_constraints_triggers.sql`   | `handle_new_user`、`updated_at` 触发器、`family_id` 不可变、成员 / 目标计数触发器                                                                                                      |
 | `…0007_rls_helpers.sql`            | `private.*` RLS 辅助函数                                                                                                                                                               |
 | `…0008_rls_policies.sql`           | 各表 RLS 策略 + 表权限 GRANT                                                                                                                                                           |
 | `…0009_rpc_functions.sql`          | `create_family` / `join_family_by_code` / `savings_deposit` / `savings_withdraw`                                                                                                       |
 | `…0010_seed_system_categories.sql` | 系统预设分类种子（含储蓄存入/取出，资金闭环依赖）                                                                                                                                      |
-| `…0011_create_invitation_rpc.sql`  | `create_invitation`（户主生成邀请码：仅户主 / 满 8 拦截 / 24h / 复用或刷新，PRD §5）                                                                                                   |
+| `…0011_create_invitation_rpc.sql`  | `create_invitation`（户主生成邀请码：仅户主 / 满员拦截 / 24h / 复用或刷新，PRD §5）                                                                                                    |
 | `…0012_preview_family_rpc.sql`     | `preview_family_by_code`（只读：校验码同 `join_family_by_code`；返回家庭名 / 封面 / 户主昵称+头像 / 成员头像列表 / 人数 / 对当前用户的加入影响；**不返回成员昵称**；限频，PRD 流程 4） |
 
 **迁移执行方式：** 当前后端为阿里云自托管 Supabase 兼容实例（非 Cloud），CLI 用直连 Postgres 连接串 `supabase db push`（不用 `supabase link`）；或在 Studio SQL Editor 按编号顺序粘贴执行。客户端仅持 anon key，无法执行 DDL。

@@ -145,7 +145,7 @@ export function ForgotPasswordSheet({
       }}
     >
       <View style={[styles.root, { backgroundColor: palette.base }]}>
-        <SafeAreaView style={styles.flex}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           {/* 头部：取消 + 标题 */}
           <View style={styles.header}>
             <Pressable hitSlop={8} onPress={onClose} disabled={busy} style={styles.headerBtn}>

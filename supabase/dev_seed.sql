@@ -10,7 +10,7 @@
 --   dev.c@homebook.test  阿强  —— 成员
 --   dev.d@homebook.test  婷婷  —— 成员
 --   dev.e@homebook.test  老王  —— 成员
---   全部属于同一个家庭「示例之家」（member_count = 5，上限 8，留位测邀请/加入）。
+--   全部属于同一个家庭「示例之家」（member_count = 5，上限 5，用于满员态走查）。
 --
 -- 特性：
 --   * 幂等可重复执行——脚本开头按外键顺序 teardown 掉这批固定 UUID 的旧数据后重建。

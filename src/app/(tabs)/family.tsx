@@ -29,6 +29,7 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
 import { Radius, Space, TabBarInset, useAvatarTints, usePalette } from '@/constants/design';
+import { MAX_FAMILY_MEMBERS } from '@/constants/family';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import { CategoryManageSheet } from '@/features/category/manage-sheet';
 import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
@@ -42,9 +43,6 @@ import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { budgetLevel, daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
 import { currentPeriod, formatAmount } from '@/lib/format';
-
-/** 家庭成员人数上限（暂为常量，后端未提供该配置）。 */
-const MAX_MEMBERS = 8;
 
 /** 本地「年-月-日」key（用于连续记账判断，须与游标同构造）。 */
 function localDayKey(d: Date): string {
@@ -269,13 +267,15 @@ export default function FamilyScreen() {
               )}
               {/* 暗色蒙版：保证白字在任意背景（亮蓝 / 浅色封面）下可读 */}
               <View style={[StyleSheet.absoluteFill, styles.heroScrim]} pointerEvents="none" />
-              <SymbolView
-                name="house.fill"
-                tintColor="rgba(255,255,255,0.14)"
-                size={96}
-                style={styles.heroHouse}
-                pointerEvents="none"
-              />
+              {!family.cover_url ? (
+                <SymbolView
+                  name="house.fill"
+                  tintColor="rgba(255,255,255,0.14)"
+                  size={96}
+                  style={styles.heroHouse}
+                  pointerEvents="none"
+                />
+              ) : null}
 
               <View style={styles.heroHead}>
                 <View style={styles.heroTop}>
@@ -342,7 +342,7 @@ export default function FamilyScreen() {
                   <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>
                     家庭成员{' '}
                     <ThemedText style={{ color: palette.textTertiary, fontSize: 15 }}>
-                      （{members.length}/{MAX_MEMBERS}）
+                      （{members.length}/{MAX_FAMILY_MEMBERS}）
                     </ThemedText>
                   </ThemedText>
                   <View style={[styles.card, { backgroundColor: palette.card }]}>
@@ -655,10 +655,7 @@ function FamilyNowCard({
                   {goal.name}
                 </ThemedText>
               </View>
-              <View style={styles.nowHeadR}>
-                <ThemedText style={[styles.nowPct, { color: palette.accent }]}>{goalPct}%</ThemedText>
-                <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
-              </View>
+              <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
             </View>
             <View style={styles.nowAmountRow}>
               <View style={styles.nowAmountLeft}>
@@ -670,6 +667,7 @@ function FamilyNowCard({
                   {formatAmount(goal.target_amount)}
                 </ThemedText>
               </View>
+              <ThemedText style={[styles.nowPct, { color: palette.accent }]}>{goalPct}%</ThemedText>
             </View>
             <View style={[styles.nowTrack, { backgroundColor: palette.separator }]}>
               <View style={[styles.nowFill, { backgroundColor: palette.accent, width: `${goalPct}%` }]} />

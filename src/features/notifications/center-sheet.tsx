@@ -7,7 +7,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAllNotifications, useMarkAllNotificationsRead, useMarkNotificationRead, type Notification } from '@/api';
-import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
+import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, usePalette } from '@/constants/design';
 
 type Payload = Record<string, string> | null;
@@ -72,7 +72,7 @@ function Body() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
         <SheetHeader title="通知中心" />
 
@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
   action: { fontSize: 16 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[2] },
   content: {
-    paddingTop: SHEET_HEADER_HEIGHT,
+    paddingTop: SHEET_CONTENT_TOP_PADDING,
     paddingHorizontal: Space[6],
     paddingBottom: Space[12],
     gap: Space[2],

@@ -47,4 +47,4 @@ count="${#migrations[@]}"
   printf -- 'commit;\n'
 } > "$out"
 
-echo "已生成 $out（合并 $count 个迁移）。"
+echo "已生成 ${out}（合并 ${count} 个迁移）。"

@@ -4,7 +4,7 @@
  *
  * 两阶段：
  *   input   ── 扫码 / 手输 → previewFamilyByCode → ok 则进 preview，异常态就地提示
- *   preview ── 渲染封面/家庭名/户主/成员堆叠/X·8 人 + 影响提示；按 impact 决定加入按钮行为
+ *   preview ── 渲染封面/家庭名/户主/成员堆叠/X·5 人 + 影响提示；按 impact 决定加入按钮行为
  *
  * 加入影响（PRD §6.3，由 RPC 的 impact 决定）：
  *   none          直接加入
@@ -29,14 +29,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type FamilyPreview, type JoinImpact, usePreviewFamily, useJoinFamily } from '@/api';
-import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
+import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useAvatarTints, usePalette } from '@/constants/design';
+import { MAX_FAMILY_MEMBERS } from '@/constants/family';
 
 /** 邀请码异常态 → 人话提示（status=ok 不在此列）。 */
 const STATUS_MESSAGE: Record<Exclude<FamilyPreview['status'], 'ok'>, string> = {
   invalid: '邀请码无效或已失效，请向家人确认后重试',
   expired: '邀请码已过期，请让家人刷新后再发你',
-  full: '这个家庭成员已满（8 人），暂时无法加入',
+  full: `这个家庭成员已满（${MAX_FAMILY_MEMBERS} 人），暂时无法加入`,
   already_member: '你已经在这个家了',
 };
 
@@ -122,7 +123,7 @@ function ScanBody({ onClose }: { onClose: () => void }) {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（DESIGN §9.9）：预览子状态显示返回；关闭靠下滑手势 */}
         <SheetHeader title="加入家庭" onBack={preview ? backToInput : undefined} />
         {/* 内容非滚动，用占位撑开标题区高度 */}
@@ -266,7 +267,7 @@ function PreviewCard({
       {/* 成员头像堆叠 + 人数 */}
       <View style={styles.memberRow}>
         <View style={styles.stack}>
-          {family.member_avatars.slice(0, 8).map((url, i) => (
+          {family.member_avatars.slice(0, MAX_FAMILY_MEMBERS).map((url, i) => (
             <View key={i} style={[styles.stackItem, { marginLeft: i === 0 ? 0 : -10, borderColor: palette.base }]}>
               <Avatar url={url} label="" tint={avatarTints[i % avatarTints.length]} size={32} />
             </View>
@@ -323,7 +324,7 @@ function Avatar({ url, label, tint, size }: { url: string | null; label: string;
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
-  headerSpacer: { height: SHEET_HEADER_HEIGHT },
+  headerSpacer: { height: SHEET_CONTENT_TOP_PADDING },
   scanWrap: { flex: 1, alignItems: 'center', gap: Space[4], paddingHorizontal: Space[6], paddingTop: Space[4] },
   cameraBox: { width: '100%', aspectRatio: 1, borderRadius: Radius.lg, overflow: 'hidden', backgroundColor: '#000' },
   scanOverlay: {

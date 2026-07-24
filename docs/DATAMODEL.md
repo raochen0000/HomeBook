@@ -82,7 +82,7 @@ erDiagram
 | `cover_url`                 | string    | null     | 家庭封面图（阿里云 OSS）；无封面时前端用暖色默认底 / 插画占位（加入预览卡、家庭页头用，PRD §3.5 / 流程 4） |
 | `owner_user_id`             | UUID      | FK→USER  | 户主，**每家唯一**                                                                                         |
 | `timezone`                  | string    | not null | 账期时区（创建时落定，见 PRD §2.5）                                                                        |
-| `member_count`              | int       | ≤ 8      | 冗余计数，便于上限校验                                                                                     |
+| `member_count`              | int       | ≤ 5      | 冗余计数，便于上限校验                                                                                     |
 | `status`                    | enum      |          | `active` / `dissolved`                                                                                     |
 | `created_at` / `updated_at` | timestamp |          |                                                                                                            |
 
@@ -369,7 +369,7 @@ erDiagram
 | ------------------- | --------------------------------------- |
 | PRD §2.2 一人一家   | 每用户仅一条 `MEMBERSHIP.status=active` |
 | PRD §2.3 数据归家   | `TRANSACTION.family_id` 创建后不可变    |
-| PRD §2.2 成员上限   | `FAMILY.member_count ≤ 8`               |
+| PRD §2.2 成员上限   | `FAMILY.member_count ≤ 5`               |
 | PRD §5 户主唯一     | 每家 `role=owner` 仅一条 active         |
 | PRD §9.3 目标上限   | 每家 `status=active` 的 goal ≤ 5        |
 | PRD §9.7 并发       | `SAVINGS_GOAL.version` 乐观锁           |

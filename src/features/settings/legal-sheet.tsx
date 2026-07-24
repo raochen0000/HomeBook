@@ -6,7 +6,7 @@
 import { Modal, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
+import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { ThemedText } from '@/components/themed-text';
 import { Space, usePalette } from '@/constants/design';
 
@@ -42,7 +42,7 @@ function Body({ kind }: { kind: LegalKind }) {
   const palette = usePalette();
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（纯预览型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
         <SheetHeader title={TITLES[kind]} />
         <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator>
@@ -65,7 +65,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   body: { flex: 1 },
-  bodyContent: { paddingTop: SHEET_HEADER_HEIGHT, paddingHorizontal: Space[6], paddingBottom: Space[6] },
+  bodyContent: { paddingTop: SHEET_CONTENT_TOP_PADDING, paddingHorizontal: Space[6], paddingBottom: Space[6] },
   section: { marginBottom: Space[5] },
   h: { fontSize: 16, fontWeight: '600', marginBottom: Space[2] },
   p: { fontSize: 15, lineHeight: 22 },
