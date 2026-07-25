@@ -5,8 +5,8 @@
  * 这里用 RN `Modal`（iOS `pageSheet`，自带下滑关）承载原生 Sheet 观感，顶部用居中抓手提示「拖拽」，
  * 内部金额键盘按设计走自定义 RN 层（@expo/ui 无此交互），避免 RNHostView 桥接的脆弱性。
  *
- * 布局：固定区（抓手 / 标题 / 支出收入分段 / 大号金额）+ 详情卡（分类区可滚动；备注·时间·记账人固定）
- * + 固定底部（数字键盘 / 保存）。展开分类时仅分类网格滚动，键盘与保存恒贴底。
+ * 布局：固定区（抓手 / 标题 / 支出收入分段 / 大号金额）+ 弹性详情区（分类区可滚动；备注·时间·记账人固定）
+ * + 底部 dock（数字键盘 / 保存）。分类始终以完整网格展示，并在详情卡内独立滚动。
  */
 import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
@@ -121,9 +121,8 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   const [note, setNote] = useState(editing?.note ?? '');
   const [occurredAt, setOccurredAt] = useState<Date>(editing?.occurred_at ? new Date(editing.occurred_at) : new Date());
   const [recorderUserId, setRecorderUserId] = useState(editing?.recorder_user_id ?? recorderId);
-  const [catExpanded, setCatExpanded] = useState(false);
   const [memberOpen, setMemberOpen] = useState(false);
-  // 分类区可用宽度（实测），用于折叠/展开两态统一每行 5 个、同一像素宽，避免切换时图标横向跳动。
+  // 分类区可用宽度（实测），用于网格每行 5 个、同一像素宽。
   const [catAreaW, setCatAreaW] = useState(0);
 
   // 同家庭成员；仅户主可查看并切换「记账人」，普通成员默认记到自己名下。
@@ -148,7 +147,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
     return categories[0]?.id ?? null;
   }, [categoryId, categories]);
 
-  // 每行 5 个；折叠态与展开态共用同一像素宽（实测宽 ÷ 5），切换不抖动。
+  // 每行 5 个；按实测宽度均分。
   const catItemW = catAreaW > 0 ? catAreaW / 5 : 64;
 
   const cents = rawToCents(raw);
@@ -251,44 +250,23 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
 
   const divider = <View style={[styles.divider, { backgroundColor: palette.separator }]} />;
 
-  // 详情卡（分类/备注/时间/记账人）。折叠态分类横滑；展开态仅分类网格在卡内纵向滚动，备注等字段始终可见。
+  // 详情卡（分类/备注/时间/记账人）。分类始终完整网格展示，且仅分类区在卡内纵向滚动。
   const detailCardNode = (
-    <View style={[styles.detailCard, { backgroundColor: palette.card }, catExpanded && styles.detailCardExpanded]}>
-      {/* 分类标题行 + 展开/收起 */}
+    <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
+      {/* 分类标题 */}
       <View style={styles.catHeader}>
         <Text style={[styles.catHeaderLabel, { color: palette.textSecondary }]}>分类</Text>
-        <Pressable style={styles.catToggle} hitSlop={8} onPress={() => setCatExpanded((v) => !v)}>
-          <Text style={[styles.catToggleText, { color: palette.textSecondary }]}>{catExpanded ? '收起' : '展开'}</Text>
-          <SymbolView name={catExpanded ? 'chevron.up' : 'chevron.down'} tintColor={palette.textSecondary} size={11} />
-        </Pressable>
       </View>
 
-      {/* 分类：折叠=横滑单行；展开=卡内 ScrollView 纵向网格（仅此区域滚动）。 */}
-      <View
-        style={catExpanded ? styles.catAreaExpanded : undefined}
-        onLayout={(e) => setCatAreaW(e.nativeEvent.layout.width)}
-      >
+      {/* 分类：完整网格；只在此区域滚动，备注／时间／记账人保持可见。 */}
+      <View style={styles.catArea} onLayout={(e) => setCatAreaW(e.nativeEvent.layout.width)}>
         {categoriesQ.isLoading ? (
           <View style={styles.catLoading}>
             <ActivityIndicator />
           </View>
-        ) : catExpanded ? (
-          <ScrollView
-            style={styles.catScroll}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-          >
-            <View style={styles.catGrid}>{categories.map((c) => renderCat(c, catItemW))}</View>
-          </ScrollView>
         ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.catRow}
-            keyboardShouldPersistTaps="handled"
-          >
-            {categories.map((c) => renderCat(c, catItemW))}
+          <ScrollView style={styles.catScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <View style={styles.catGrid}>{categories.map((c) => renderCat(c, catItemW))}</View>
           </ScrollView>
         )}
       </View>
@@ -344,77 +322,76 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      {/* 居中抓手（替代「取消」：拖拽 / 下滑收起，由 pageSheet 原生处理） */}
-      <View style={styles.grabberWrap}>
-        <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
+      <View style={styles.formArea}>
+        {/* 居中抓手（替代「取消」：拖拽 / 下滑收起，由 pageSheet 原生处理） */}
+        <View style={styles.grabberWrap}>
+          <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
+        </View>
+
+        {/* 标题行：标题居中（删除入口走列表左滑，DESIGN §9.9：非保存动作不放标题两侧） */}
+        <View style={styles.topBar}>
+          <View style={styles.topActionSpacer} />
+          <Text style={[styles.topTitle, { color: palette.textPrimary }]}>{editing ? '编辑流水' : '记一笔'}</Text>
+          <View style={styles.topActionSpacer} />
+        </View>
+
+        {/* 支出 / 收入：iOS 原生分段控件（SwiftUI Picker.segmented） */}
+        <Host style={styles.segmentHost}>
+          <Picker
+            modifiers={[pickerStyle('segmented')]}
+            selection={type}
+            onSelectionChange={(t) => setType(t as TxnType)}
+          >
+            <UIText modifiers={[tag('expense')]}>支出</UIText>
+            <UIText modifiers={[tag('income')]}>收入</UIText>
+          </Picker>
+        </Host>
+
+        {/* 大号金额（支出绿 / 收入红） */}
+        <View style={styles.amountRow}>
+          <Text style={[styles.amountSign, { color: amountColor }]}>{`${sign}¥`}</Text>
+          <Text style={[styles.amountInt, { color: amountColor }]}>{parts.integer}</Text>
+          {parts.hasDot ? <Text style={[styles.amountDec, { color: amountColor }]}>{`.${parts.decimal}`}</Text> : null}
+        </View>
+
+        {/* 详情卡固定在 dock 上方；只让分类区占用弹性高度并滚动。 */}
+        <View style={styles.middleFlex}>{detailCardNode}</View>
       </View>
 
-      {/* 标题行：标题居中（删除入口走列表左滑，DESIGN §9.9：非保存动作不放标题两侧） */}
-      <View style={styles.topBar}>
-        <View style={styles.topActionSpacer} />
-        <Text style={[styles.topTitle, { color: palette.textPrimary }]}>{editing ? '编辑流水' : '记一笔'}</Text>
-        <View style={styles.topActionSpacer} />
-      </View>
+      {/* pageSheet 已为 Home Indicator 预留安全区；dock 不重复叠加 inset，才能贴近 sheet 底部。 */}
+      <View style={styles.bottomDock}>
+        <View style={styles.keypad}>
+          {KEY_ROWS.map((row, ri) => (
+            <View key={ri} style={styles.keyRow}>
+              {row.map((k) => (
+                <Pressable
+                  key={k}
+                  style={({ pressed }) => [styles.key, { backgroundColor: pressed ? palette.separator : palette.card }]}
+                  onPress={() => press(k)}
+                >
+                  {k === '⌫' ? (
+                    <SymbolView name="delete.left" tintColor={palette.textPrimary} size={24} />
+                  ) : (
+                    <Text style={[styles.keyText, { color: palette.textPrimary }]}>{k}</Text>
+                  )}
+                </Pressable>
+              ))}
+            </View>
+          ))}
+        </View>
 
-      {/* 支出 / 收入：iOS 原生分段控件（SwiftUI Picker.segmented） */}
-      <Host style={styles.segmentHost}>
-        <Picker
-          modifiers={[pickerStyle('segmented')]}
-          selection={type}
-          onSelectionChange={(t) => setType(t as TxnType)}
+        <Pressable
+          disabled={!canSave}
+          onPress={handleSave}
+          style={[styles.save, { backgroundColor: palette.ink, opacity: canSave ? 1 : 0.35 }]}
         >
-          <UIText modifiers={[tag('expense')]}>支出</UIText>
-          <UIText modifiers={[tag('income')]}>收入</UIText>
-        </Picker>
-      </Host>
-
-      {/* 大号金额（支出绿 / 收入红） */}
-      <View style={styles.amountRow}>
-        <Text style={[styles.amountSign, { color: amountColor }]}>{`${sign}¥`}</Text>
-        <Text style={[styles.amountInt, { color: amountColor }]}>{parts.integer}</Text>
-        {parts.hasDot ? <Text style={[styles.amountDec, { color: amountColor }]}>{`.${parts.decimal}`}</Text> : null}
+          {saving ? (
+            <ActivityIndicator color={palette.onInk} />
+          ) : (
+            <Text style={[styles.saveText, { color: palette.onInk }]}>保存</Text>
+          )}
+        </Pressable>
       </View>
-
-      {/* 详情卡：展开时外层弹性区 + 卡内分类滚动；折叠时随内容高度紧贴键盘 */}
-      {catExpanded ? <View style={styles.middleFlex}>{detailCardNode}</View> : detailCardNode}
-
-      {/* 自定义数字键盘：每个键独立成块（白底圆角 + 键间留白），近似 iOS 系统键盘的独立按键观感 */}
-      <View style={styles.keypad}>
-        {KEY_ROWS.map((row, ri) => (
-          <View key={ri} style={styles.keyRow}>
-            {row.map((k) => (
-              <Pressable
-                key={k}
-                style={({ pressed }) => [styles.key, { backgroundColor: pressed ? palette.separator : palette.card }]}
-                onPress={() => press(k)}
-              >
-                {k === '⌫' ? (
-                  <SymbolView name="delete.left" tintColor={palette.textPrimary} size={24} />
-                ) : (
-                  <Text style={[styles.keyText, { color: palette.textPrimary }]}>{k}</Text>
-                )}
-              </Pressable>
-            ))}
-          </View>
-        ))}
-      </View>
-
-      {/* 保存（金额 > 0 才可用），贴底展示 */}
-      <Pressable
-        disabled={!canSave}
-        onPress={handleSave}
-        style={[
-          styles.save,
-          // 贴底但留出 Home Indicator 的清空间（折叠态还会有少量余量落在按钮下方，整体不挡系统横条）。
-          { backgroundColor: palette.ink, opacity: canSave ? 1 : 0.35, marginBottom: Space[6] },
-        ]}
-      >
-        {saving ? (
-          <ActivityIndicator color={palette.onInk} />
-        ) : (
-          <Text style={[styles.saveText, { color: palette.onInk }]}>保存</Text>
-        )}
-      </Pressable>
 
       {/* 记账人选择（底部 sheet） */}
       <MemberPickerSheet
@@ -482,9 +459,10 @@ function MemberPickerSheet({
 
 const styles = StyleSheet.create({
   root: { flex: 1, paddingHorizontal: Space[4], paddingTop: Space[2] },
+  formArea: { flex: 1, minHeight: 0 },
   grabberWrap: { alignItems: 'center', paddingBottom: Space[1] },
   grabber: { width: 36, height: 5, borderRadius: Radius.full, alignSelf: 'center' },
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: Space[1] },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: Space[3] },
   topAction: { fontSize: 16 },
   topActionRight: { width: 48, alignItems: 'flex-end' },
   topActionSpacer: { width: 48 },
@@ -494,10 +472,8 @@ const styles = StyleSheet.create({
   amountSign: { fontSize: 28, fontWeight: '700', fontVariant: ['tabular-nums'] },
   amountInt: { fontSize: 48, fontWeight: '700', fontVariant: ['tabular-nums'] },
   amountDec: { fontSize: 28, fontWeight: '400', fontVariant: ['tabular-nums'] },
-  // 金额与键盘之间的弹性区；展开态详情卡填满此区，分类 ScrollView 在卡内滚动。
   middleFlex: { flex: 1, minHeight: 0 },
-  detailCard: { borderRadius: Radius.lg, paddingHorizontal: Space[4] },
-  detailCardExpanded: { flex: 1, minHeight: 0 },
+  detailCard: { flex: 1, minHeight: 0, borderRadius: Radius.lg, paddingHorizontal: Space[4] },
   catHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -506,14 +482,10 @@ const styles = StyleSheet.create({
     paddingBottom: Space[1],
   },
   catHeaderLabel: { fontSize: 13, fontWeight: '600' },
-  catToggle: { flexDirection: 'row', alignItems: 'center', gap: Space[1] },
-  catToggleText: { fontSize: 13 },
-  catAreaExpanded: { flex: 1, minHeight: 0 },
+  catArea: { flex: 1, minHeight: 0 },
   catScroll: { flex: 1 },
   catLoading: { height: 80, alignItems: 'center', justifyContent: 'center' },
-  // 折叠横滑：不留 gap，让前 5 个正好铺满实测宽，位置与展开第一行完全一致（切换不跳）。
-  catRow: { paddingVertical: Space[2] },
-  // 展开网格：每行 5 个（itemW=实测宽/5），rowGap 保证 ≥3 行图标完整展示。
+  // 完整网格：每行 5 个（itemW=实测宽/5），rowGap 保持分类项的可点间距。
   catGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: Space[3], paddingVertical: Space[2] },
   catItem: { alignItems: 'center', gap: Space[1] },
   catCircle: { width: 52, height: 52, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
@@ -525,8 +497,9 @@ const styles = StyleSheet.create({
   rowSpacer: { flex: 1 },
   // matchContents 让 host 贴合原生 DatePicker 胶囊尺寸；minWidth/minHeight 仅作初次测量前的兜底。
   dateHost: { minWidth: 130, minHeight: 28 },
-  // 键盘：独立按键（白底圆角 + 行/键间留白），近似 iOS 系统键盘。marginTop 即「分类卡↔键盘」间距，与金额上下间距一致（Space[5]）。
-  keypad: { marginTop: Space[5], gap: Space[2] },
+  // pageSheet 已处理安全区；额外 18pt 只用于避开大屏 sheet 的圆角/手势边缘，不重复占用 Home Indicator 高度。
+  bottomDock: { paddingTop: Space[2], paddingBottom: Space[5] },
+  keypad: { gap: Space[2] },
   keyRow: { flexDirection: 'row', gap: Space[2] },
   key: {
     flex: 1,
