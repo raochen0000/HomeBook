@@ -66,6 +66,8 @@ type Palette = {
   card: string;
   /** 浮层 / 分组 */
   elevated: string;
+  /** pageSheet 内分组卡片；必须与 sheet 容器底保持可辨识的层级。 */
+  sheetCard: string;
   textPrimary: string;
   textSecondary: string;
   textTertiary: string;
@@ -115,6 +117,7 @@ const light: Palette = {
   sheet: '#F2F1F5',
   card: '#FFFFFF',
   elevated: '#F2F1F5',
+  sheetCard: '#FFFFFF',
   textPrimary: '#1C1C1E',
   textSecondary: 'rgba(60,60,67,0.6)',
   textTertiary: 'rgba(60,60,67,0.3)',
@@ -142,6 +145,7 @@ const dark: Palette = {
   sheet: '#1C1C1E',
   card: '#1C1C1E',
   elevated: '#2C2C2E',
+  sheetCard: '#2C2C2E',
   textPrimary: '#FFFFFF',
   textSecondary: 'rgba(235,235,245,0.6)',
   textTertiary: 'rgba(235,235,245,0.3)',
@@ -201,7 +205,7 @@ export function usePalette(): Palette {
  */
 export function useSheetPalette(): Palette {
   const palette = usePalette();
-  return { ...palette, base: palette.sheet, card: palette.elevated };
+  return { ...palette, base: palette.sheet, card: palette.sheetCard };
 }
 
 export function useCategoryColors() {

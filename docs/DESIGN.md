@@ -1,6 +1,6 @@
 # 家账 · 视觉设计规范 & 设计系统（DESIGN）
 
-> 文档版本：v0.6.9（**记一笔 FAB 原生 Liquid Glass 校准**）
+> 文档版本：v0.6.10（**Tab Bar 黑白高亮与双态图标校准**）
 > 最后更新：2026-07-25
 > 关联文档：PRD.md（v0.1.8）、IA.md、MVP.md、DATAMODEL.md、TECH.md
 > 负责人：产品组 / 设计 / 客户端
@@ -36,7 +36,7 @@
 ### 1.2 五条基调铁律（本版核心，AI 必须遵守）
 
 1. **骨架黑白灰**：页面底、卡片、文本、分隔线**只用黑 / 白 / 灰阶**，不设主题色 / 品牌色 / 家庭温暖色。
-2. **交互统一蓝**：可点文字、选中、高亮与链接用**系统蓝**（iOS systemBlue），Light / Night 自动切换；确认型主 CTA 另用 `ink`，常驻「记一笔」FAB 另遵从 §9.2 的中性表面规则。
+2. **交互统一蓝**：可点文字、选中、高亮与链接用**系统蓝**（iOS systemBlue），Light / Night 自动切换；确认型主 CTA 另用 `ink`，常驻「记一笔」FAB 与 Tab Bar 另遵从 §9.2 的中性表面 / 墨色导航规则。
 3. **收支红绿**：金额语义色仅 **红（收入）/ 绿（支出）**，且**必须**同时配 `+/-` 符号与文案，不能只靠颜色区分。
 4. **分类彩底**：分类图标用**低饱和彩色圆底**做功能识别（类比「提醒事项」每个清单的彩色图标圆），是识别色、非品牌色，纯前端映射不入库。
 5. **分区靠明度**：采用 **iOS 设置式分组**——**浅灰页面底 + 纯白卡片**，靠明度差分区；**阴影只留给真正的浮层**（FAB / Toast / Sheet），普通卡片不投影。
@@ -84,8 +84,11 @@ PRD §2.4 的配色仅用于**流程图（Mermaid）绘制**，与界面视觉�
 | `bg/base`     | **页面底**（浅灰）      | `#F2F1F5` | `#000000` | systemGroupedBackground 微调     |
 | `bg/card`     | **卡片 / 列表行**（白） | `#FFFFFF` | `#1C1C1E` | secondarySystemGroupedBackground |
 | `bg/elevated` | 嵌套分组 / 浮层内底     | `#F2F1F5` | `#2C2C2E` | tertiarySystemGroupedBackground  |
+| `bg/sheet-card` | **pageSheet 内分组卡片** | `#FFFFFF` | `#2C2C2E` | sheet 内独立内容层 |
 
 > **分区规则**：卡片靠 `bg/base`（灰）↔ `bg/card`（白）的**明度差**浮出，**默认不加阴影**（`elevation/0`）；卡内多行用 `separator` 分隔。这正是 iOS「设置」的做法。
+
+> **pageSheet 规则**：sheet 自身是独立表面，内容分组一律用 `bg/sheet-card`。浅色用白卡从浅灰 sheet 底浮出；Night 用 `#2C2C2E` 从 `#1C1C1E` sheet 底浮出。不可直接把 `bg/elevated` 映射为浅色 sheet 卡片。
 
 ### 2.4 文本层级
 
@@ -106,6 +109,8 @@ PRD §2.4 的配色仅用于**流程图（Mermaid）绘制**，与界面视觉�
 | `accent/tint`      | `rgba(0,122,255,0.12)` | `rgba(10,132,255,0.18)` | 选中行浅底、选中 chip、浅蓝填充                                      |
 
 **蓝色用到的地方（清单）**：选中态（列表选中行 / Menu 勾选 `checkmark`）、可点文字与链接（含列表「＋ 添加 / 新建」行）、开关 on（见下注）、线性 / 环形进度的常态色、输入聚焦框、返回箭头等系统导航元素。
+
+> **蓝色的例外 ⑤ · Tab Bar（v0.6.10）**：顶级导航当前项不用蓝，Light 用 `tab/active` `#1C1C1E`、Night 用 `#F5F5F7`；非当前项用独立系统灰 `tab/inactive`（Light `#8E8E93` / Night `#98989F`）。当前项必须是**实心 SF Symbol + 12pt Semibold 标签**，非当前项必须是对应的**描边 SF Symbol + 11pt Regular 标签**；以图标填充、字重、字号和明度共同表达位置，不能只依赖颜色。
 
 > **v0.6.5 关键变更**：**确认型按钮实底不再用蓝，改用墨色 `ink`**（详见下方例外 ③）；常驻 ➕ FAB 的表面规则见例外 ④ / §9.2。蓝退回「跳转 / 链接 + 系统交互」。
 
@@ -338,7 +343,7 @@ _豁免（唯一判据：**该颜色所在的表面本身就是主题无关的�
 
 ### 9.2 Tab Bar + 记一笔 FAB
 
-- **四 Tab**：首页(`house`) / 报表(`chart.pie`) / 家庭(`person.2`) / 我的(`person.crop.circle`)。顺应系统材质。
+- **四 Tab**：首页(`house`) / 报表(`chart.pie`) / 家庭(`person.2`) / 我的(`person.crop.circle`)。非当前项用描边图标 + `tab/inactive` 11pt Regular 标签；当前项切为对应实心图标 + `tab/active` 12pt Semibold 标签。顺应系统材质。
 - **➕ FAB**：圆形 56×56，Light 为白色表面 + `#1C1C1E` `plus`，Night 为 `bg/sheet` `#1C1C1E` 表面 + 白色 `plus`。iOS 26+ 使用原生 `glassEffect(.regular, interactive: true)` 与同色 tint，系统负责材质边缘、折射、按压和层级；**禁止额外画 border / shadow**。旧系统与非 iOS 回退为无边框中性实底 + `elevation/1`。固定 Tab Bar 右上方、全 Tab 常驻；右边距 16。点击 → 弹记账面板（§10.3）。
 
 ### 9.3 分组卡 / Section
@@ -585,9 +590,10 @@ _豁免（唯一判据：**该颜色所在的表面本身就是主题无关的�
 // —— 语义色（Light / Night）——
 accent/primary  #007AFF / #0A84FF    accent/onPrimary #FFFFFF / #FFFFFF   accent/tint rgba(0,122,255,.12)/(10,132,255,.18)
 ink #1C1C1E/#F5F5F7   onInk #FFFFFF/#1C1C1E   ← 随主题反相，确认型「主操作」实底（§2.5 例外③ / §9.5）
+tab/active #1C1C1E/#F5F5F7   tab/inactive #8E8E93/#98989F   ← 顶级导航当前项（实心 + 12pt Semibold）/ 非当前项（描边 + 11pt Regular）
 fab/surface #FFFFFF/#1C1C1E   fab/onSurface #1C1C1E/#FFFFFF   fab/border rgba(60,60,67,.16)/rgba(255,255,255,.12)  ← 高常用创建入口（§2.5 例外④ / §9.2）
 text/primary #000/#FFF  secondary rgba(60,60,67,.6)/(235,235,245,.6)  tertiary .3/.3
-bg/base #F2F1F5/#000  bg/card #FFF/#1C1C1E  bg/elevated #F2F1F5/#2C2C2E  separator rgba(60,60,67,.29)/(84,84,88,.6)
+bg/base #F2F1F5/#000  bg/card #FFF/#1C1C1E  bg/elevated #F2F1F5/#2C2C2E  bg/sheet-card #FFF/#2C2C2E  separator rgba(60,60,67,.29)/(84,84,88,.6)
 semantic/income #E2563D/#FF7461（+，红）  semantic/expense #2FA36B/#46C98A（−，绿）
 state/warning #F5A623/#FFB84D  state/danger #E2563D/#FF7461  state/success #2FA36B/#46C98A  state/info #007AFF/#0A84FF
 cat: food/transit/shopping/home/medical/saving/other → §2.8
@@ -717,6 +723,7 @@ animation(Animation.spring({duration}), dep)                 原生动效
 
 ## 附录 B · 变更日志（历史收敛）
 
+- **v0.6.10**（2026-07-25 · Tab Bar 黑白高亮与双态图标校准）：顶级导航当前项从系统蓝改为 `tab/active`（Light 近黑 / Night 近白），非当前项改为独立 `tab/inactive` 灰；图标由全填充改为「非当前描边 / 当前实心」，标签由非当前 11pt Regular 切为当前 12pt Semibold。原因：仅靠颜色切换时，不同 Tab 的实心图标视觉重量接近，当前位置不够醒目；四重状态差异能在 Light / Night 都明确定位，同时保留蓝色给链接、列表选中与系统交互。
 - **v0.6.9**（2026-07-25 · 记一笔 FAB 原生 Liquid Glass 校准）：iOS 26+ 的 ➕ FAB 改用 SwiftUI 原生 `glassEffect(.regular, interactive: true)`，以 Light 白 / Night `bg/sheet` 作为 tint，移除上一版为规避矩形 `border` 而添加的人工圆形边缘与阴影；系统材质自行呈现边缘、折射与按压。旧系统和非 iOS 保持无边框中性实底 + 轻投影。原因：浅色人工灰圈既不符合白色 FAB 的设计意图，也遮蔽了应有的 Liquid Glass 质感。同步修订 §2.5、§9.2、§9.5 和令牌速查。
 - **v0.6.8**（2026-07-25 · 记一笔 FAB 明暗模式表面校准）：➕ FAB 从 `ink` 反相实底改为独立中性表面，Light = 白底 + 近黑 `plus`，Night = `bg/sheet` `#1C1C1E` + 白色 `plus`；保留 56pt 触控面与按压反馈。后续 v0.6.9 移除人工边缘，改为系统 Liquid Glass。原因：深色的纯白 FAB 在黑色首页形成过强视觉焦点，抢夺交易金额层级。同步修订 §2.5、§9.2、§9.5 和令牌速查，避免规范与实现脱节。
 - **v0.6.7**（2026-07-22 · Sheet 标题区三形态）：§9.9 pageSheet 标题区收敛为共享 `SheetHeader`（悬浮磨砂玻璃 + 居中标题 + 原生圆形玻璃按钮，参考 iOS 提醒事项「详细信息」）。按数据提交方式分三形态：显式保存 = ✕/返回 + ✓（`ink` 色，非 iOS 蓝，禁用置灰）；自动保存与纯预览 = 纯标题、下滑关闭。作废「内容型 Sheet 右上角 X」；非保存动作（全部已读 / 编辑入口）移入内容区；记账面板编辑态撤掉右上角「删除」（删除走列表左滑）。
