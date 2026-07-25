@@ -162,10 +162,17 @@ export type RowData = {
   editor: AvatarInfo | null;
 };
 
-/** 行内边距。 */
-const ROW_INSET_H = Space[1];
+type ContentInsets = { horizontal?: number; vertical?: number };
 
-function TransactionRow({ row, onPress }: { row: RowData; onPress?: (id: string) => void }) {
+function TransactionRow({
+  row,
+  onPress,
+  contentInsets,
+}: {
+  row: RowData;
+  onPress?: (id: string) => void;
+  contentInsets: ContentInsets;
+}) {
   const palette = usePalette();
   return (
     <VStack
@@ -181,7 +188,8 @@ function TransactionRow({ row, onPress }: { row: RowData; onPress?: (id: string)
         alignment="center"
         modifiers={[
           padding({
-            horizontal: ROW_INSET_H,
+            horizontal: contentInsets.horizontal,
+            vertical: contentInsets.vertical,
           }),
         ]}
       >
@@ -228,8 +236,10 @@ function TransactionRow({ row, onPress }: { row: RowData; onPress?: (id: string)
   );
 }
 
-/** 与 Hero 卡等宽的内容宽度：屏宽 − 页边距(2×Space4)。用于分组头/横幅与卡片左右对齐。 */
-const CONTENT_WIDTH = Dimensions.get('window').width - Space[4] * 2;
+/** 指定页面边距后的分组标题宽度，用于对齐「今天 / 合计」这一行的左右文字。 */
+function contentWidth(horizontalInset: number) {
+  return Dimensions.get('window').width - horizontalInset * 2;
+}
 
 /** 当日净额颜色（红/绿语义，与本 App income=红/expense=绿一致）：正→红、负→绿、零→中性。 */
 function netColor(cents: number, palette: ReturnType<typeof usePalette>) {
@@ -247,6 +257,8 @@ export function DayGroup({
   onRowPress,
   onEdit,
   onDelete,
+  headerHorizontalInset = Space[4],
+  rowInsets = { horizontal: Space[4], vertical: Space[3] },
 }: {
   label: string;
   totalCents: number;
@@ -254,12 +266,16 @@ export function DayGroup({
   onRowPress?: (id: string) => void;
   onEdit?: (id: string) => void;
   onDelete?: (id: string) => void;
+  /** 日期标题与当日合计相对页面边缘的距离。 */
+  headerHorizontalInset?: number;
+  /** 流水内容相对分组卡片边缘的内边距。 */
+  rowInsets?: ContentInsets;
 }) {
   const palette = usePalette();
   // 定宽 = 屏宽 − 页边距：header 在系统默认缩进的可用区内居中，溢出对称，
   // 从而左右边缘与上方 Hero 卡 / 分组白卡对齐（系统 header 缩进不可直接清零）。
   const header = (
-    <HStack modifiers={[frame({ width: CONTENT_WIDTH })]}>
+    <HStack modifiers={[frame({ width: contentWidth(headerHorizontalInset) })]}>
       <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{label}</Text>
       <Spacer />
       <Text modifiers={[font({ size: 13, weight: 'bold' }), foregroundColor(netColor(totalCents, palette))]}>
@@ -272,7 +288,7 @@ export function DayGroup({
     <Section header={header} modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 })]}>
       {rows.map((row) => (
         <SwipeActions key={row.id} modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 })]}>
-          <TransactionRow row={row} onPress={onRowPress} />
+          <TransactionRow row={row} onPress={onRowPress} contentInsets={rowInsets} />
           {/* allowsFullSwipe=false：滑到底也不自动触发首个动作（否则误触「编辑」）。
               删除按钮不用 role="destructive"（那会让 SwiftUI 在点击时直接把行收起，取消后不复原）；
               改用红色 tint，真正的二次确认与危险色交给 RN Alert。 */}
@@ -399,10 +415,22 @@ function budgetBarColor(stage: 'safe' | 'normal' | 'warning' | 'danger', palette
 
 /**
  * 进度条（@expo/ui SwiftUI 无现成可控变色进度件，用定宽轨道 + 比例填充自绘）。
- * 轨道宽 = 屏宽 − 页边距(2×Space4) − 卡内边距(2×Space4)。
+ * 轨道宽 = 屏宽 − 页面边距 − Hero 卡内边距；两者由首页入口统一传入。
  */
-function ProgressBar({ frac, color, track }: { frac: number; color: string; track: string }) {
-  const trackW = Dimensions.get('window').width - Space[4] * 2 - Space[4] * 2;
+function ProgressBar({
+  frac,
+  color,
+  track,
+  contentHorizontalInset,
+  pageHorizontalInset,
+}: {
+  frac: number;
+  color: string;
+  track: string;
+  contentHorizontalInset: number;
+  pageHorizontalInset: number;
+}) {
+  const trackW = Dimensions.get('window').width - pageHorizontalInset * 2 - contentHorizontalInset * 2;
   const fillW = Math.round(Math.max(0, Math.min(1, frac)) * trackW);
   return (
     <HStack spacing={0} modifiers={[frame({ width: trackW, height: 8 }), background(track), cornerRadius(Radius.full)]}>
@@ -433,6 +461,8 @@ export function PulseCard({
   onToggleHidden,
   onPress,
   onSetBudget,
+  contentInsets = { horizontal: Space[4], vertical: Space[4] },
+  pageHorizontalInset = Space[4],
 }: {
   hasBudget: boolean;
   totalCents: number;
@@ -446,6 +476,10 @@ export function PulseCard({
   onToggleHidden: () => void;
   onPress: () => void;
   onSetBudget: () => void;
+  /** Hero 内容相对卡片边缘的内边距。 */
+  contentInsets?: ContentInsets;
+  /** Hero 卡片相对页面边缘的距离，用于计算进度条宽度。 */
+  pageHorizontalInset?: number;
 }) {
   const palette = usePalette();
 
@@ -475,7 +509,10 @@ export function PulseCard({
     </HStack>
   );
 
-  const cardModifiers = [listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 })];
+  const cardModifiers = [
+    listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }),
+    padding({ horizontal: contentInsets.horizontal, vertical: contentInsets.vertical }),
+  ];
 
   // ── 未设预算：现金流摘要降级态 ──
   if (!hasBudget) {
@@ -555,7 +592,13 @@ export function PulseCard({
         hidden={hidden}
       />
       <VStack alignment="leading" spacing={Space[1]} modifiers={[padding({ top: Space[1] })]}>
-        <ProgressBar frac={pct / 100} color={barColor} track={palette.base} />
+        <ProgressBar
+          frac={pct / 100}
+          color={barColor}
+          track={palette.base}
+          contentHorizontalInset={contentInsets.horizontal ?? 0}
+          pageHorizontalInset={pageHorizontalInset}
+        />
         <ProgressCaption hidden={hidden} usedCents={usedCents} totalCents={totalCents} daysLeft={daysLeft} />
       </VStack>
       {/* 分隔线 + 现金流结余行（对账口径，无环比） */}
@@ -605,11 +648,14 @@ export function InsightBanner({
   subtitle,
   onPress,
   onDismiss,
+  contentInsets = { horizontal: Space[4], vertical: Space[4] },
 }: {
   title: string;
   subtitle: string;
   onPress?: () => void;
   onDismiss?: () => void;
+  /** 横幅内容相对卡片边缘的内边距；与 Hero 保持一致。 */
+  contentInsets?: ContentInsets;
 }) {
   const palette = usePalette();
   const contentMods = [
@@ -620,7 +666,10 @@ export function InsightBanner({
     <HStack
       spacing={Space[3]}
       alignment="center"
-      modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 })]}
+      modifiers={[
+        listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }),
+        padding({ horizontal: contentInsets.horizontal, vertical: contentInsets.vertical }),
+      ]}
     >
       <HStack spacing={Space[3]} alignment="center" modifiers={contentMods}>
         <Image systemName="calendar" size={28} color={palette.textSecondary} />

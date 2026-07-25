@@ -75,6 +75,18 @@ type Group = { key: string; label: string; totalCents: number; rows: RowData[] }
 const RECORD_FAB_ICON_SIZE = 28;
 
 /**
+ * 首页内容间距：在这里统一微调 Hero、日期汇总行与流水 Item，避免三处各自维护数值。
+ * - hero：卡片内容相对卡片边缘的内边距；会同时影响进度条可用宽度。
+ * - dayHeaderHorizontal：如「今天  +¥…」的页面左右边距。
+ * - transactionRow：流水 Item 内容相对分组卡片边缘的内边距。
+ */
+const HOME_CONTENT_INSETS = {
+  hero: { horizontal: Space[4] },
+  dayHeaderHorizontal: Space[6],
+  transactionRow: { vertical: Space[1] },
+} as const;
+
+/**
  * iOS 走 SwiftUI 原生 Button：系统负责按压态、触控与 VoiceOver 语义；Android / Web 保留 RN 回退。
  * 浮层定位仍留在 RN 壳上，避免 SwiftUI Host 与页面滚动容器争夺布局所有权。
  */
@@ -424,6 +436,8 @@ export default function HomeScreen() {
                   onToggleHidden={toggleAmounts}
                   onPress={() => openSummary(currentPeriod())}
                   onSetBudget={() => setBudgetOpen(true)}
+                  contentInsets={HOME_CONTENT_INSETS.hero}
+                  pageHorizontalInset={HOME_CONTENT_INSETS.dayHeaderHorizontal}
                 />
               </Section>
               {showLastMonthReminder ? (
@@ -433,6 +447,7 @@ export default function HomeScreen() {
                     subtitle="看看上个月家里的开销与变化"
                     onPress={() => openSummary(prevPeriodStr)}
                     onDismiss={dismissLastMonthReminder}
+                    contentInsets={HOME_CONTENT_INSETS.hero}
                   />
                 </Section>
               ) : showCountBanner ? (
@@ -441,6 +456,7 @@ export default function HomeScreen() {
                     title={`${month} 月家里一起记下了 ${monthCount} 笔`}
                     subtitle="每一笔都是一家人生活的痕迹"
                     onDismiss={dismissCountBanner}
+                    contentInsets={{ horizontal: 0, vertical: 0 }}
                   />
                 </Section>
               ) : null}
@@ -453,6 +469,8 @@ export default function HomeScreen() {
                   onRowPress={openDetail}
                   onEdit={openEdit}
                   onDelete={confirmDelete}
+                  headerHorizontalInset={HOME_CONTENT_INSETS.dayHeaderHorizontal}
+                  rowInsets={HOME_CONTENT_INSETS.transactionRow}
                 />
               ))}
               {/* 末尾「没有更多了」提示 + 底部留白 */}
