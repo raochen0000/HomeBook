@@ -4,7 +4,7 @@
  * 入口收敛（PRD §18.1）：原列表「个人信息 / 账号与安全 / 绑定手机号」已并入顶部用户块 → 账号页（G2）。
  * - 顶部用户块整块点击 → push /account（换头像在账号页「头像」行）。
  * - 记账设置 / 导出数据 / 通知设置 / 帮助 / 反馈 / 关于 → push 各子页。
- * - 深色模式 / 语言 → 行内原生菜单式 Picker 下拉（当前项打勾、无「取消」项；深色仍跟随系统，语言仅简体中文）。
+ * - 深色模式 / 语言 → 行内原生菜单式 Picker 下拉；当前值与箭头使用主题次级文字色（深色仍跟随系统，语言仅简体中文）。
  * - 退出登录 → 二次确认后登出（真实操作）。
  * 折叠头与首页同款：useManualCollapsibleHeader + 原生 List 的 scrollGeometry 修饰符驱动，
  * 头部只作背景与安全区让位（不渲染标题 / 搜索）。
@@ -102,7 +102,7 @@ export default function MineScreen() {
 
         {/* 卡一 记账与数据 */}
         <Section>
-          <Row icon="ruler.fill" label="记账设置" onPress={() => router.push('/settings/record' as Href)} />
+          <Row icon="slider.horizontal.3" label="记账设置" onPress={() => router.push('/settings/record' as Href)} />
           <Row icon="square.and.arrow.down" label="导出数据" onPress={() => router.push('/export' as Href)} />
         </Section>
 
@@ -114,6 +114,7 @@ export default function MineScreen() {
             icon="moon.fill"
             label="深色模式"
             selection="system"
+            tintColor={palette.textSecondary}
             onSelectionChange={(v) => {
               if (v !== 'system') toast.info('深色模式即将上线，当前跟随系统');
             }}
@@ -128,6 +129,7 @@ export default function MineScreen() {
             icon="globe"
             label="语言"
             selection="zh"
+            tintColor={palette.textSecondary}
             onSelectionChange={(v) => {
               if (v !== 'zh') toast.info('暂仅支持简体中文');
             }}

@@ -18,7 +18,7 @@ import {
   type DefaultTxnType,
 } from '@/api';
 import { usePalette } from '@/constants/design';
-import { Caption, MenuRow, Row, SettingsList, ToggleRow } from '@/features/settings/native-list';
+import { InfoCaption, MenuRow, Row, SettingsList, ToggleRow } from '@/features/settings/native-list';
 import { resolveCardLayout, TOTAL_CARDS } from '@/lib/report-cards';
 
 export default function RecordSettingsScreen() {
@@ -39,11 +39,12 @@ export default function RecordSettingsScreen() {
       <Stack.Screen options={{ headerShown: true, title: '记账设置' }} />
       <SettingsList>
         {/* 记账偏好（PRD §18.3.1） */}
-        <Section title="记账偏好">
+        <Section title="记账偏好" footer={<InfoCaption text="开启金额隐私后，首页与报表金额显示为 ****" />}>
           <MenuRow<DefaultTxnType>
             icon="arrow.left.arrow.right"
             label="默认记账类型"
             selection={prefs.default_txn_type}
+            tintColor={palette.textSecondary}
             onSelectionChange={(v) => save.mutate({ ...prefs, default_txn_type: v })}
             options={[
               { value: 'expense', label: '支出' },
@@ -54,6 +55,7 @@ export default function RecordSettingsScreen() {
             icon="checkmark.circle"
             label="记一笔后"
             selection={prefs.after_record_behavior}
+            tintColor={palette.textSecondary}
             onSelectionChange={(v) => save.mutate({ ...prefs, after_record_behavior: v })}
             options={[
               { value: 'close', label: '保存即关' },
@@ -67,10 +69,9 @@ export default function RecordSettingsScreen() {
             onValueChange={(v) => save.mutate({ ...prefs, amount_privacy: v })}
           />
         </Section>
-        <Caption text="开启金额隐私后，首页与报表金额显示为 ****，防窥屏。金额恒定显示到角分（两位小数）。" />
 
         {/* 首页展示 */}
-        <Section title="首页">
+        <Section title="首页" footer={<InfoCaption text="关闭后，首页不再显示「上月总结来啦」月度总结入口横幅" />}>
           <ToggleRow
             icon="doc.text.fill"
             label="月度总结横幅"
@@ -78,10 +79,14 @@ export default function RecordSettingsScreen() {
             onValueChange={(v) => save.mutate({ ...prefs, show_monthly_summary_entry: v })}
           />
         </Section>
-        <Caption text="关闭后，首页不再显示「上月总结来啦」月度总结入口横幅；月度总结仍可点脉搏卡进入。" />
 
         {/* 报表与自动化 */}
-        <Section title="报表与自动化">
+        <Section
+          title="报表与自动化"
+          footer={
+            <InfoCaption text="报表卡片可拖动排序、自由显隐（「收支概览」常驻，至少展示 3 个）。定时收支按「每月 N 号」自动记一笔，如工资、订阅。" />
+          }
+        >
           <Row
             icon="rectangle.grid.1x2.fill"
             label="报表卡片"
@@ -95,7 +100,6 @@ export default function RecordSettingsScreen() {
             onPress={() => router.push('/settings/recurring' as Href)}
           />
         </Section>
-        <Caption text="报表卡片可拖动排序、自由显隐（「收支概览」常驻，至少展示 3 个）。定时收支按「每月 N 号」自动记一笔，如工资、订阅。" />
       </SettingsList>
     </View>
   );

@@ -16,6 +16,7 @@ import {
   pickerStyle,
   shapes,
   tag,
+  tint,
 } from '@expo/ui/swift-ui/modifiers';
 import type { ComponentProps, ReactNode } from 'react';
 
@@ -23,6 +24,7 @@ import { Space, usePalette } from '@/constants/design';
 
 type IconName = ComponentProps<typeof Image>['systemName'];
 type Modifiers = ComponentProps<typeof List>['modifiers'];
+const SETTINGS_ROW_ICON_SIZE = 19;
 
 /** 原生 insetGrouped List 外壳；extraModifiers 供首页式滚动折叠头（scrollGeometry）用。 */
 export function SettingsList({ children, extraModifiers }: { children: ReactNode; extraModifiers?: Modifiers }) {
@@ -57,7 +59,7 @@ export function Row({
   const tapMods = onPress ? [contentShape(shapes.rectangle()), onTapGesture(onPress)] : [];
   return (
     <HStack alignment="center" spacing={Space[3]} modifiers={tapMods}>
-      <Image systemName={icon} size={19} color={primary} />
+      <Image systemName={icon} size={SETTINGS_ROW_ICON_SIZE} color={primary} />
       <Text modifiers={[font({ size: 16 }), foregroundColor(primary)]}>{label}</Text>
       <Spacer />
       {value ? (
@@ -73,6 +75,7 @@ export function Row({
 
 /**
  * 下拉选择行：外观同 Row，点按弹出原生 SwiftUI 菜单式 Picker（行内下拉、当前项打勾、无「取消」项）。
+ * tintColor 仅覆盖收起态的当前值与上下箭头，不改变菜单样式、勾选或点按行为。
  * 用 Picker(.menu) 而非 Menu：Menu 的自定义 label 在 List 中打开时会被系统「抬」进浮层，原位留空
  * （整行短暂消失）；Picker 打开时行保持在位，是 iOS「设置」下拉的标准控件。
  * selection 受控且由调用方决定是否更新——占位功能可固定 selection、仅在 onSelectionChange 里提示。
@@ -83,22 +86,25 @@ export function MenuRow<T extends string>({
   selection,
   onSelectionChange,
   options,
+  tintColor,
 }: {
   icon: IconName;
   label: string;
   selection: T;
   onSelectionChange: (value: T) => void;
   options: { value: T; label: string }[];
+  /** 当前值与上下箭头的可选主题色；省略时保留系统默认蓝。 */
+  tintColor?: string;
 }) {
   const palette = usePalette();
   return (
     <Picker
       selection={selection}
       onSelectionChange={onSelectionChange}
-      modifiers={[pickerStyle('menu')]}
+      modifiers={[pickerStyle('menu'), ...(tintColor ? [tint(tintColor)] : [])]}
       label={
         <HStack alignment="center" spacing={Space[3]}>
-          <Image systemName={icon} size={19} color={palette.textPrimary} />
+          <Image systemName={icon} size={SETTINGS_ROW_ICON_SIZE} color={palette.textPrimary} />
           <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{label}</Text>
         </HStack>
       }
@@ -113,8 +119,8 @@ export function MenuRow<T extends string>({
 }
 
 /**
- * 开关行：图标 + 标题 + 尾随原生开关（SwiftUI Toggle）。外观同 iOS「设置」的 Toggle 行
- * （系统绿开关、整行随行分隔），受控——value 由调用方持久化后回传。
+ * 开关行：图标 + 标题 + 尾随原生开关（SwiftUI Toggle）。图标使用自定义标签绘制，
+ * 与普通行统一为主文字色和 19pt；开关本身仍保留系统绿与原生交互。
  */
 export function ToggleRow({
   icon,
@@ -127,10 +133,29 @@ export function ToggleRow({
   value: boolean;
   onValueChange: (value: boolean) => void;
 }) {
-  return <Toggle isOn={value} onIsOnChange={onValueChange} label={label} systemImage={icon} />;
+  const palette = usePalette();
+  return (
+    <Toggle isOn={value} onIsOnChange={onValueChange}>
+      <HStack alignment="center" spacing={Space[3]}>
+        <Image systemName={icon} size={SETTINGS_ROW_ICON_SIZE} color={palette.textPrimary} />
+        <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{label}</Text>
+      </HStack>
+    </Toggle>
+  );
 }
 
-/** 分组脚注（小灰字，落在页面底色上、无白卡）。Section 本版无 footer 属性，故自绘一段。 */
+/** 原生 Section 页脚内的说明行：信息图标在左，文案跟随次级主题色。 */
+export function InfoCaption({ text }: { text: string }) {
+  const palette = usePalette();
+  return (
+    <HStack alignment="top" spacing={Space[1]}>
+      <Image systemName="info.circle" size={13} color={palette.textSecondary} />
+      <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textSecondary)]}>{text}</Text>
+    </HStack>
+  );
+}
+
+/** 兼容尚未接入 Section.footer 的页面：小灰字落在页面底色上、无白卡。 */
 export function Caption({ text }: { text: string }) {
   const palette = usePalette();
   return (

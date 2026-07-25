@@ -17,7 +17,7 @@ import { View } from 'react-native';
 import { DEFAULT_ACCOUNTING_PREFS, useAccountingPrefs, useSaveAccountingPrefs } from '@/api';
 import { toast } from '@/components/toast';
 import { Space, usePalette } from '@/constants/design';
-import { Caption, SettingsList } from '@/features/settings/native-list';
+import { SettingsList } from '@/features/settings/native-list';
 import {
   isLockedCard,
   MIN_VISIBLE_CARDS,
@@ -45,6 +45,19 @@ export default function ReportCardsScreen() {
 
   const prefs = data ?? DEFAULT_ACCOUNTING_PREFS;
   const { visible, hidden } = resolveCardLayout(prefs.report_card_order, prefs.report_card_hidden);
+  const visibleCardsHeader = (
+    <Text modifiers={[font({ size: 17, weight: 'semibold' }), foregroundColor(palette.textSecondary)]}>
+      已展示（长按拖动排序）
+    </Text>
+  );
+  const visibleCardsFooter = (
+    <HStack alignment="center" spacing={Space[2]}>
+      <Image systemName="info.circle" size={13} color={palette.textTertiary} />
+      <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textTertiary)]}>
+        「收支概览」为核心卡，常驻不可隐藏。隐藏的卡片可随时添加回来。
+      </Text>
+    </HStack>
+  );
 
   // 全序 = 可见序 + 隐藏序；隐藏集合另存，落库后由 resolveCardLayout 还原。
   const persist = (nextVisible: ReportCardId[], nextHidden: ReportCardId[]) =>
@@ -77,14 +90,14 @@ export default function ReportCardsScreen() {
     <View style={{ flex: 1, backgroundColor: palette.base }}>
       <Stack.Screen options={{ headerShown: true, title: '报表卡片' }} />
       <SettingsList>
-        <Section title="已展示（长按拖动排序）">
+        <Section header={visibleCardsHeader} footer={visibleCardsFooter}>
           <List.ForEach onMove={onMove}>
             {visible.map((id) => {
               const meta = reportCardMeta(id);
               const locked = isLockedCard(id);
               return (
                 <HStack key={id} alignment="center" spacing={Space[3]} modifiers={locked ? [moveDisabled(true)] : []}>
-                  <Image systemName={meta.icon as IconName} size={19} color={palette.accent} />
+                  <Image systemName={meta.icon as IconName} size={19} color={palette.ink} />
                   <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{meta.title}</Text>
                   <Spacer />
                   {locked ? (
@@ -115,7 +128,7 @@ export default function ReportCardsScreen() {
                   <Image
                     systemName="plus.circle.fill"
                     size={22}
-                    color={palette.accent}
+                    color={palette.ink}
                     modifiers={[contentShape(shapes.rectangle()), onTapGesture(() => showCard(id))]}
                   />
                 </HStack>
@@ -123,8 +136,6 @@ export default function ReportCardsScreen() {
             })}
           </Section>
         ) : null}
-
-        <Caption text="「收支概览」为核心卡，常驻不可隐藏。隐藏的卡片可随时添加回来。" />
       </SettingsList>
     </View>
   );

@@ -136,12 +136,12 @@ export default function FeedbackScreen() {
                   disabled={busy}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
-                  style={[styles.segmentItem, active && { backgroundColor: palette.accent }]}
+                  style={[styles.segmentItem, active && { backgroundColor: palette.ink }]}
                 >
                   <Text
                     style={[
                       styles.segmentText,
-                      { color: active ? palette.onAccent : palette.textSecondary, fontWeight: active ? '600' : '400' },
+                      { color: active ? palette.onInk : palette.textSecondary, fontWeight: active ? '600' : '400' },
                     ]}
                   >
                     {t.label}
@@ -223,7 +223,7 @@ export default function FeedbackScreen() {
               value={contactOk}
               onValueChange={setContactOk}
               disabled={busy}
-              trackColor={{ true: palette.accent, false: palette.separator }}
+              trackColor={{ true: palette.success, false: palette.separator }}
             />
           </View>
 
@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
   labelRow: { flexDirection: 'row', alignItems: 'center', gap: Space[1], marginTop: Space[2] },
   required: { fontSize: 15, fontWeight: '600' },
 
-  // 分段标签（iOS 分段控件观感：灰轨 + accent 选中块）
+  // 分段标签（iOS 分段控件观感：灰轨 + 主题墨色选中块）
   segment: { flexDirection: 'row', padding: Space[1], borderRadius: Radius.md },
   segmentItem: { flex: 1, height: 44, borderRadius: Radius.sm, alignItems: 'center', justifyContent: 'center' },
   segmentText: { fontSize: 15 },
