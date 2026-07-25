@@ -65,7 +65,9 @@ export function useCollapsibleHeader(estimatedHeight = 84) {
 }
 
 export function useManualCollapsibleHeader(estimatedHeight = 84, topInset = 0) {
-  const offset = useSharedValue(0);
+  // useScrollGeometryChange 在首个 SwiftUI layout 后才回传；首帧先按原生 List
+  // 停靠顶部的 -topInset 初始化，避免被误判为已滚过安全区而把标题推到状态栏下。
+  const offset = useSharedValue(-topInset);
   // iOS 18+ 原生滚动几何回调（worklet 跑在 UI 线程，直接写入 offset 驱动头部折叠）。
   // iOS 18 以下返回 null（修饰符 no-op），头部保持常驻、不折叠。
   const scrollGeometry = useScrollGeometryChange((g) => {
