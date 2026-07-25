@@ -6,10 +6,8 @@
  * 头像换图、昵称编辑已可用；登录方式 / 改密 push 到管理小页；账号注销走 delete_account RPC
  * （软注销：家庭流水保留、成员消失、登录身份删除），触发前须输入「注销」二字二次确认。
  */
-import { HStack, Image, Popover, Section, Spacer, Text } from '@expo/ui/swift-ui';
+import { HStack, Image, Popover, RNHostView, Section, Spacer, Text } from '@expo/ui/swift-ui';
 import {
-  aspectRatio,
-  clipShape,
   contentShape,
   fixedSize,
   font,
@@ -19,7 +17,6 @@ import {
   multilineTextAlignment,
   onTapGesture,
   padding,
-  resizable,
   shapes,
 } from '@expo/ui/swift-ui/modifiers';
 import { Stack, useRouter, type Href } from 'expo-router';
@@ -27,6 +24,7 @@ import { useState } from 'react';
 import { Alert, View } from 'react-native';
 
 import { useMyProfile, useUpdateMyAvatar, useUpdateMyNickname } from '@/api';
+import { UserAvatar } from '@/components/user-avatar';
 import { Space, usePalette } from '@/constants/design';
 import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
@@ -111,19 +109,13 @@ export default function AccountScreen() {
           >
             <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>头像</Text>
             <Spacer />
-            {avatarUri ? (
-              <Image
-                uiImage={avatarUri}
-                modifiers={[
-                  resizable(),
-                  aspectRatio({ contentMode: 'fill' }),
-                  frame({ width: 32, height: 32 }),
-                  clipShape('circle'),
-                ]}
+            <RNHostView matchContents>
+              <UserAvatar
+                avatarUrl={avatarUri ?? profile?.avatar_url}
+                nickname={profile?.nickname ?? '用户'}
+                size={32}
               />
-            ) : (
-              <Image systemName="person.crop.circle.fill" size={30} color={palette.textTertiary} />
-            )}
+            </RNHostView>
             <Image systemName="chevron.right" size={13} color={palette.textTertiary} />
           </HStack>
           <HStack

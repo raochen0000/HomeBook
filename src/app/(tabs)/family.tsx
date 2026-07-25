@@ -31,7 +31,8 @@ import {
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
-import { Radius, Space, TabBarInset, useAvatarTints, usePalette } from '@/constants/design';
+import { UserAvatar } from '@/components/user-avatar';
+import { Radius, Space, TabBarInset, usePalette } from '@/constants/design';
 import { MAX_FAMILY_MEMBERS } from '@/constants/family';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import { CategoryManageSheet } from '@/features/category/manage-sheet';
@@ -74,7 +75,6 @@ function formatCny(cents: number): string {
 
 export default function FamilyScreen() {
   const palette = usePalette();
-  const avatarTints = useAvatarTints();
   const insets = useSafeAreaInsets();
   const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 69);
   const period = currentPeriod();
@@ -386,7 +386,6 @@ export default function FamilyScreen() {
 
                 <FamilyCollaborationCard
                   members={members}
-                  avatarTints={avatarTints}
                   todayCount={stats.todayCount}
                   monthParticipantCount={stats.byMemberMonth.size}
                   myMonthCount={stats.myMonthCount}
@@ -564,7 +563,6 @@ function HeroStat({
 // ── 多人家庭：首页协作概览（名册与权限操作下沉至成员管理 Sheet）──
 function FamilyCollaborationCard({
   members,
-  avatarTints,
   todayCount,
   monthParticipantCount,
   myMonthCount,
@@ -579,7 +577,6 @@ function FamilyCollaborationCard({
   onViewLatest,
 }: {
   members: FamilyMembership[];
-  avatarTints: readonly string[];
   todayCount: number;
   monthParticipantCount: number;
   myMonthCount: number;
@@ -621,25 +618,9 @@ function FamilyCollaborationCard({
         </Pressable>
 
         <View style={styles.collaborationAvatars} accessibilityLabel={`家庭成员，共 ${members.length} 人`} accessible>
-          {members.map((member, index) => {
-            const tint = avatarTints[index % avatarTints.length];
-            return member.avatarUrl ? (
-              <Image
-                key={member.id}
-                source={member.avatarUrl}
-                style={styles.collaborationAvatar}
-                contentFit="cover"
-                transition={120}
-              />
-            ) : (
-              <View
-                key={member.id}
-                style={[styles.collaborationAvatar, styles.memberAvatarFallback, { backgroundColor: tint }]}
-              >
-                <SymbolView name="person.fill" tintColor="#FFFFFF" size={20} />
-              </View>
-            );
-          })}
+          {members.map((member) => (
+            <UserAvatar key={member.id} avatarUrl={member.avatarUrl} nickname={member.nickname} size={44} />
+          ))}
         </View>
 
         {!hasTodayActivity ? (
@@ -1080,8 +1061,6 @@ const styles = StyleSheet.create({
   collaborationTitle: { fontSize: 17, lineHeight: 22, fontWeight: '600' },
   collaborationCount: { fontSize: 14, lineHeight: 20, fontWeight: '500' },
   collaborationAvatars: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Space[3] },
-  collaborationAvatar: { width: 44, height: 44, borderRadius: Radius.full },
-  memberAvatarFallback: { alignItems: 'center', justifyContent: 'center' },
   collaborationStats: {
     minHeight: 28,
     borderRadius: Radius.sm,

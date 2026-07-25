@@ -4,7 +4,7 @@
  */
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,12 +14,17 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  defaultFamilyCoverCrop,
   type Family,
+  type FamilyCoverCrop,
+  type PickedFamilyCover,
+  pickFamilyCoverImage,
   useMyFamily,
   useMyProfile,
   useUpdateFamilySettings,
@@ -73,6 +78,7 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
   const [slogan, setSlogan] = useState(family.slogan);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(family.avatar_url);
   const [coverUrl, setCoverUrl] = useState<string | null>(family.cover_url);
+  const [coverDraft, setCoverDraft] = useState<PickedFamilyCover | null>(null);
   const [nameTouched, setNameTouched] = useState(false);
   const [sloganTouched, setSloganTouched] = useState(false);
 
@@ -101,8 +107,19 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
   const changeCover = async () => {
     if (!isOwner || uploading) return;
     try {
-      const url = await uploadCoverM.mutateAsync(family.id);
+      const image = await pickFamilyCoverImage();
+      if (image) setCoverDraft(image);
+    } catch {
+      Alert.alert('该图片资源不可用');
+    }
+  };
+
+  const confirmCoverCrop = async (image: PickedFamilyCover, crop: FamilyCoverCrop) => {
+    if (!isOwner || uploading) return;
+    try {
+      const url = await uploadCoverM.mutateAsync({ familyId: family.id, image, crop });
       if (url) setCoverUrl(url);
+      setCoverDraft(null);
     } catch (error) {
       Alert.alert('封面上传失败', (error as Error).message ?? String(error));
     }
@@ -260,7 +277,201 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
           confirmDisabled={!canSave}
         />
       </SafeAreaView>
+      <CoverCropSheet
+        key={coverDraft?.uri}
+        image={coverDraft}
+        saving={uploadCoverM.isPending}
+        onClose={() => setCoverDraft(null)}
+        onConfirm={(crop) => {
+          if (coverDraft) void confirmCoverCrop(coverDraft, crop);
+        }}
+      />
     </View>
+  );
+}
+
+function clamp(value: number, lower: number, upper: number): number {
+  return Math.max(lower, Math.min(value, upper));
+}
+
+function touchDistance(touches: readonly { pageX: number; pageY: number }[]): number {
+  if (touches.length < 2) return 0;
+  return Math.hypot(touches[0].pageX - touches[1].pageX, touches[0].pageY - touches[1].pageY);
+}
+
+/**
+ * iOS 系统裁切只支持正方形，家庭封面改为应用内固定 3:1 取景。
+ * 裁切是连续画布手势，必须全屏承载，避免与 pageSheet 的上下拖拽关闭手势竞争。
+ */
+function CoverCropSheet({
+  image,
+  saving,
+  onClose,
+  onConfirm,
+}: {
+  image: PickedFamilyCover | null;
+  saving: boolean;
+  onClose: () => void;
+  onConfirm: (crop: FamilyCoverCrop) => void;
+}) {
+  const { width: viewportWidth } = useWindowDimensions();
+  const cropWidth = Math.min(Math.max(viewportWidth - Space[12], 240), 520);
+  const cropHeight = cropWidth / 3;
+  const initialCrop = image ? defaultFamilyCoverCrop(image) : null;
+  const [zoom, setZoom] = useState(1);
+  const imageScale = image ? Math.max(cropWidth / image.width, cropHeight / image.height) * zoom : 1;
+  const renderedWidth = image ? image.width * imageScale : 0;
+  const renderedHeight = image ? image.height * imageScale : 0;
+  const maxOffsetX = Math.max(0, renderedWidth - cropWidth);
+  const maxOffsetY = Math.max(0, renderedHeight - cropHeight);
+  const [position, setPosition] = useState({ x: 0.5, y: 0.5 });
+  const [dragStart, setDragStart] = useState<{ x: number; y: number; positionX: number; positionY: number } | null>(
+    null,
+  );
+  const pinchStart = useRef<{ distance: number; zoom: number } | null>(null);
+
+  if (!image || !initialCrop) return null;
+
+  const crop: FamilyCoverCrop = {
+    width: initialCrop.width / zoom,
+    height: initialCrop.height / zoom,
+    originX: (image.width - initialCrop.width / zoom) * position.x,
+    originY: (image.height - initialCrop.height / zoom) * position.y,
+  };
+  const direction =
+    maxOffsetX > 1 ? '拖动调整取景，双指缩放' : maxOffsetY > 1 ? '拖动调整取景，双指缩放' : '双指缩放后可拖动调整取景';
+  const resetCrop = () => {
+    setZoom(1);
+    setPosition({ x: 0.5, y: 0.5 });
+  };
+
+  return (
+    <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+      {/* Modal 会创建独立的原生容器；需在其根节点重新测量安全区，不能复用页面的 provider。 */}
+      <SafeAreaProvider>
+        <View style={styles.cropRoot}>
+          <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.flex}>
+            <View style={styles.cropHeader}>
+              <CropHeaderButton icon="xmark" label="取消裁切" onPress={onClose} />
+              <Text style={styles.cropTitle}>裁切封面</Text>
+              <CropHeaderButton icon="checkmark" label="完成裁切" disabled={saving} onPress={() => onConfirm(crop)} />
+            </View>
+            <View style={styles.cropContent}>
+              <Text style={styles.cropEyebrow}>家庭封面 · 固定 3:1 比例</Text>
+              <View
+                onStartShouldSetResponder={() => true}
+                onResponderGrant={(event) => {
+                  pinchStart.current = null;
+                  setDragStart({
+                    x: event.nativeEvent.locationX,
+                    y: event.nativeEvent.locationY,
+                    positionX: position.x,
+                    positionY: position.y,
+                  });
+                }}
+                onResponderMove={(event) => {
+                  const touches = event.nativeEvent.touches;
+                  if (touches.length >= 2) {
+                    const distance = touchDistance(touches);
+                    if (!pinchStart.current) pinchStart.current = { distance, zoom };
+                    if (pinchStart.current.distance > 0) {
+                      setZoom(clamp((pinchStart.current.zoom * distance) / pinchStart.current.distance, 1, 3));
+                    }
+                    return;
+                  }
+                  if (pinchStart.current) {
+                    pinchStart.current = null;
+                    setDragStart({
+                      x: event.nativeEvent.locationX,
+                      y: event.nativeEvent.locationY,
+                      positionX: position.x,
+                      positionY: position.y,
+                    });
+                    return;
+                  }
+                  if (!dragStart) return;
+                  const deltaX = event.nativeEvent.locationX - dragStart.x;
+                  const deltaY = event.nativeEvent.locationY - dragStart.y;
+                  setPosition({
+                    x: maxOffsetX ? clamp(dragStart.positionX - deltaX / maxOffsetX, 0, 1) : 0.5,
+                    y: maxOffsetY ? clamp(dragStart.positionY - deltaY / maxOffsetY, 0, 1) : 0.5,
+                  });
+                }}
+                onResponderRelease={() => {
+                  pinchStart.current = null;
+                  setDragStart(null);
+                }}
+                onResponderTerminate={() => {
+                  pinchStart.current = null;
+                  setDragStart(null);
+                }}
+                style={[styles.cropViewport, { width: cropWidth, height: cropHeight }]}
+                accessibilityRole="adjustable"
+                accessibilityLabel="家庭封面取景区域"
+                accessibilityHint={direction}
+              >
+                <Image
+                  source={image.uri}
+                  style={[
+                    styles.cropImage,
+                    {
+                      width: renderedWidth,
+                      height: renderedHeight,
+                      left: -position.x * maxOffsetX,
+                      top: -position.y * maxOffsetY,
+                    },
+                  ]}
+                  contentFit="fill"
+                />
+              </View>
+              <Text style={styles.cropHint}>{direction}</Text>
+              <Pressable
+                onPress={resetCrop}
+                accessibilityRole="button"
+                accessibilityLabel="还原封面取景"
+                style={({ pressed }) => [styles.cropReset, pressed ? styles.cropButtonPressed : null]}
+              >
+                <SymbolView name="arrow.counterclockwise" tintColor="#FFFFFF" size={15} />
+                <Text style={styles.cropResetText}>还原</Text>
+              </Pressable>
+            </View>
+          </SafeAreaView>
+        </View>
+      </SafeAreaProvider>
+    </Modal>
+  );
+}
+
+function CropHeaderButton({
+  icon,
+  label,
+  disabled,
+  onPress,
+}: {
+  icon: 'xmark' | 'checkmark';
+  label: string;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      disabled={disabled}
+      hitSlop={6}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.cropHeaderButton,
+        pressed ? styles.cropButtonPressed : null,
+        disabled ? styles.cropDisabled : null,
+      ]}
+    >
+      {disabled && icon === 'checkmark' ? (
+        <ActivityIndicator color="#FFFFFF" size="small" />
+      ) : (
+        <SymbolView name={icon} tintColor="#FFFFFF" size={18} weight="semibold" />
+      )}
+    </Pressable>
   );
 }
 
@@ -325,6 +536,40 @@ function EditableRow({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
+  cropRoot: { flex: 1, backgroundColor: '#000000' },
+  cropHeader: {
+    height: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Space[4],
+  },
+  cropTitle: { color: '#FFFFFF', fontSize: 17, lineHeight: 22, fontWeight: '600' },
+  cropHeaderButton: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  cropDisabled: { opacity: 0.52 },
+  cropButtonPressed: { opacity: 0.72, transform: [{ scale: 0.97 }] },
+  cropContent: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[4], paddingHorizontal: Space[6] },
+  cropEyebrow: { color: 'rgba(255,255,255,0.72)', fontSize: 14, lineHeight: 20, fontWeight: '500' },
+  cropViewport: { overflow: 'hidden', borderRadius: Radius.lg, borderWidth: 1, borderColor: 'rgba(255,255,255,0.52)' },
+  cropImage: { position: 'absolute' },
+  cropHint: { color: 'rgba(255,255,255,0.72)', fontSize: 14, lineHeight: 20 },
+  cropReset: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[2],
+    paddingHorizontal: Space[3],
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  cropResetText: { color: '#FFFFFF', fontSize: 14, lineHeight: 20, fontWeight: '600' },
   loadingRoot: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: {
     paddingTop: SHEET_CONTENT_TOP_PADDING,

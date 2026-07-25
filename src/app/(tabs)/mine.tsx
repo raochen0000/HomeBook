@@ -9,19 +9,8 @@
  * 折叠头与首页同款：useManualCollapsibleHeader + 原生 List 的 scrollGeometry 修饰符驱动，
  * 头部只作背景与安全区让位（不渲染标题 / 搜索）。
  */
-import { HStack, Image, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
-import {
-  aspectRatio,
-  clipShape,
-  contentShape,
-  font,
-  foregroundColor,
-  frame,
-  listRowInsets,
-  onTapGesture,
-  resizable,
-  shapes,
-} from '@expo/ui/swift-ui/modifiers';
+import { HStack, Image, RNHostView, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
+import { contentShape, font, foregroundColor, listRowInsets, onTapGesture, shapes } from '@expo/ui/swift-ui/modifiers';
 import { useRouter, type Href } from 'expo-router';
 import { Alert, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -29,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useMyProfile } from '@/api';
 import { toast } from '@/components/toast';
+import { UserAvatar } from '@/components/user-avatar';
 import { Space, usePalette } from '@/constants/design';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { MenuRow, Row, SettingsList } from '@/features/settings/native-list';
@@ -90,19 +80,13 @@ export default function MineScreen() {
               onTapGesture(() => router.push('/account' as Href)),
             ]}
           >
-            {avatarUri ? (
-              <Image
-                uiImage={avatarUri}
-                modifiers={[
-                  resizable(),
-                  aspectRatio({ contentMode: 'fill' }),
-                  frame({ width: 60, height: 60 }),
-                  clipShape('circle'),
-                ]}
+            <RNHostView matchContents>
+              <UserAvatar
+                avatarUrl={avatarUri ?? profile?.avatar_url}
+                nickname={profile?.nickname ?? '用户'}
+                size={60}
               />
-            ) : (
-              <Image systemName="person.crop.circle.fill" size={60} color={palette.textTertiary} />
-            )}
+            </RNHostView>
             <VStack alignment="leading" spacing={Space[1]}>
               <Text modifiers={[font({ size: 22, weight: 'semibold' }), foregroundColor(palette.textPrimary)]}>
                 {profile?.nickname ?? '小满'}

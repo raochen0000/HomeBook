@@ -5,14 +5,14 @@
  * 抓手用 responder 事件驱动 translateY 实现下拉关闭（与 AppleLoginSheet 同一手势范式）。
  * 编辑 / 删除走列表左滑，不在此处。RN 实现（remote 头像可直接用 expo-image）。
  */
-import { Image } from 'expo-image';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCategories, useFamilyMembers, useMyProfile, type Transaction } from '@/api';
-import { avatarTintFor, Radius, Space, useAvatarTints, useCategoryColors, usePalette } from '@/constants/design';
+import { UserAvatar } from '@/components/user-avatar';
+import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { clockTime, formatAmount, signForType } from '@/lib/format';
 
@@ -26,30 +26,21 @@ function fullDate(iso: string): string {
 
 function MemberRow({
   label,
-  userId,
   nickname,
   avatarUrl,
   sub,
 }: {
   label: string;
-  userId: string;
   nickname: string;
   avatarUrl: string | null;
   sub?: string;
 }) {
   const palette = usePalette();
-  const avatarTints = useAvatarTints();
   return (
     <View style={styles.field}>
       <Text style={[styles.fieldLabel, { color: palette.textSecondary }]}>{label}</Text>
       <View style={styles.member}>
-        {avatarUrl ? (
-          <Image source={avatarUrl} style={styles.avatar} contentFit="cover" transition={120} />
-        ) : (
-          <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: avatarTintFor(userId, avatarTints) }]}>
-            <Text style={styles.avatarInitial}>{[...nickname.trim()][0]?.toUpperCase() ?? '?'}</Text>
-          </View>
-        )}
+        <UserAvatar avatarUrl={avatarUrl} nickname={nickname} size={28} />
         <Text style={[styles.fieldValue, { color: palette.textPrimary }]}>
           {nickname}
           {sub ? <Text style={{ color: palette.textTertiary }}>{`  ${sub}`}</Text> : null}
@@ -194,16 +185,10 @@ function Body({
               <Text style={[styles.fieldValue, { color: palette.textPrimary }]}>{t.note}</Text>
             </View>
           ) : null}
-          <MemberRow
-            label="记录人"
-            userId={t.recorder_user_id}
-            nickname={nameOf(t.recorder_user_id)}
-            avatarUrl={avatarOf(t.recorder_user_id)}
-          />
+          <MemberRow label="记录人" nickname={nameOf(t.recorder_user_id)} avatarUrl={avatarOf(t.recorder_user_id)} />
           {editedByOther ? (
             <MemberRow
               label="修改者"
-              userId={t.last_editor_user_id as string}
               nickname={nameOf(t.last_editor_user_id as string)}
               avatarUrl={avatarOf(t.last_editor_user_id as string)}
               sub={`于 ${fullDate(t.updated_at)}`}
@@ -245,7 +230,4 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 13 },
   fieldValue: { fontSize: 15, lineHeight: 21 },
   member: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
-  avatar: { width: 28, height: 28, borderRadius: Radius.full },
-  avatarFallback: { alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
 });

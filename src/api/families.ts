@@ -1,7 +1,14 @@
 /** 家庭 / profile 数据访问 + 家庭相关 RPC（创建、邀请、加入）。 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { pickAndUploadAvatar, pickAndUploadFamilyAvatar, pickAndUploadFamilyCover } from '@/adapters/storage';
+import {
+  pickAndUploadAvatar,
+  pickAndUploadFamilyAvatar,
+  pickAndUploadFamilyCover,
+  type FamilyCoverCrop,
+  type PickedFamilyCover,
+  uploadCroppedFamilyCover,
+} from '@/adapters/storage';
 import type { Tables } from '@/lib/database.types';
 import { validateNickname } from '@/lib/profile';
 import { supabase } from '@/lib/supabase';
@@ -11,6 +18,8 @@ import { queryKeys } from './keys';
 export type Profile = Tables<'profiles'>;
 export type Family = Tables<'families'>;
 export type Invitation = Tables<'invitations'>;
+export type { FamilyCoverCrop, PickedFamilyCover } from '@/adapters/storage';
+export { defaultFamilyCoverCrop, pickFamilyCoverImage } from '@/adapters/storage';
 
 /** 当前登录用户的 profile；未登录返回 null。 */
 export async function fetchMyProfile(): Promise<Profile | null> {
@@ -314,7 +323,7 @@ export function useUpdateMyAvatar() {
   });
 }
 
-/** 家庭封面：选图（宽幅原图）→ 压缩 → 上传 → 写回 family.cover_url（仅户主）。取消时 data 为 null。 */
+/** 家庭封面旧入口：选图后默认居中裁为 3:1 → 压缩 → 上传 → 写回 family.cover_url。 */
 export function useUpdateFamilyCover() {
   const qc = useQueryClient();
   return useMutation({
@@ -353,9 +362,12 @@ export function useUploadFamilyAvatar() {
   return useMutation({ mutationFn: (familyId: string) => pickAndUploadFamilyAvatar(familyId) });
 }
 
-/** 上传家庭封面草稿，不修改 families 表；由家庭设置确认操作统一提交 URL。 */
+/** 上传经用户确认的 3:1 家庭封面草稿，不修改 families 表；由家庭设置确认操作统一提交 URL。 */
 export function useUploadFamilyCover() {
-  return useMutation({ mutationFn: (familyId: string) => pickAndUploadFamilyCover(familyId) });
+  return useMutation({
+    mutationFn: ({ familyId, image, crop }: { familyId: string; image: PickedFamilyCover; crop: FamilyCoverCrop }) =>
+      uploadCroppedFamilyCover(familyId, image, crop),
+  });
 }
 
 /** 写回本人昵称（账号页个人资料编辑）。 */

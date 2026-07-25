@@ -18,7 +18,7 @@
  *   - 写按 owner 列把关：本实例 auth.uid() 在 storage 上下文取不到，故不依赖它，改用
  *     storage 服务端盖在 objects.owner / owner_id 的真实 uid（客户端伪造不了）——头像
  *     「文件名 = owner」、封面「owner 须为该家庭户主」。详见迁移 0022 注释。
- *   - 自托管开源 Supabase 无服务端图片变换，故上传前在客户端压缩为方形 JPEG。
+ *   - 自托管开源 Supabase 无服务端图片变换，故上传前在客户端裁切并压缩为 JPEG。
  */
 import { decode } from 'base64-arraybuffer';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
@@ -32,7 +32,7 @@ export const FAMILY_BACKGROUND_BUCKET = 'homebook-family-background';
 /** 意见反馈截图桶（public；见迁移 0025）。路径 {userId}_{rand}.jpg，写策略校验前缀=本人 uid。 */
 export const FEEDBACK_IMAGE_BUCKET = 'homebook-feedback-images';
 
-/** 头像/封面统一方形边长（px）。自托管无服务端变换，故落地即最终尺寸。 */
+/** 头像方形边长（px）。自托管无服务端变换，故落地即最终尺寸。 */
 const IMAGE_SIZE = 512;
 /** JPEG 压缩质量（0–1）。 */
 const COMPRESS_QUALITY = 0.8;
@@ -125,23 +125,44 @@ export async function pickAndUploadFamilyAvatar(familyId: string): Promise<strin
   return uploadPublic(FAMILY_AVATAR_BUCKET, `${familyId}.${imageVersion()}.jpg`, base64);
 }
 
-/** 封面：不裁剪（iOS 编辑器只支持方裁，封面要宽幅原图），宽压到 1280 保比例。 */
+/** 家庭封面固定为与家庭页一致的 3:1 宽幅比例。 */
+export const FAMILY_COVER_ASPECT = 3;
 const COVER_MAX_WIDTH = 1280;
 
-/** 弹相册选图（不裁剪，取原图），取消抛 PickCanceledError，无权限抛 PermissionDeniedError。 */
-async function pickFullImage(): Promise<string> {
+export type PickedFamilyCover = { uri: string; width: number; height: number };
+export type FamilyCoverCrop = { originX: number; originY: number; width: number; height: number };
+
+/** 弹相册选图，随后在应用内以 3:1 取景；取消抛 PickCanceledError。 */
+async function pickFullImage(): Promise<PickedFamilyCover> {
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!perm.granted) throw new PermissionDeniedError();
 
   const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
   if (res.canceled || !res.assets?.length) throw new PickCanceledError();
-  return res.assets[0].uri;
+  const asset = res.assets[0];
+  if (!asset.width || !asset.height) throw new Error('无法读取图片尺寸');
+  return { uri: asset.uri, width: asset.width, height: asset.height };
 }
 
-/** 保比例压缩为 JPEG（宽 1280），返回 base64（不含 data: 前缀）。 */
-async function compressWideToBase64(uri: string): Promise<string> {
-  const ctx = ImageManipulator.manipulate(uri);
-  ctx.resize({ width: COVER_MAX_WIDTH });
+/** 默认居中取景；用于旧入口与裁切页首次展示。 */
+export function defaultFamilyCoverCrop(image: PickedFamilyCover): FamilyCoverCrop {
+  if (image.width / image.height >= FAMILY_COVER_ASPECT) {
+    const width = image.height * FAMILY_COVER_ASPECT;
+    return { originX: (image.width - width) / 2, originY: 0, width, height: image.height };
+  }
+  const height = Math.floor(image.width / FAMILY_COVER_ASPECT);
+  const width = height * FAMILY_COVER_ASPECT;
+  return { originX: (image.width - width) / 2, originY: (image.height - height) / 2, width, height };
+}
+
+/** 裁切并压缩为 JPEG（输出宽 1280），返回 base64（不含 data: 前缀）。 */
+async function compressCroppedCoverToBase64(image: PickedFamilyCover, crop: FamilyCoverCrop): Promise<string> {
+  const originX = Math.max(0, Math.min(Math.round(crop.originX), image.width - 1));
+  const originY = Math.max(0, Math.min(Math.round(crop.originY), image.height - 1));
+  const width = Math.max(1, Math.min(Math.round(crop.width), image.width - originX));
+  const height = Math.max(1, Math.min(Math.round(crop.height), image.height - originY));
+  const ctx = ImageManipulator.manipulate(image.uri);
+  ctx.crop({ originX, originY, width, height }).resize({ width: COVER_MAX_WIDTH });
   const ref = await ctx.renderAsync();
   const out = await ref.saveAsync({ compress: COMPRESS_QUALITY, format: SaveFormat.JPEG, base64: true });
   if (!out.base64) throw new Error('图片压缩失败');
@@ -153,14 +174,28 @@ async function compressWideToBase64(uri: string): Promise<string> {
  * 路径 {familyId}.{version}.jpg：split_part(name,'.',1) 是家庭 id，复用家庭背景桶的户主写策略。
  */
 export async function pickAndUploadFamilyCover(familyId: string): Promise<string | null> {
-  let uri: string;
+  const image = await pickFamilyCoverImage();
+  if (!image) return null;
+  return uploadCroppedFamilyCover(familyId, image, defaultFamilyCoverCrop(image));
+}
+
+/** 选择家庭封面原图；由设置页的 3:1 裁切界面决定最终取景。 */
+export async function pickFamilyCoverImage(): Promise<PickedFamilyCover | null> {
   try {
-    uri = await pickFullImage();
+    return await pickFullImage();
   } catch (e) {
     if (e instanceof PickCanceledError) return null;
     throw e;
   }
-  const base64 = await compressWideToBase64(uri);
+}
+
+/** 将用户确认的 3:1 取景上传为家庭封面草稿，不写回 families 表。 */
+export async function uploadCroppedFamilyCover(
+  familyId: string,
+  image: PickedFamilyCover,
+  crop: FamilyCoverCrop,
+): Promise<string> {
+  const base64 = await compressCroppedCoverToBase64(image, crop);
   return uploadPublic(FAMILY_BACKGROUND_BUCKET, `${familyId}.${imageVersion()}.jpg`, base64);
 }
 

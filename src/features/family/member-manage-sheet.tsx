@@ -4,7 +4,6 @@
  * 点其他成员弹系统操作单（转让 / 移除）；移除 / 转让复用 DangerConfirmSheet 的「输入昵称 + 滑动确认」闸门。
  * 邀请页为独立 pageSheet，由父层（家庭页）打开——本页先关闭再请求父层开，避免 pageSheet 叠加（DESIGN §9.9）。
  */
-import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
 import { ActionSheetIOS, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -19,7 +18,8 @@ import {
   type FamilyMembership,
 } from '@/api';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
-import { Radius, Space, useAvatarTints, useSheetPalette } from '@/constants/design';
+import { UserAvatar } from '@/components/user-avatar';
+import { Radius, Space, useSheetPalette } from '@/constants/design';
 import { MAX_FAMILY_MEMBERS } from '@/constants/family';
 
 import { DangerConfirmSheet } from './danger-confirm-sheet';
@@ -57,7 +57,6 @@ export function MemberManageSheet({
 
 function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvite: () => void }) {
   const palette = useSheetPalette();
-  const avatarTints = useAvatarTints();
   const profileQ = useMyProfile();
   const membershipsQ = useMemberships();
   const removeM = useRemoveMember();
@@ -132,20 +131,13 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
 
           <View style={[styles.card, { backgroundColor: palette.card }]}>
             {members.map((m, i) => {
-              const tint = avatarTints[i % avatarTints.length];
               // 只有「其他普通成员」有可执行操作，才可点、才显示 chevron。
               const actionable = m.userId !== myId && m.role !== 'owner';
               return (
                 <View key={m.id}>
                   {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
                   <Pressable style={styles.memberRow} onPress={() => onMemberTap(m)} disabled={!actionable}>
-                    {m.avatarUrl ? (
-                      <Image source={m.avatarUrl} style={styles.avatar} contentFit="cover" transition={120} />
-                    ) : (
-                      <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: tint }]}>
-                        <SymbolView name="person.fill" tintColor="#FFFFFF" size={20} />
-                      </View>
-                    )}
+                    <UserAvatar avatarUrl={m.avatarUrl} nickname={m.nickname} size={44} />
                     <View style={styles.flex}>
                       <View style={styles.nameRow}>
                         <Text style={[styles.name, { color: palette.textPrimary }]}>
@@ -256,8 +248,6 @@ const styles = StyleSheet.create({
     paddingVertical: Space[3],
     paddingHorizontal: Space[4],
   },
-  avatar: { width: 44, height: 44, borderRadius: Radius.full },
-  avatarFallback: { alignItems: 'center', justifyContent: 'center' },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
   name: { fontSize: 16, fontWeight: '600' },
   sub: { fontSize: 13, lineHeight: 16, marginTop: 2 },
