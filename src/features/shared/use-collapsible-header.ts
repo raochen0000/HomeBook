@@ -41,9 +41,9 @@ function useHeaderStyle(offset: SharedValue<number>, estimatedHeight: number, to
 
   const headerStyle = useAnimatedStyle(() => {
     const h = headerHeight || estimatedHeight;
-    // SwiftUI List/ScrollView 在不同内容态下顶部 offset 可能是 -topInset，也可能是 0。
-    // 只在负 offset 时加回安全区，保证「停靠顶部」稳定归一化为 0，避免首帧把标题推到状态栏下。
-    const progress = Math.max(0, offset.value < 0 ? offset.value + topInset : offset.value);
+    // 原生 List 顶部从 -topInset 起步；始终加回安全区，令内容一开始上滑就驱动淡出。
+    // 不按 offset 正负切换公式，因而跨过 0 时进度保持连续、不会令标题重新出现。
+    const progress = Math.max(0, offset.value + topInset);
     return {
       transform: [{ translateY: interpolate(progress, [0, h], [0, -h], Extrapolation.CLAMP) }],
       opacity: interpolate(progress, [0, h * FADE_RATIO], [1, 0], Extrapolation.CLAMP),
@@ -68,7 +68,6 @@ export function useManualCollapsibleHeader(estimatedHeight = 84, topInset = 0) {
   const offset = useSharedValue(0);
   // iOS 18+ 原生滚动几何回调（worklet 跑在 UI 线程，直接写入 offset 驱动头部折叠）。
   // iOS 18 以下返回 null（修饰符 no-op），头部保持常驻、不折叠。
-  // 写入原始 contentOffsetY；安全区偏移的归一化（+ topInset）在 useHeaderStyle 内完成。
   const scrollGeometry = useScrollGeometryChange((g) => {
     'worklet';
     offset.value = g.contentOffsetY;
