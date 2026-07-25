@@ -7,7 +7,8 @@
  * - 返回态（onBack）：单壳内子视图（编辑器 / 详情）左侧圆形返回按钮，语义为退回上一视图；
  * - 确认态（onConfirm）：显式保存型——左 ✕（onClose，放弃并关闭）或返回（onBack）+ 右 ✓（提交）。
  *
- * 按钮对齐原生 push 页返回头：38pt 圆形浅色底 + 轻阴影。左右各占 38pt 定宽槽位，标题保持严格居中。
+ * 按钮对齐提醒事项的原生圆形玻璃操作：44pt 独立表面 + 轻描边 / 阴影。确认按钮用主题墨色，
+ * 左右各占 44pt 定宽槽位，标题保持严格居中。
  *
  * 使用：置于 sheet 根视图的**最后一个子元素**（浮层最后渲染）；滚动内容区需自行加
  * `paddingTop: SHEET_CONTENT_TOP_PADDING`，否则首屏内容会被标题区压住。
@@ -15,7 +16,17 @@
 import MaskedView from '@react-native-masked-view/masked-view';
 import { BlurView } from 'expo-blur';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Button, Host, type ButtonProps } from '@expo/ui/swift-ui';
+import {
+  buttonStyle,
+  controlSize,
+  disabled as swiftUIDisabled,
+  frame,
+  foregroundColor,
+  glassEffect,
+  labelStyle,
+} from '@expo/ui/swift-ui/modifiers';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, Rect, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
 
 import { Space, useSheetPalette } from '@/constants/design';
@@ -25,7 +36,7 @@ export const SHEET_HEADER_HEIGHT = 64;
 /** 内容区顶部避让：标题区高度 + 额外呼吸距离。 */
 export const SHEET_CONTENT_TOP_PADDING = SHEET_HEADER_HEIGHT + Space[3];
 /** 圆形按钮 / 左右槽位边长（等宽保证标题严格居中）。 */
-const SLOT_SIZE = 38;
+const SLOT_SIZE = 40;
 /** 模糊背景总高：越过标题区底边，让模糊在内容区上方渐隐收尾（无硬边界）。 */
 const BACKDROP_HEIGHT = SHEET_HEADER_HEIGHT + 24;
 
@@ -59,16 +70,56 @@ function ProgressiveBlur() {
 
 function HeaderIconButton({
   icon,
+  label,
   tintColor,
+  prominent,
   disabled,
   onPress,
 }: {
   icon: SymbolViewProps['name'];
+  /** 图标隐藏时保留给 VoiceOver 的原生按钮标签。 */
+  label: string;
   tintColor: string;
+  /** ✓ 保存操作采用主题墨色实底；其余为可见的玻璃表面。 */
+  prominent?: boolean;
   disabled?: boolean;
   onPress: () => void;
 }) {
   const palette = useSheetPalette();
+  const isProminent = prominent && !disabled;
+  const supportsLiquidGlass = Platform.OS === 'ios' && Number(Platform.Version) >= 26;
+  const nativeIconColor = disabled ? palette.textTertiary : isProminent ? palette.onInk : palette.textPrimary;
+
+  // 仅在支持 Liquid Glass 的 iOS 上启用原生 interactive glass。
+  // 低版本走下方的 RN 表面，避免 SwiftUI `bordered` 降级成不符合页面层级的灰色按钮。
+  if (supportsLiquidGlass) {
+    return (
+      <Host matchContents>
+        <Button
+          label={label}
+          systemImage={icon as ButtonProps['systemImage']}
+          onPress={onPress}
+          modifiers={[
+            labelStyle('iconOnly'),
+            controlSize('large'),
+            frame({ width: SLOT_SIZE, height: SLOT_SIZE }),
+            buttonStyle('plain'),
+            foregroundColor(nativeIconColor),
+            glassEffect({
+              glass: {
+                variant: 'regular',
+                interactive: !disabled,
+                ...(isProminent ? { tint: palette.ink } : {}),
+              },
+              shape: 'circle',
+            }),
+            ...(disabled ? [swiftUIDisabled(true)] : []),
+          ]}
+        />
+      </Host>
+    );
+  }
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -77,7 +128,12 @@ function HeaderIconButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.btn,
-        { backgroundColor: palette.card, shadowColor: palette.shadow },
+        {
+          backgroundColor: isProminent ? palette.ink : palette.sheetHeaderControl,
+          borderColor: isProminent ? palette.ink : palette.separator,
+          shadowColor: palette.shadow,
+        },
+        isProminent ? styles.btnProminent : null,
         pressed ? styles.btnPressed : null,
         disabled ? styles.btnDisabled : null,
       ]}
@@ -114,6 +170,7 @@ export function SheetHeader({
           {onLeft ? (
             <HeaderIconButton
               icon={onBack ? 'chevron.left' : 'xmark'}
+              label={onBack ? '返回' : '关闭'}
               tintColor={palette.textPrimary}
               onPress={onLeft}
             />
@@ -126,7 +183,9 @@ export function SheetHeader({
           {onConfirm ? (
             <HeaderIconButton
               icon="checkmark"
-              tintColor={confirmDisabled ? palette.textTertiary : palette.textPrimary}
+              label="保存"
+              tintColor={confirmDisabled ? palette.textTertiary : palette.onInk}
+              prominent
               disabled={confirmDisabled}
               onPress={onConfirm}
             />
@@ -168,11 +227,13 @@ const styles = StyleSheet.create({
     borderRadius: SLOT_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOffset: { width: 0, height: 8 },
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
-    shadowRadius: 18,
+    shadowRadius: 8,
     elevation: 3,
   },
+  btnProminent: { borderWidth: 0 },
   btnPressed: { opacity: 0.72, transform: [{ scale: 0.97 }] },
   btnDisabled: { opacity: 0.48 },
   title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },

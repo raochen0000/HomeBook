@@ -2,20 +2,32 @@
  * 首页（Tab 1）：本月概览卡 + 月度总结条 + 按日分组流水列表。
  * 内容主体用 @expo/ui/swift-ui 原生渲染；外层脚手架（标题栏 / FAB / 状态页）用 RN。
  */
-import { Host, List, Section, Spacer, VStack } from '@expo/ui/swift-ui';
+import { Button, Host, List, Section, Spacer, VStack } from '@expo/ui/swift-ui';
 import {
+  accessibilityHint,
+  accessibilityLabel,
+  background,
+  buttonStyle,
+  clipShape,
+  contentShape,
+  font,
+  foregroundStyle,
   frame,
+  glassEffect,
+  labelStyle,
   listRowBackground,
   listRowInsets,
   listRowSeparator,
   listSectionSpacing,
   listStyle,
+  shadow,
+  shapes,
 } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Link, useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -58,6 +70,78 @@ import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { clockTime, currentPeriod, dayKey, greetingForHour, humanDay, previousPeriod, signForType } from '@/lib/format';
 
 type Group = { key: string; label: string; totalCents: number; rows: RowData[] };
+
+/** 常驻 FAB 的 SF Symbol 尺寸；调大 / 调小此值不会改变 56pt 触控面。 */
+const RECORD_FAB_ICON_SIZE = 28;
+
+/**
+ * iOS 走 SwiftUI 原生 Button：系统负责按压态、触控与 VoiceOver 语义；Android / Web 保留 RN 回退。
+ * 浮层定位仍留在 RN 壳上，避免 SwiftUI Host 与页面滚动容器争夺布局所有权。
+ */
+function RecordFloatingActionButton({
+  onPress,
+  surfaceColor,
+  iconColor,
+}: {
+  onPress: () => void;
+  surfaceColor: string;
+  iconColor: string;
+}) {
+  if (Platform.OS === 'ios') {
+    const supportsLiquidGlass = Number.parseInt(String(Platform.Version), 10) >= 26;
+    const surfaceModifiers = supportsLiquidGlass
+      ? [
+          // iOS 26+：交给 SwiftUI 绘制系统 Liquid Glass；tint 保留浅白 / 深 pageSheet 的主题意图。
+          glassEffect({
+            glass: { variant: 'regular', interactive: true, tint: surfaceColor },
+            shape: 'circle',
+          }),
+        ]
+      : [
+          // 旧系统没有 Liquid Glass，回退为无描边的中性实底，仍保持 56pt 触控面。
+          background(surfaceColor, shapes.circle()),
+          clipShape('circle'),
+          shadow({ color: '#29000000', radius: 10, x: 0, y: 3 }),
+        ];
+
+    return (
+      <Host matchContents style={styles.fabHost}>
+        <Button
+          label="记一笔"
+          systemImage="plus"
+          onPress={onPress}
+          modifiers={[
+            buttonStyle('plain'),
+            labelStyle('iconOnly'),
+            font({ size: RECORD_FAB_ICON_SIZE, weight: 'medium' }),
+            foregroundStyle(iconColor),
+            frame({ width: 56, height: 56 }),
+            contentShape(shapes.circle()),
+            ...surfaceModifiers,
+            accessibilityLabel('记一笔'),
+            accessibilityHint('打开记账面板，为家庭账本添加一笔流水'),
+          ]}
+        />
+      </Host>
+    );
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="记一笔"
+      accessibilityHint="打开记账面板，为家庭账本添加一笔流水"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.fabFallback,
+        { backgroundColor: surfaceColor, shadowColor: '#000' },
+        pressed ? styles.fabPressed : null,
+      ]}
+    >
+      <SymbolView name="plus" tintColor={iconColor} size={RECORD_FAB_ICON_SIZE} weight="medium" />
+    </Pressable>
+  );
+}
 
 /** 月末「家里一起记下了 N 笔」提示条的关闭记忆（存被关闭的周期 YYYY-MM，本月内不再出现）。 */
 const COUNT_BANNER_DISMISSED_KEY = 'home.countBannerDismissedPeriod';
@@ -288,7 +372,9 @@ export default function HomeScreen() {
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <View style={styles.flex}>
         {loading ? (
-          <HomeSkeleton topPadding={headerHeight - insets.top + Space[2]} />
+          // 骨架是普通 RN 视图，不像 SwiftUI List 那样会自动避开顶部安全区；
+          // 必须预留完整的悬浮标题高度，避免首屏内容被标题覆盖。
+          <HomeSkeleton topPadding={headerHeight + Space[2]} />
         ) : !session ? (
           <View style={styles.center}>
             <ThemedText style={{ color: palette.textSecondary }}>请先登录</ThemedText>
@@ -403,10 +489,11 @@ export default function HomeScreen() {
       </View>
 
       {/* 记一笔 悬浮钮（IA §2：Tab Bar 右上方常驻） */}
-      {/* 系统蓝强调底 + 白加号：accent 系统蓝（DESIGN §9.2 v0.6.0） */}
-      <Pressable onPress={openCreate} style={[styles.fab, { backgroundColor: palette.ink, shadowColor: '#000' }]}>
-        <SymbolView name="plus" tintColor={palette.onInk} size={28} weight="semibold" />
-      </Pressable>
+      <RecordFloatingActionButton
+        onPress={openCreate}
+        surfaceColor={palette.floatingActionSurface}
+        iconColor={palette.onFloatingActionSurface}
+      />
 
       {/* 记账面板（流程 2 + 编辑/删除 流程 10） */}
       <RecordSheet
@@ -463,7 +550,12 @@ const styles = StyleSheet.create({
   title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
   subtitle: { fontSize: 14, lineHeight: 18 },
   searchBtn: { paddingTop: Space[2] },
-  fab: {
+  fabHost: {
+    position: 'absolute',
+    right: Space[4],
+    bottom: 96,
+  },
+  fabFallback: {
     position: 'absolute',
     right: Space[4],
     bottom: 96,
@@ -472,9 +564,10 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 5,
   },
+  fabPressed: { opacity: 0.82, transform: [{ scale: 0.96 }] },
 });

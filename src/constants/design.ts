@@ -75,7 +75,7 @@ type Palette = {
   onAccent: string;
   /**
    * 墨色：**全局**「用户的确认 / 主操作」色（v0.6.5 起，不再限登录 surface）。用于：主 CTA 实底、
-   * ➕ 记一笔 FAB 实底、Sheet 顶部的确认文字动作（完成 / 保存 / 应用 / 获取验证码，加粗）、
+   * Sheet 顶部的确认文字动作（完成 / 保存 / 应用 / 获取验证码，加粗）、
    * 勾选态、滑动确认。蓝（accent）退回「跳转 / 链接 + 系统交互」——可点文字与链接、列表选中态、
    * 开关 on、进度、聚焦框——不再做按钮实底。见 DESIGN §2.5 / §9.5。
    *
@@ -92,6 +92,12 @@ type Palette = {
   shadow: string;
   /** 卡内胶囊（周期选择器）底色（中性 systemFill） */
   cardPill: string;
+  /** pageSheet 标题区常规圆形操作按钮的玻璃表面；必须与 sheet 底形成可见层级。 */
+  sheetHeaderControl: string;
+  /** 常驻「记一笔」浮钮表面；浅色白卡、深色 pageSheet，避开黑白反相造成的视觉跳跃。 */
+  floatingActionSurface: string;
+  /** 浮钮图标颜色，与浮钮表面成对定义。 */
+  onFloatingActionSurface: string;
 };
 
 /**
@@ -120,6 +126,9 @@ const light: Palette = {
   bannerTint: 'rgba(120,120,128,0.12)',
   shadow: 'rgba(0,0,0,0.06)',
   cardPill: 'rgba(120,120,128,0.12)',
+  sheetHeaderControl: '#FFFFFF',
+  floatingActionSurface: '#FFFFFF',
+  onFloatingActionSurface: '#1C1C1E',
 };
 
 const dark: Palette = {
@@ -144,6 +153,9 @@ const dark: Palette = {
   bannerTint: 'rgba(120,120,128,0.24)',
   shadow: 'rgba(0,0,0,0.4)',
   cardPill: 'rgba(255,255,255,0.12)',
+  sheetHeaderControl: '#3A3A3C',
+  floatingActionSurface: '#1C1C1E',
+  onFloatingActionSurface: '#FFFFFF',
 };
 
 /** 分类识别色（DESIGN §2.8），按主题取值。 */
