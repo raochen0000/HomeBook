@@ -4,7 +4,7 @@
  * 入口收敛（PRD §18.1）：原列表「个人信息 / 账号与安全 / 绑定手机号」已并入顶部用户块 → 账号页（G2）。
  * - 顶部用户块整块点击 → push /account（换头像在账号页「头像」行）。
  * - 记账设置 / 导出数据 / 通知设置 / 帮助 / 反馈 / 关于 → push 各子页。
- * - 深色模式 / 语言 → 行内原生菜单式 Picker 下拉；当前值与箭头使用主题次级文字色（深色仍跟随系统，语言仅简体中文）。
+ * - 深色模式 / 语言 → 行内原生菜单式 Picker 下拉；当前值与箭头使用主题次级文字色（语言仅简体中文）。
  * - 退出登录 → 二次确认后登出（真实操作）。
  * 折叠头与首页同款：useManualCollapsibleHeader + 原生 List 的 scrollGeometry 修饰符驱动，
  * 头部只作背景与安全区让位（不渲染标题 / 搜索）。
@@ -23,6 +23,7 @@ import { Space, usePalette } from '@/constants/design';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { MenuRow, Row, SettingsList } from '@/features/settings/native-list';
 import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-header';
+import { useThemePreference, type ThemePreference } from '@/features/settings/theme-preference';
 import { signOut, useSession } from '@/lib/auth';
 
 const APP_VERSION = 'v1.0.0';
@@ -45,6 +46,7 @@ export default function MineScreen() {
   );
   const { session } = useSession();
   const { data: profile } = useMyProfile();
+  const { preference: themePreference, setPreference: setThemePreference } = useThemePreference();
 
   const avatarFiles = useAvatarFiles(profile ? [{ id: profile.id, avatar_url: profile.avatar_url }] : []);
   const avatarUri = profile ? (avatarFiles.get(profile.id) ?? null) : null;
@@ -109,15 +111,12 @@ export default function MineScreen() {
         {/* 卡二 通用 */}
         <Section>
           <Row icon="bell.fill" label="通知设置" onPress={() => router.push('/settings/notifications' as Href)} />
-          {/* 深色模式（本轮占位）：selection 固定「跟随系统」，选浅色/深色不改状态、仅提示即将上线。 */}
           <MenuRow
             icon="moon.fill"
             label="深色模式"
-            selection="system"
+            selection={themePreference}
             tintColor={palette.textSecondary}
-            onSelectionChange={(v) => {
-              if (v !== 'system') toast.info('深色模式即将上线，当前跟随系统');
-            }}
+            onSelectionChange={(value) => setThemePreference(value as ThemePreference)}
             options={[
               { value: 'system', label: '跟随系统' },
               { value: 'light', label: '浅色' },

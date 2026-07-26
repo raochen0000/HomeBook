@@ -11,6 +11,7 @@ import { NotificationGate } from '@/features/notifications/notification-gate';
 import { usePushRegistration } from '@/features/notifications/use-push-registration';
 import { useRecurringCatchup } from '@/features/record/use-recurring-catchup';
 import { SearchProvider } from '@/features/search/search-provider';
+import { ThemePreferenceProvider } from '@/features/settings/theme-preference';
 import { useSession } from '@/lib/auth';
 import { devAutoSignIn } from '@/lib/dev-auth';
 import { queryClient } from '@/lib/query-client';
@@ -33,7 +34,9 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-        <AppShell />
+        <ThemePreferenceProvider>
+          <AppShell />
+        </ThemePreferenceProvider>
       </SafeAreaProvider>
     </QueryClientProvider>
   );
