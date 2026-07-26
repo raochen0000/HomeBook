@@ -207,6 +207,7 @@ git --version
 - **用户主表 = `auth.users`（Supabase Auth 托管）+ `public.profiles`（业务字段）**：DATAMODEL 中的 `USER` 实体落地时拆分——手机号/OTP/session 由 Supabase Auth 的 `auth.users` 持有，**不在业务表冗余 `phone`**；`public.profiles.id` 一对一引用 `auth.users(id)`（`ON DELETE CASCADE`），存 `nickname / avatar_url / current_family_id / last_login_at / status`。新用户注册时由 `handle_new_user()` 触发器自动建 profiles 行。
 - **手机号 OTP**：客户端 `signInWithOtp` → **GoTrue 自生成 OTP** → 经 **Send SMS Hook → 阿里云 FC → 阿里云短信认证(PNVS)`dypnsapi.SendSmsVerifyCode`** 下发（FC 只当下发管道；个人开发者免企业资质，弃用需企业报备的「短信服务」）→ 客户端 `verifyOtp` 回填 → **GoTrue 自校验并签发 session**（JWT），存入 `expo-secure-store`。FC 代码与部署见 `services/sms-hook-fc/`。
 - **Apple 登录**：Supabase Auth Apple provider（iOS 必备的第三方登录合规项）。
+- **邮箱密码防爆破**：GoTrue 的 Password Verification Hook 在密码校验后、session 签发前调用 `public.password_verification_attempt(jsonb)`（迁移 `…0036_password_login_lockout.sql`）。同一用户连续 5 次密码错误即写入 `locked_until = now() + 24h` 并返回拒绝决策；锁定期内正确密码也不能创建 session，到期后的下一次尝试原子清零并自然恢复，且不注销用户的其它既有会话。该表开启 RLS，只授予 `supabase_auth_admin`，客户端与普通登录态均不可读写。自托管 auth 容器须启用：`GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_ENABLED=true`、`GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_URI=pg-functions://postgres/public/password_verification_attempt`，然后重建 auth 容器。
 - **微信登录（后期可选）**：Supabase Auth 无内置，需自实现 OAuth provider。
 - **风控**：验证码下发做频率限制与防刷（按手机号/IP/设备）；邀请码为 **6 位大写字母数字（排除易混 `0/O/1/I`）**、24h 有效且户主权限变更即失效（服务端校验）；**`preview_family_by_code` 凭码即返家庭信息，须按 IP / 设备 / 失败次数限频，防邀请码枚举爆破**。
 - **客户端只持 anon key**：service role key 绝不进客户端/仓库；权限由 RLS 兜底（见 AGENTS.md §4）。

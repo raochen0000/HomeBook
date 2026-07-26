@@ -9,3 +9,10 @@ project_id = "HomeBook"
 # 本地开发栈用，远程自托管实例不依赖此配置
 port = 54322
 major_version = 15
+
+# 密码校验完成、session 签发前的服务端 Hook；配合 0036 迁移实现
+# 「连续输错 5 次 → 锁定 24 小时」。远程自托管实例须在 auth 容器配置等效的
+# GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_* 环境变量，详见 docs/TECH.md §7.3。
+[auth.hook.password_verification_attempt]
+enabled = true
+uri = "pg-functions://postgres/public/password_verification_attempt"

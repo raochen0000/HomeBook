@@ -37,11 +37,23 @@ export function useSession(): { session: Session | null; loading: boolean } {
  * 邮箱登录；账号不存在则自动注册（实例已开 mailer_autoconfirm，注册即拿到 session）。
  * Supabase 出于防枚举对「无此账号」与「密码错误」都返回同一错误，故先试登录、失败再试注册：
  * 注册成功＝原本没账号；注册报「已注册」＝登录凭据不匹配，对外仍给合并提示。
+ * 密码校验 Hook 返回 429 时代表服务端已锁定账号，绝不能再回退到注册流程。
  */
 export async function signInWithEmail(email: string, password: string): Promise<void> {
   const trimmed = email.trim();
   const signIn = await supabase.auth.signInWithPassword({ email: trimmed, password });
   if (!signIn.error) return;
+
+  // Password Verification Hook 的 reject 未承诺固定 HTTP 状态码，故先按其服务端文案识别。
+  // 一旦账户锁定，不能再回退到 signUp，否则会吞掉锁定提示。
+  if (signIn.error.message.includes('账号已锁定')) throw new Error(signIn.error.message);
+  if (signIn.error.status === 429) {
+    // 其它 429 也不尝试注册，避免把限流误当成账号不存在。
+    throw new Error('登录请求过于频繁，请稍后再试');
+  }
+  if (signIn.error.status && ![400, 401].includes(signIn.error.status)) {
+    throw new Error(signIn.error.message || '登录失败，请稍后重试');
+  }
 
   const signUp = await supabase.auth.signUp({
     email: trimmed,
