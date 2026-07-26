@@ -44,7 +44,9 @@ echo "v1,whsec_$(openssl rand -base64 32 | tr -d '\n')"
 
 按 [`.env.example`](.env.example) 在函数配置里逐项填入：
 `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET` / `SMS_SIGN_NAME`（从「短信认证 →
-签名配置」复制）/ `SMS_TEMPLATE_CODE`（登录/注册＝`100001`）/ `HOOK_SECRET`（上一步那串）。
+签名配置」复制）/ `SMS_TEMPLATE_CODE`（登录/注册＝`100001`）/ `HOOK_SECRET`（上一步那串）/ `SUPABASE_URL`
+与 `SUPABASE_SERVICE_ROLE_KEY`。后两项只放在 FC：函数会调用数据库 RPC，以用户 ID 和中国自然日原子
+计数，**每位用户每天最多发送 5 条短信验证码**；第 6 次会被拒绝。绝不能把 ServiceKey 放到 App 或提交进仓库。
 系统赠送模板含 `${code}` + `${min}` 两个变量，代码默认已自动填好（`min` = `SMS_OTP_EXP`/60，即 5），
 无需额外配置；仅当模板变量不同才用 `SMS_TEMPLATE_PARAM` 覆盖。
 

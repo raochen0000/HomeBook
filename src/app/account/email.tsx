@@ -48,6 +48,9 @@ function maskEmail(email?: string | null): string {
 function bindErrorText(err: unknown): string {
   const e = err as { status?: number; message?: string; name?: string; code?: string };
   const msg = (e?.message ?? '').toLowerCase();
+  if (e?.status === 429 || msg.includes('daily email verification code limit')) {
+    return '今日邮箱验证码已达 5 次上限，请明天再试';
+  }
   if (e?.code === 'email_exists' || msg.includes('already registered') || msg.includes('already been registered')) {
     return '该邮箱已被其他账号绑定，请更换邮箱';
   }

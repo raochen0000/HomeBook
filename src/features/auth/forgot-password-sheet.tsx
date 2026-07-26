@@ -41,6 +41,9 @@ const OTP_LEN = 6;
 function resetErrorText(err: unknown): string {
   const e = err as { status?: number; message?: string; name?: string; code?: string };
   const msg = (e?.message ?? '').toLowerCase();
+  if (e?.status === 429 || msg.includes('daily email verification code limit')) {
+    return '今日邮箱验证码已达 5 次上限，请明天再试';
+  }
   if (e?.code === 'otp_expired' || msg.includes('invalid') || msg.includes('expired') || msg.includes('token')) {
     return '验证码错误或已过期，请重新获取';
   }

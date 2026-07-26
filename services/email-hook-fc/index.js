@@ -75,7 +75,12 @@ async function processHook(method, headers, rawBody) {
     const user = (payload && payload.user) || {};
     const data = (payload && payload.email_data) || {};
     const { email, token } = pickRecipient(user, data);
-    if (!email || !token) return { status: 200, body: hookError(400, 'missing recipient email or token') };
+    if (!user.id || !email || !token) return { status: 200, body: hookError(400, 'missing user.id, recipient email or token') };
+
+    // 在邮件服务商调用前原子占用当天配额，确保并发 Hook 也不会超过每天五封。
+    if (!(await consumeDailyQuota(user.id, 'email'))) {
+      return { status: 200, body: hookError(429, 'daily email verification code limit reached') };
+    }
 
     // 3) 组邮件（主题/正文按动作类型），经阿里云邮件推送发出去。
     const tpl = EMAIL_TEMPLATES[data.email_action_type] || EMAIL_TEMPLATES._default;
@@ -89,6 +94,21 @@ async function processHook(method, headers, rawBody) {
     // 失败：200 + error 对象，GoTrue 会把它当作邮件下发失败上报给客户端。
     return { status: 200, body: hookError(500, 'email delivery failed') };
   }
+}
+
+/** 用仅部署在 FC 的 service_role 调用配额 RPC，标量返回兼容 true / [true] 两种 PostgREST 形态。 */
+async function consumeDailyQuota(userId, channel) {
+  const url = `${env('SUPABASE_URL').replace(/\/+$/, '')}/rest/v1/rpc/consume_verification_delivery_quota`;
+  const key = env('SUPABASE_SERVICE_ROLE_KEY');
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ p_user_id: userId, p_channel: channel }),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`verification quota RPC failed: HTTP ${response.status} ${text}`);
+  const value = text ? JSON.parse(text) : false;
+  return value === true || (Array.isArray(value) && value[0] === true);
 }
 
 // ── 邮件动作类型 → 主题/开场白 ───────────────────────────────────────────────────
@@ -290,4 +310,4 @@ function env(name) {
 
 // FC 以 `node index.js` 启动时起服务；被 require（单测）时只导出，不监听。
 if (require.main === module) startServer();
-module.exports = { processHook, verifyWebhook, pickRecipient, buildHtml, rpcSign, percentEncode };
+module.exports = { processHook, verifyWebhook, pickRecipient, buildHtml, rpcSign, percentEncode, consumeDailyQuota };

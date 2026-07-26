@@ -57,6 +57,7 @@ Studio → **Storage** → 新建这些 **Public** 桶（策略已由迁移建�
   - ⇒ 结果：`email-hook-fc` 这个实例**用不上**，闲置即可。
 - **手机号** → 用 **SMS Webhook** tab（**不是**「阿里云 SMS Provider」——那个走短信服务要企业资质；你走 PNVS→FC，见 [[supabase-phone-otp-native-aliyun]]）：
   - 开启 SMS Web Hook；https 服务地址 = `homebooksms` FC 地址；**Hook 密钥 = 该 FC 的 `HOOK_SECRET`（两边必须一致，否则验签失败、收不到码）**；SMS OTP 有效期填个值（如 `600`）。
+  - `homebooksms` FC 还必须配置 `SUPABASE_URL` 与 `SUPABASE_SERVICE_ROLE_KEY`，并先执行迁移 `0035`：Hook 会在供应商下发前按用户和中国自然日原子扣减配额，每人每天最多 **5 条短信验证码**。
 - **Apple** → 托管版控制台**没有 Apple provider**：
   - **国内版：搁置**。主登录是手机 OTP + 邮箱（均第一方）；只要不接第三方社交登录，App Store 4.8 不强制 Apple。⚠️ 一旦加微信/Google 登录，Apple 立即变强制。
   - **国际版：本就不用阿里云 RDS Supabase**，走 **Supabase 云版 / 海外自建**（原生支持 Apple）。App 代码（`src/app/account/apple.tsx` 的 `linkIdentity`）已就绪，后端配好 provider 零改动生效。
@@ -65,6 +66,8 @@ Studio → **Storage** → 新建这些 **Public** 桶（策略已由迁移建�
 ## 4. FC（托管版：**只 push-fc 一个要改**）
 
 > SMS Hook 已在第 3 步控制台配好；Email Hook 托管版没有（走了 SMTP）→ `email-hook-fc` 闲置。（自建版则要在 Studio → Authentication → Hooks 配 SMS + Email 两个 Hook，且 URI 必须 FC 内网地址。）
+
+> **邮件验证码每日上限**：自建版启用 `email-hook-fc` 后，与短信相同由迁移 `0035` 强制为每用户每天 5 封（FC 需配置 `SUPABASE_URL` 与 `SUPABASE_SERVICE_ROLE_KEY`）。当前阿里云托管版的邮件直接由 GoTrue → SMTP 下发，绕过了该 Hook，因此无法仅靠 App 或数据库迁移可靠地限额；要在托管版强制邮件上限，需将邮件改为可调用此 Hook 的自建 Auth，或在 SMTP 前部署能识别收件人并调用该 RPC 的邮件网关。
 
 - **push-fc**（`homebook_notification_push`，FC 定时轮询拉通知投递）：FC 控制台 → 该函数 → **配置 → 环境变量**：
   - `SUPABASE_URL` = `http://112.124.220.11`

@@ -49,7 +49,9 @@ echo "v1,whsec_$(openssl rand -base64 32 | tr -d '\n')"
 ## 3. 配置 FC 环境变量
 
 按 [`.env.example`](.env.example) 逐项填：`ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET`
-/ `DM_ACCOUNT_NAME`（`no-reply@homebook-app.com`）/ `HOOK_SECRET`（上一步那串）。可选 `DM_FROM_ALIAS`（默认「家账」）。
+/ `DM_ACCOUNT_NAME`（`no-reply@homebook-app.com`）/ `HOOK_SECRET`（上一步那串）/ `SUPABASE_URL` /
+`SUPABASE_SERVICE_ROLE_KEY`。后两项只放在 FC：函数会调用数据库 RPC，以用户 ID 和中国自然日原子计数，
+**每位用户每天最多发送 5 封验证码邮件**；第 6 次会被拒绝。绝不能把 ServiceKey 放到 App 或提交进仓库。可选 `DM_FROM_ALIAS`（默认「家账」）。
 
 ## 4. 本地先验「FC + 邮件推送」这半边（强烈建议）
 

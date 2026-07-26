@@ -47,6 +47,9 @@ function maskPhone(e164?: string | null): string {
 function bindErrorText(err: unknown): string {
   const e = err as { status?: number; message?: string; name?: string; code?: string };
   const msg = (e?.message ?? '').toLowerCase();
+  if (e?.status === 429 || msg.includes('daily sms verification code limit')) {
+    return '今日短信验证码已达 5 次上限，请明天再试';
+  }
   if (e?.code === 'phone_exists' || msg.includes('already registered') || msg.includes('already been registered')) {
     return '该手机号已被其他账号绑定，请更换号码';
   }

@@ -67,9 +67,15 @@ async function processHook(method, headers, rawBody) {
 
     // 2) 取出手机号与 GoTrue 生成的验证码。
     const payload = JSON.parse(rawBody || '{}');
-    const phone = payload && payload.user && payload.user.phone;
+    const user = (payload && payload.user) || {};
+    const phone = user.phone;
     const otp = payload && payload.sms && payload.sms.otp;
-    if (!phone || !otp) return { status: 200, body: hookError(400, 'missing user.phone or sms.otp') };
+    if (!user.id || !phone || !otp) return { status: 200, body: hookError(400, 'missing user.id, user.phone or sms.otp') };
+
+    // 在调用短信供应商前原子占用当天配额，避免客户端绕过 60 秒倒计时或并发请求滥发短信。
+    if (!(await consumeDailyQuota(user.id, 'sms'))) {
+      return { status: 200, body: hookError(429, 'daily SMS verification code limit reached') };
+    }
 
     // 3) 经阿里云短信认证服务把这串验证码发出去。
     await sendAliyunCode(phone, otp);
@@ -81,6 +87,24 @@ async function processHook(method, headers, rawBody) {
     // 失败：200 + error 对象，GoTrue 会把它当作短信下发失败上报给客户端。
     return { status: 200, body: hookError(500, 'SMS delivery failed') };
   }
+}
+
+/**
+ * 用 FC 专属的 service_role 调数据库 RPC；不能由客户端调用，否则会绕过配额。
+ * PostgREST 对标量 RPC 在不同版本会返回 true 或 [true]，两种都兼容。
+ */
+async function consumeDailyQuota(userId, channel) {
+  const url = `${env('SUPABASE_URL').replace(/\/+$/, '')}/rest/v1/rpc/consume_verification_delivery_quota`;
+  const key = env('SUPABASE_SERVICE_ROLE_KEY');
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ p_user_id: userId, p_channel: channel }),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`verification quota RPC failed: HTTP ${response.status} ${text}`);
+  const value = text ? JSON.parse(text) : false;
+  return value === true || (Array.isArray(value) && value[0] === true);
 }
 
 // ── 阿里云短信认证（dypnsapi.SendSmsVerifyCode）─────────────────────────────────
@@ -195,4 +219,4 @@ function env(name) {
 
 // FC 以 `node index.js` 启动时起服务；被 require（单测）时只导出，不监听。
 if (require.main === module) startServer();
-module.exports = { processHook, verifyWebhook, toAliyunPhone, buildTemplateParam };
+module.exports = { processHook, verifyWebhook, toAliyunPhone, buildTemplateParam, consumeDailyQuota };

@@ -104,6 +104,9 @@ function otpErrorText(err: unknown): string {
   const status = e?.status;
   const msg = (e?.message ?? '').toLowerCase();
 
+  if (status === 429 || msg.includes('daily sms verification code limit')) {
+    return '今日短信验证码已达 5 次上限，请明天再试';
+  }
   if (e?.code === 'otp_expired' || msg.includes('invalid') || msg.includes('expired')) {
     return '验证码错误或已过期，请重新获取';
   }
