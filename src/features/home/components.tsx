@@ -433,12 +433,14 @@ function ProgressBar({
   const trackW = Dimensions.get('window').width - pageHorizontalInset * 2 - contentHorizontalInset * 2;
   const fillW = Math.round(Math.max(0, Math.min(1, frac)) * trackW);
   return (
-    <HStack spacing={0} modifiers={[frame({ width: trackW, height: 8 }), background(track), cornerRadius(Radius.full)]}>
+    <ZStack
+      alignment="leading"
+      modifiers={[frame({ width: trackW, height: 8 }), background(track), cornerRadius(Radius.full)]}
+    >
       <HStack modifiers={[frame({ width: fillW, height: 8 }), background(color), cornerRadius(Radius.full)]}>
         <Spacer />
       </HStack>
-      <Spacer />
-    </HStack>
+    </ZStack>
   );
 }
 
