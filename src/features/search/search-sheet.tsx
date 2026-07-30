@@ -1,12 +1,18 @@
 /**
  * 搜索（流程 14 / PRD §16）：独立路由页，按参考图实现。
- * 顶栏：返回 + 搜索框 + 取消；筛选为单行横向滚动摘要胶囊。
+ * 顶栏：返回 + 搜索框；筛选为单行横向滚动摘要胶囊。
  * 空态：最近搜索卡片 + 引导插图；无结果：search-empty.png 占位图。
  * 金额 / 日期筛选为底部 BottomSheet；结果列表复用首页 DayGroup（点击查看详情、左滑编辑/删除）。
  */
-import { DatePicker, Host, List, Section, VStack } from '@expo/ui/swift-ui';
+import { Button, type ButtonProps, DatePicker, Host, List, Section, VStack } from '@expo/ui/swift-ui';
 import {
+  buttonStyle,
+  controlSize,
   datePickerStyle,
+  foregroundColor,
+  frame,
+  glassEffect,
+  labelStyle,
   labelsHidden,
   listRowBackground,
   listRowInsets,
@@ -14,11 +20,11 @@ import {
   listSectionSpacing,
   listStyle,
 } from '@expo/ui/swift-ui/modifiers';
+import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
 import {
   Alert,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -30,6 +36,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import {
   useCategories,
@@ -85,6 +92,11 @@ const AMOUNT_RANGES = [
   { label: '500–1000', min: '500', max: '1000' },
   { label: '1000 以上', min: '1000', max: '' },
 ] as const;
+
+/** 搜索结果区统一与 insetGrouped 卡片外沿对齐；需要手调时只改这里。 */
+const SEARCH_LIST_HORIZONTAL_INSET = 16;
+/** 搜索结果较首页更紧凑；需要手调单项内容留白时只改这里。 */
+const SEARCH_RESULT_ROW_INSETS = { horizontal: Space[3], vertical: Space[2] };
 
 export function SearchScreen({ onClose }: { onClose: () => void }) {
   return <SearchBody onClose={onClose} />;
@@ -301,45 +313,15 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView style={styles.flex} edges={['top']}>
-        {/* 顶栏：返回 + 搜索框 + 取消，独立路由页形态。 */}
+        {/* 顶栏：原生玻璃返回键 + 玻璃搜索框。 */}
         <View style={styles.topBar}>
-          <Pressable
-            style={styles.navIconButton}
-            hitSlop={10}
-            onPress={onClose}
-            accessibilityRole="button"
-            accessibilityLabel="返回"
-          >
-            <SymbolView name="chevron.left" tintColor={palette.textPrimary} size={21} />
-          </Pressable>
-          <View style={[styles.searchBox, { backgroundColor: palette.card }]}>
-            <SymbolView name="magnifyingglass" tintColor={palette.textTertiary} size={17} />
-            <TextInput
-              style={[styles.searchInput, { color: palette.textPrimary }]}
-              placeholder="搜索备注、分类或成员"
-              placeholderTextColor={palette.textTertiary}
-              value={keyword}
-              onChangeText={setKeyword}
-              onSubmitEditing={() => history.push(keyword)}
-              autoFocus
-              autoCorrect={false}
-              returnKeyType="search"
-              clearButtonMode="never"
-            />
-            {keyword.trim() ? (
-              <Pressable
-                hitSlop={8}
-                onPress={() => setKeyword('')}
-                accessibilityRole="button"
-                accessibilityLabel="清空搜索关键词"
-              >
-                <SymbolView name="xmark.circle.fill" tintColor={palette.textTertiary} size={17} />
-              </Pressable>
-            ) : null}
-          </View>
-          <Pressable style={styles.cancelButton} hitSlop={10} onPress={onClose} accessibilityRole="button">
-            <Text style={[styles.cancelText, { color: palette.info }]}>取消</Text>
-          </Pressable>
+          <SearchBackButton onPress={onClose} />
+          <SearchInput
+            keyword={keyword}
+            onChangeKeyword={setKeyword}
+            onSubmit={() => history.push(keyword)}
+            onClear={() => setKeyword('')}
+          />
         </View>
 
         {/* 筛选：单行横向滚动，每个维度聚合为一个摘要胶囊。 */}
@@ -403,6 +385,8 @@ function SearchBody({ onClose }: { onClose: () => void }) {
                   onRowPress={onRowPress}
                   onEdit={openEdit}
                   onDelete={confirmDelete}
+                  headerHorizontalInset={SEARCH_LIST_HORIZONTAL_INSET}
+                  rowInsets={SEARCH_RESULT_ROW_INSETS}
                 />
               ))}
               <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
@@ -467,6 +451,96 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   );
 }
 
+function supportsLiquidGlass() {
+  return Platform.OS === 'ios' && isGlassEffectAPIAvailable();
+}
+
+/** iOS 26+ 用原生 SwiftUI 圆形玻璃按钮；其他平台保留可感知的普通返回键。 */
+function SearchBackButton({ onPress }: { onPress: () => void }) {
+  const palette = usePalette();
+  if (supportsLiquidGlass()) {
+    return (
+      <Host matchContents>
+        <Button
+          label="返回"
+          systemImage={'chevron.left' as ButtonProps['systemImage']}
+          onPress={onPress}
+          modifiers={[
+            labelStyle('iconOnly'),
+            controlSize('large'),
+            frame({ width: 40, height: 40 }),
+            buttonStyle('plain'),
+            foregroundColor(palette.textPrimary),
+            glassEffect({ glass: { variant: 'regular', interactive: true }, shape: 'circle' }),
+          ]}
+        />
+      </Host>
+    );
+  }
+
+  return (
+    <Pressable
+      style={styles.navIconButton}
+      hitSlop={10}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="返回"
+    >
+      <SymbolView name="chevron.left" tintColor={palette.textPrimary} size={21} />
+    </Pressable>
+  );
+}
+
+/**
+ * 输入层继续使用 RN TextInput：与既有 React 状态、清除按钮和搜索提交直接绑定；
+ * iOS 26+ 仅由原生 GlassView 承担容器材质，低版本回退为主题卡片底。
+ */
+function SearchInput({
+  keyword,
+  onChangeKeyword,
+  onSubmit,
+  onClear,
+}: {
+  keyword: string;
+  onChangeKeyword: (value: string) => void;
+  onSubmit: () => void;
+  onClear: () => void;
+}) {
+  const palette = usePalette();
+  const content = (
+    <>
+      <SymbolView name="magnifyingglass" tintColor={palette.textTertiary} size={17} />
+      <TextInput
+        style={[styles.searchInput, { color: palette.textPrimary }]}
+        placeholder="搜索备注、分类或成员"
+        placeholderTextColor={palette.textTertiary}
+        value={keyword}
+        onChangeText={onChangeKeyword}
+        onSubmitEditing={onSubmit}
+        autoFocus
+        autoCorrect={false}
+        returnKeyType="search"
+        clearButtonMode="never"
+      />
+      {keyword.trim() ? (
+        <Pressable hitSlop={8} onPress={onClear} accessibilityRole="button" accessibilityLabel="清空搜索关键词">
+          <SymbolView name="xmark.circle.fill" tintColor={palette.textTertiary} size={17} />
+        </Pressable>
+      ) : null}
+    </>
+  );
+
+  if (supportsLiquidGlass()) {
+    return (
+      <GlassView style={styles.searchBox} glassEffectStyle="regular" isInteractive colorScheme="auto">
+        {content}
+      </GlassView>
+    );
+  }
+
+  return <View style={[styles.searchBox, { backgroundColor: palette.card }]}>{content}</View>;
+}
+
 // ── 筛选胶囊 ──────────────────────────────────────────────────────────────────
 function FilterPill({
   icon,
@@ -507,12 +581,7 @@ function NoResultEmpty({ filtersActive, onClearFilters }: { filtersActive: boole
   const palette = usePalette();
   return (
     <View style={styles.center}>
-      <Image
-        source={require('@/assets/images/search/search-empty.png')}
-        style={styles.emptyImage}
-        resizeMode="contain"
-        accessibilityLabel="无搜索结果"
-      />
+      <SearchEmptyIllustration />
       <Text style={[styles.emptyTitle, { color: palette.textPrimary }]}>没有找到相关记录</Text>
       <Text style={[styles.emptySubtitle, { color: palette.textSecondary }]}>试试更换关键词或放宽筛选条件</Text>
       {filtersActive ? (
@@ -521,6 +590,40 @@ function NoResultEmpty({ filtersActive, onClearFilters }: { filtersActive: boole
         </Pressable>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * 不使用带白色底图的 PNG：由主题色实时绘制，深浅模式都能自然融入页面背景。
+ * 若需手调图形尺寸，调整 `styles.emptyIllustration` 的 width / height 即可。
+ */
+function SearchEmptyIllustration() {
+  const palette = usePalette();
+  return (
+    <Svg
+      width={150}
+      height={150}
+      viewBox="0 0 150 150"
+      style={styles.emptyIllustration}
+      accessibilityLabel="无搜索结果"
+    >
+      <Path
+        d="M36 39C48 23 75 20 91 34C106 48 121 48 125 68C130 91 111 110 92 116C71 123 56 113 39 104C19 93 17 57 36 39Z"
+        fill={palette.cardPill}
+      />
+      <Circle cx={70} cy={70} r={30} fill="none" stroke={palette.textSecondary} strokeWidth={7} />
+      <Line x1={92} y1={92} x2={112} y2={112} stroke={palette.textSecondary} strokeWidth={8} strokeLinecap="round" />
+      <Path
+        d="M23 76h13M28 70h7M28 82h7M116 78h11M119 72h6M119 84h6"
+        stroke={palette.textTertiary}
+        strokeWidth={3}
+        strokeLinecap="round"
+      />
+      <Path d="M23 42l2.5 5L31 49.5L25.5 52L23 57L20.5 52L15 49.5L20.5 47L23 42Z" fill={palette.textTertiary} />
+      <Path d="M116 28l2 4L122 34L118 36L116 40L114 36L110 34L114 32L116 28Z" fill={palette.textTertiary} />
+      <Circle cx={121} cy={59} r={3} fill={palette.textTertiary} />
+      <Circle cx={112} cy={90} r={6} fill="none" stroke={palette.textTertiary} strokeWidth={2} />
+    </Svg>
   );
 }
 
@@ -541,6 +644,7 @@ function HistoryCloud({
             <View style={styles.historyTitleWrap}>
               <SymbolView name="clock" tintColor={palette.textSecondary} size={15} />
               <Text style={[styles.historyTitle, { color: palette.textPrimary }]}>最近搜索</Text>
+              <Text style={[styles.historyHintInline, { color: palette.textTertiary }]}>长按可删除</Text>
             </View>
             <Pressable hitSlop={8} onPress={history.clear} accessibilityRole="button">
               <Text style={[styles.historyClear, { color: palette.info }]}>清空</Text>
@@ -561,7 +665,6 @@ function HistoryCloud({
               </Pressable>
             ))}
           </View>
-          <Text style={[styles.historyHint, { color: palette.textTertiary }]}>长按可删除</Text>
         </View>
       ) : null}
 
@@ -883,7 +986,8 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space[2],
+    // 为 Liquid Glass 返回按钮的按压扩张态预留空间，避免遮住搜索框左沿。
+    gap: Space[4],
     paddingHorizontal: Space[4],
     paddingTop: Space[2],
     paddingBottom: Space[2],
@@ -904,14 +1008,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Space[3],
   },
   searchInput: { flex: 1, fontSize: 16, paddingVertical: 0 },
-  cancelButton: {
-    minWidth: 44,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Space[1],
-  },
-  cancelText: { fontSize: 16 },
   pillScroller: { flexGrow: 0 },
   pillRow: {
     flexDirection: 'row',
@@ -941,7 +1037,7 @@ const styles = StyleSheet.create({
     gap: Space[3],
     paddingHorizontal: Space[6],
   },
-  emptyImage: { width: 180, height: 180 },
+  emptyIllustration: { marginBottom: Space[1] },
   emptyTitle: { fontSize: 17, fontWeight: '600', textAlign: 'center' },
   emptySubtitle: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
   historyContainer: { flex: 1, paddingHorizontal: Space[4], paddingTop: Space[3] },
@@ -958,7 +1054,7 @@ const styles = StyleSheet.create({
   cloud: { flexDirection: 'row', flexWrap: 'wrap', gap: Space[2], marginTop: Space[3] },
   historyTag: { paddingHorizontal: Space[4], paddingVertical: Space[2], borderRadius: Radius.full, maxWidth: 200 },
   historyTagText: { fontSize: 14 },
-  historyHint: { fontSize: 12, marginTop: Space[3] },
+  historyHintInline: { fontSize: 11 },
   defaultEmpty: {
     flex: 1,
     alignItems: 'center',
