@@ -48,7 +48,7 @@ import {
   type Transaction,
 } from '@/api';
 import { toast } from '@/components/toast';
-import { avatarTintFor, Radius, Space, useAvatarTints, useCategoryColors, usePalette } from '@/constants/design';
+import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { DayGroup, EndOfListHint, type AvatarInfo, type RowData } from '@/features/home/components';
 import { TransactionDetailSheet } from '@/features/home/transaction-detail-sheet';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
@@ -105,7 +105,6 @@ export function SearchScreen({ onClose }: { onClose: () => void }) {
 function SearchBody({ onClose }: { onClose: () => void }) {
   const palette = usePalette();
   const catColors = useCategoryColors();
-  const avatarTints = useAvatarTints();
 
   const txnsQ = useTransactions();
   const catsQ = useCategories();
@@ -170,8 +169,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
 
     const avatarOf = (userId: string): AvatarInfo => {
       const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? '成员';
-      const initial = [...nick.trim()][0]?.toUpperCase() ?? '?';
-      return { uri: avatarFiles.get(userId) ?? null, initial, tint: avatarTintFor(userId, avatarTints) };
+      return { uri: avatarFiles.get(userId) ?? null, nickname: nick };
     };
 
     const map = new Map<string, ResultGroup>();
@@ -207,18 +205,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       });
     }
     return { groups: Array.from(map.values()), valid: result.valid };
-  }, [
-    txnsQ.data,
-    catsQ.data,
-    membersQ.data,
-    profileQ.data,
-    filters,
-    myId,
-    avatarFiles,
-    catColors,
-    palette,
-    avatarTints,
-  ]);
+  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, filters, myId, avatarFiles, catColors, palette]);
 
   const categories = catsQ.data ?? [];
   const members = membersQ.data ?? [];

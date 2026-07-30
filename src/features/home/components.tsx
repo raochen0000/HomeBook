@@ -2,11 +2,20 @@
  * 首页 UI 组件（@expo/ui/swift-ui 原生 SwiftUI 渲染）。
  * 视觉对齐参考图 + DESIGN.md：浅灰底 + 白卡、分类圆底图标、两段式金额、收支语义色。
  */
-import { Button, HStack, Image, Section, Spacer, SwipeActions, Text, VStack, ZStack } from '@expo/ui/swift-ui';
 import {
-  aspectRatio,
+  Button,
+  HStack,
+  Image,
+  RNHostView,
+  Section,
+  Spacer,
+  SwipeActions,
+  Text,
+  VStack,
+  ZStack,
+} from '@expo/ui/swift-ui';
+import {
   background,
-  clipShape,
   contentShape,
   cornerRadius,
   font,
@@ -17,7 +26,6 @@ import {
   onTapGesture,
   opacity,
   padding,
-  resizable,
   shapes,
   tint,
   truncationMode,
@@ -26,6 +34,7 @@ import {
 import type { ComponentProps } from 'react';
 import { Dimensions } from 'react-native';
 
+import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, Typography, usePalette } from '@/constants/design';
 import { budgetLevel, budgetStage } from '@/lib/budget';
 import { amountParts, formatAmount, signForNet } from '@/lib/format';
@@ -71,50 +80,21 @@ export function CategoryAvatar({ symbol, color, size = 44 }: { symbol: string; c
   );
 }
 
-// ── 成员头像（真实照片 + 首字母色块回退）────────────────────────────────────────
-// 回退色块底色改由 `@/constants/design` 的 useAvatarTints()/avatarTintFor() 统一供给
-// （DESIGN §3.0 铁律 1、4：禁裸 hex + Light/Night 各自取值）。
+// ── 成员头像（与「家庭协作」复用同一展示组件）────────────────────────────────────
 
 export type AvatarInfo = {
   /** 本地缓存的头像文件路径（file://…）；无则走首字母回退。 */
   uri: string | null;
-  /** 昵称首字（回退色块用）。 */
-  initial: string;
-  /** 回退色块底色。 */
-  tint: string;
+  /** 昵称；缺省头像时由共用组件取昵称末字。 */
+  nickname: string;
 };
 
-/** 单个成员头像：有图用真实照片（resizable + fill 居中裁圆），无图用首字母色块；外圈白环便于层叠区分。 */
+/** 单个成员头像：与「家庭协作」一致——真实照片或蓝紫渐变昵称头像。 */
 function MemberAvatar({ info, size = 20 }: { info: AvatarInfo; size?: number }) {
-  const palette = usePalette();
-  const outer = Math.round(size + 3);
-  const inner = info.uri ? (
-    <Image
-      uiImage={info.uri}
-      modifiers={[
-        resizable(),
-        aspectRatio({ contentMode: 'fill' }),
-        frame({ width: size, height: size }),
-        clipShape('circle'),
-      ]}
-    />
-  ) : (
-    <Text
-      modifiers={[
-        frame({ width: size, height: size }),
-        background(info.tint),
-        clipShape('circle'),
-        font({ size: Math.round(size * 0.5), weight: 'semibold' }),
-        foregroundColor('#FFFFFF'),
-      ]}
-    >
-      {info.initial}
-    </Text>
-  );
   return (
-    <ZStack modifiers={[frame({ width: outer, height: outer }), background(palette.card), clipShape('circle')]}>
-      {inner}
-    </ZStack>
+    <RNHostView matchContents>
+      <UserAvatar avatarUrl={info.uri} nickname={info.nickname} size={size} />
+    </RNHostView>
   );
 }
 

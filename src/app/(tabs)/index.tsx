@@ -47,7 +47,7 @@ import {
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
-import { avatarTintFor, Radius, Space, useAvatarTints, useCategoryColors, usePalette } from '@/constants/design';
+import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import {
   DayGroup,
@@ -163,7 +163,6 @@ const LAST_MONTH_REMINDER_DISMISSED_KEY = 'home.lastMonthReminderDismissedPeriod
 export default function HomeScreen() {
   const palette = usePalette();
   const catColors = useCategoryColors();
-  const avatarTints = useAvatarTints();
   const insets = useSafeAreaInsets();
   const { scrollGeometry, headerHeight, headerStyle, onHeaderLayout } = useManualCollapsibleHeader(
     insets.top + 84,
@@ -272,11 +271,10 @@ export default function HomeScreen() {
     let exp = 0;
     let cnt = 0;
 
-    // 用户 → 头像信息（真实照片本地路径，缺图回退首字母色块）。
+    // 用户 → 头像信息（真实照片本地路径，缺图回退为共用的昵称渐变头像）。
     const avatarOf = (userId: string): AvatarInfo => {
       const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? '成员';
-      const initial = [...nick.trim()][0]?.toUpperCase() ?? '?';
-      return { uri: avatarFiles.get(userId) ?? null, initial, tint: avatarTintFor(userId, avatarTints) };
+      return { uri: avatarFiles.get(userId) ?? null, nickname: nick };
     };
 
     const map = new Map<string, Group>();
@@ -324,16 +322,7 @@ export default function HomeScreen() {
       income: inc,
       monthCount: cnt,
     };
-  }, [
-    transactionsQ.data,
-    categoriesQ.data,
-    membersQ.data,
-    profileQ.data,
-    avatarFiles,
-    catColors,
-    palette,
-    avatarTints,
-  ]);
+  }, [transactionsQ.data, categoriesQ.data, membersQ.data, profileQ.data, avatarFiles, catColors, palette]);
 
   // 记一笔：若当前用户还没有家庭，先自动建「单人家庭」（M1：登录 + 单人家庭自动创建）。
   const openCreate = async () => {
