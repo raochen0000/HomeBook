@@ -75,6 +75,8 @@ type Palette = {
   /** 强调 / 交互色（系统蓝）：app 内主 CTA / FAB / 选中态 / 进度常态（DESIGN §2.5） */
   accent: string;
   onAccent: string;
+  /** 强调色的浅填充：选中行、选中 chip（DESIGN §2.5）。 */
+  accentTint: string;
   /**
    * 墨色：**全局**「用户的确认 / 主操作」色（v0.6.5 起，不再限登录 surface）。用于：主 CTA 实底、
    * Sheet 顶部的确认文字动作（完成 / 保存 / 应用 / 获取验证码，加粗）、
@@ -124,6 +126,7 @@ const light: Palette = {
   separator: 'rgba(60,60,67,0.18)',
   accent: '#007AFF',
   onAccent: '#FFFFFF',
+  accentTint: 'rgba(0,122,255,0.12)',
   ink: '#1C1C1E',
   onInk: '#FFFFFF',
   bannerTint: 'rgba(120,120,128,0.12)',
@@ -152,6 +155,7 @@ const dark: Palette = {
   separator: 'rgba(84,84,88,0.6)',
   accent: '#0A84FF',
   onAccent: '#FFFFFF',
+  accentTint: 'rgba(10,132,255,0.18)',
   ink: '#F5F5F7',
   onInk: '#1C1C1E',
   bannerTint: 'rgba(120,120,128,0.24)',
