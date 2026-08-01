@@ -10,7 +10,8 @@
  * 「获取验证码」带 60s 倒计时。以全屏覆盖层渲染于 Tab 之上（无 session 时显示），
  * 登录成功后随 session 变化自动卸载（见 _layout.tsx）。
  *
- * 设计取舍（2026-06-26 与用户确认）：纯品牌头无插画；协议页 / 忘记密码先占位（toast）；
+ * 设计取舍（2026-06-26 与用户确认）：纯品牌头无插画；忘记密码先占位（toast）；
+ * 用户协议 / 隐私政策复用 settings/legal-sheet（与「关于家账」同一信源）。
  * 走设计令牌、适配 Light/Night。
  *
  * 协议勾选（2026-07-17 改）：默认不勾选，且是硬闸门——未勾选时全部登录入口（手机验证码 /
@@ -48,6 +49,8 @@ import {
   signInWithEmail,
   verifyPhoneOtp,
 } from '@/lib/auth';
+
+import { LegalSheet, type LegalKind } from '@/features/settings/legal-sheet';
 
 import { ForgotPasswordSheet } from './forgot-password-sheet';
 
@@ -162,6 +165,7 @@ export function LoginScreen() {
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [appleSheetOpen, setAppleSheetOpen] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
+  const [legal, setLegal] = useState<LegalKind | null>(null);
 
   useEffect(() => {
     isAppleAuthAvailable().then(setAppleAvailable);
@@ -353,23 +357,25 @@ export function LoginScreen() {
               </View>
 
               {/* 协议：未勾选时拦截全部登录入口（含获取验证码），点击时 toast 提示 */}
-              <Pressable style={styles.agreeRow} hitSlop={6} onPress={() => setAgreed((v) => !v)}>
-                <SymbolView
-                  name={agreed ? 'checkmark.circle.fill' : 'circle'}
-                  tintColor={agreed ? palette.ink : palette.textTertiary}
-                  size={16}
-                />
+              <View style={styles.agreeRow}>
+                <Pressable hitSlop={6} onPress={() => setAgreed((v) => !v)}>
+                  <SymbolView
+                    name={agreed ? 'checkmark.circle.fill' : 'circle'}
+                    tintColor={agreed ? palette.ink : palette.textTertiary}
+                    size={16}
+                  />
+                </Pressable>
                 <Text style={[styles.agreeText, { color: palette.textTertiary }]}>
                   登录即表示你已阅读并同意
-                  <Text style={{ color: palette.accent }} onPress={() => toast.info('用户协议 · 敬请期待')}>
+                  <Text style={{ color: palette.accent }} onPress={() => setLegal('terms')}>
                     《用户协议》
                   </Text>
                   与
-                  <Text style={{ color: palette.accent }} onPress={() => toast.info('隐私政策 · 敬请期待')}>
+                  <Text style={{ color: palette.accent }} onPress={() => setLegal('privacy')}>
                     《隐私政策》
                   </Text>
                 </Text>
-              </Pressable>
+              </View>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -385,6 +391,7 @@ export function LoginScreen() {
         }}
       />
       <ForgotPasswordSheet visible={forgotOpen} initialEmail={emailInput} onClose={() => setForgotOpen(false)} />
+      <LegalSheet kind={legal} onClose={() => setLegal(null)} />
     </View>
   );
 }
