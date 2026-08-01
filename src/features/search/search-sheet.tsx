@@ -4,7 +4,7 @@
  * 空态：最近搜索卡片 + 引导插图；无结果：search-empty.png 占位图。
  * 金额 / 日期筛选为底部 BottomSheet；结果列表复用首页 DayGroup（点击查看详情、左滑编辑/删除）。
  */
-import { Button, type ButtonProps, DatePicker, Host, List, Section, VStack } from '@expo/ui/swift-ui';
+import { Button, DatePicker, Host, List, Section, VStack, type ButtonProps } from '@expo/ui/swift-ui';
 import {
   buttonStyle,
   controlSize,
@@ -12,8 +12,8 @@ import {
   foregroundColor,
   frame,
   glassEffect,
-  labelStyle,
   labelsHidden,
+  labelStyle,
   listRowBackground,
   listRowInsets,
   listRowSeparator,
@@ -22,9 +22,11 @@ import {
 } from '@expo/ui/swift-ui/modifiers';
 import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useMemo, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
+  Animated,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -35,7 +37,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import {
@@ -67,9 +69,11 @@ import {
   compactAmountFilterLabel,
   customDateFilterLabel,
   DATE_PRESET_LABELS,
+  isAmountFilterUnrestricted,
   summarizeSelectedLabels,
 } from '@/lib/search-labels';
 
+import { getSearchPresentation, shouldLockFilterControls } from './search-presentation';
 import { useSearchHistory } from './use-search-history';
 
 const DATE_PRESET_OPTIONS: { key: DatePresetKey; label: string }[] = [
@@ -78,7 +82,6 @@ const DATE_PRESET_OPTIONS: { key: DatePresetKey; label: string }[] = [
   { key: 'lastMonth', label: '上月' },
   { key: 'last7', label: '近 7 天' },
   { key: 'last30', label: '近 30 天' },
-  { key: 'thisYear', label: '今年' },
 ];
 
 /** 哪个筛选下拉面板正打开。 */
@@ -97,6 +100,8 @@ const AMOUNT_RANGES = [
 const SEARCH_LIST_HORIZONTAL_INSET = 16;
 /** 搜索结果较首页更紧凑；需要手调单项内容留白时只改这里。 */
 const SEARCH_RESULT_ROW_INSETS = { horizontal: Space[3], vertical: Space[2] };
+/** 关键词停止输入后再检索，避免每个字符都触发全量筛选与列表更新。 */
+const KEYWORD_SEARCH_DEBOUNCE_MS = 300;
 
 export function SearchScreen({ onClose }: { onClose: () => void }) {
   return <SearchBody onClose={onClose} />;
@@ -115,6 +120,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const history = useSearchHistory();
 
   const [keyword, setKeyword] = useState('');
+  const [searchKeyword, setSearchKeyword] = useState('');
   const [types, setTypes] = useState<Set<TxnType>>(new Set());
   const [categoryIds, setCategoryIds] = useState<Set<string>>(new Set());
   const [recorderIds, setRecorderIds] = useState<Set<string>>(new Set());
@@ -125,10 +131,16 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const [amountMaxYuan, setAmountMaxYuan] = useState('');
 
   const [openFilter, setOpenFilter] = useState<FilterKind | null>(null);
+  const [filterInteractionId, setFilterInteractionId] = useState(0);
   // 点击结果行 → 详情；左滑 → 编辑 / 删除，与首页列表一致。
   const [detail, setDetail] = useState<{ open: boolean; txn: Transaction | null }>({ open: false, txn: null });
   const [editing, setEditing] = useState<Transaction | null>(null);
   const softDeleteM = useSoftDeleteTransaction();
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setSearchKeyword(keyword), KEYWORD_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+  }, [keyword]);
 
   const multiMember = (familyQ.data?.member_count ?? 1) > 1;
   const myId = profileQ.data?.id;
@@ -136,7 +148,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
 
   const filters = useMemo<SearchFilters>(
     () => ({
-      keyword,
+      keyword: searchKeyword,
       types,
       categoryIds,
       recorderIds,
@@ -146,13 +158,24 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       amountMinYuan,
       amountMaxYuan,
     }),
-    [keyword, types, categoryIds, recorderIds, datePreset, customFrom, customTo, amountMinYuan, amountMaxYuan],
+    [searchKeyword, types, categoryIds, recorderIds, datePreset, customFrom, customTo, amountMinYuan, amountMaxYuan],
   );
 
-  const hasQuery = hasAnyQuery(filters);
+  // 先提交筛选控件的即时状态；结果检索、分组与列表渲染则在可中断的低优先级更新中完成。
+  const deferredFilters = useDeferredValue(filters);
+  const deferredFilterInteractionId = useDeferredValue(filterInteractionId);
+  const isSearching = deferredFilters !== filters;
+  const filterControlsLocked = shouldLockFilterControls(filterInteractionId, deferredFilterInteractionId);
   const errors = validateFilters(filters);
+  const valid = !errors.amount && !errors.date;
+  const hasCurrentQuery = hasAnyQuery(filters);
+  const presentation = getSearchPresentation({
+    isValid: valid,
+    hasCurrentQuery,
+    isSearching,
+  });
 
-  const { groups, valid } = useMemo(() => {
+  const { groups } = useMemo(() => {
     const txns = txnsQ.data ?? [];
     const cats = catsQ.data ?? [];
     const members = membersQ.data ?? [];
@@ -161,7 +184,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     const memberById = new Map(members.map((m) => [m.id, m]));
     const myNick = profileQ.data?.nickname;
 
-    const result = runSearch(txns, filters, {
+    const result = runSearch(txns, deferredFilters, {
       categoryNameById: new Map(cats.map((c) => [c.id, c.name])),
       recorderNameById: nameById,
       myId,
@@ -204,70 +227,92 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         editor: editedByOther ? avatarOf(t.last_editor_user_id as string) : null,
       });
     }
-    return { groups: Array.from(map.values()), valid: result.valid };
-  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, filters, myId, avatarFiles, catColors, palette]);
+    return { groups: Array.from(map.values()) };
+  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, deferredFilters, myId, avatarFiles, catColors, palette]);
 
   const categories = catsQ.data ?? [];
   const members = membersQ.data ?? [];
   const typeIsAll = types.size === 0;
 
-  const setType = (v: TxnType | null) => setTypes(v ? new Set([v]) : new Set());
+  const runFilterChange = useCallback(
+    (change: () => void) => {
+      if (filterControlsLocked) return;
+      setFilterInteractionId((id) => id + 1);
+      change();
+    },
+    [filterControlsLocked],
+  );
+
+  const setType = (v: TxnType | null) => runFilterChange(() => setTypes(v ? new Set([v]) : new Set()));
 
   const toggle = (set: Set<string>, setter: (s: Set<string>) => void, id: string) => {
-    const next = new Set(set);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setter(next);
+    runFilterChange(() => {
+      const next = new Set(set);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      setter(next);
+    });
   };
 
   const onPickPreset = (key: DatePresetKey) => {
-    setDatePreset(key);
-    if (key === 'custom') {
-      const now = new Date();
-      setCustomFrom((v) => v ?? new Date(now.getFullYear(), now.getMonth(), 1));
-      setCustomTo((v) => v ?? now);
-    }
+    runFilterChange(() => {
+      setDatePreset(key);
+      if (key === 'custom') {
+        const now = new Date();
+        setCustomFrom((v) => v ?? new Date(now.getFullYear(), now.getMonth(), 1));
+        setCustomTo((v) => v ?? now);
+      }
+    });
   };
 
-  const onRowPress = (id: string) => {
-    const txn = (txnsQ.data ?? []).find((t) => t.id === id);
-    if (!txn) {
-      toast.error('该记录已不存在');
-      txnsQ.refetch();
-      return;
-    }
-    setDetail({ open: true, txn });
-  };
+  const onRowPress = useCallback(
+    (id: string) => {
+      const txn = (txnsQ.data ?? []).find((t) => t.id === id);
+      if (!txn) {
+        toast.error('该记录已不存在');
+        txnsQ.refetch();
+        return;
+      }
+      setDetail({ open: true, txn });
+    },
+    [txnsQ.data, txnsQ.refetch],
+  );
 
-  const openEdit = (id: string) => {
-    const txn = (txnsQ.data ?? []).find((t) => t.id === id);
-    if (!txn) {
-      toast.error('该记录已不存在');
-      txnsQ.refetch();
-      return;
-    }
-    if (txn.source !== 'normal') {
-      toast.info('储蓄流水请在对应储蓄目标内管理');
-      return;
-    }
-    setEditing(txn);
-  };
+  const openEdit = useCallback(
+    (id: string) => {
+      const txn = (txnsQ.data ?? []).find((t) => t.id === id);
+      if (!txn) {
+        toast.error('该记录已不存在');
+        txnsQ.refetch();
+        return;
+      }
+      if (txn.source !== 'normal') {
+        toast.info('储蓄流水请在对应储蓄目标内管理');
+        return;
+      }
+      setEditing(txn);
+    },
+    [txnsQ.data, txnsQ.refetch],
+  );
 
-  const confirmDelete = (id: string) => {
-    const txn = (txnsQ.data ?? []).find((t) => t.id === id);
-    if (txn?.source !== 'normal') {
-      toast.info('储蓄流水请在对应储蓄目标内管理');
-      return;
-    }
-    Alert.alert('删除这笔记录？', '删除后将从账单中移除，无法在 App 内恢复。', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '删除',
-        style: 'destructive',
-        onPress: () => softDeleteM.mutate(id, { onError: (e) => Alert.alert('删除失败', (e as Error).message) }),
-      },
-    ]);
-  };
+  const confirmDelete = useCallback(
+    (id: string) => {
+      const txn = (txnsQ.data ?? []).find((t) => t.id === id);
+      if (txn?.source !== 'normal') {
+        toast.info('储蓄流水请在对应储蓄目标内管理');
+        return;
+      }
+      Alert.alert('删除这笔记录？', '删除后将从账单中移除，无法在 App 内恢复。', [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '删除',
+          style: 'destructive',
+          onPress: () => softDeleteM.mutate(id, { onError: (e) => Alert.alert('删除失败', (e as Error).message) }),
+        },
+      ]);
+    },
+    [softDeleteM.mutate, txnsQ.data],
+  );
 
   const amountSet = amountMinYuan.trim() !== '' || amountMaxYuan.trim() !== '';
   const filtersActive = !typeIsAll || categoryIds.size > 0 || recorderIds.size > 0 || datePreset !== 'all' || amountSet;
@@ -287,14 +332,26 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const amountLabel = compactAmountFilterLabel(amountMinYuan, amountMaxYuan);
 
   const clearFilters = () => {
-    setTypes(new Set());
-    setCategoryIds(new Set());
-    setRecorderIds(new Set());
-    setDatePreset('all');
-    setCustomFrom(null);
-    setCustomTo(null);
-    setAmountMinYuan('');
-    setAmountMaxYuan('');
+    runFilterChange(() => {
+      setTypes(new Set());
+      setCategoryIds(new Set());
+      setRecorderIds(new Set());
+      setDatePreset('all');
+      setCustomFrom(null);
+      setCustomTo(null);
+      setAmountMinYuan('');
+      setAmountMaxYuan('');
+    });
+  };
+
+  const submitKeyword = () => {
+    setSearchKeyword(keyword);
+    history.push(keyword);
+  };
+
+  const clearKeyword = () => {
+    setKeyword('');
+    setSearchKeyword('');
   };
 
   return (
@@ -303,12 +360,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         {/* 顶栏：原生玻璃返回键 + 玻璃搜索框。 */}
         <View style={styles.topBar}>
           <SearchBackButton onPress={onClose} />
-          <SearchInput
-            keyword={keyword}
-            onChangeKeyword={setKeyword}
-            onSubmit={() => history.push(keyword)}
-            onClear={() => setKeyword('')}
-          />
+          <SearchInput keyword={keyword} onChangeKeyword={setKeyword} onSubmit={submitKeyword} onClear={clearKeyword} />
         </View>
 
         {/* 筛选：单行横向滚动，每个维度聚合为一个摘要胶囊。 */}
@@ -323,18 +375,21 @@ function SearchBody({ onClose }: { onClose: () => void }) {
             label={typeLabel}
             active={!typeIsAll}
             onPress={() => setOpenFilter('type')}
+            disabled={filterControlsLocked}
           />
           <FilterPill
             icon="calendar"
             label={dateLabel}
             active={datePreset !== 'all'}
             onPress={() => setOpenFilter('date')}
+            disabled={filterControlsLocked}
           />
           <FilterPill
             icon="square.grid.2x2"
             label={categoryLabel}
             active={categoryIds.size > 0}
             onPress={() => setOpenFilter('category')}
+            disabled={filterControlsLocked}
           />
           {multiMember ? (
             <FilterPill
@@ -342,51 +397,38 @@ function SearchBody({ onClose }: { onClose: () => void }) {
               label={memberLabel}
               active={recorderIds.size > 0}
               onPress={() => setOpenFilter('member')}
+              disabled={filterControlsLocked}
             />
           ) : null}
-          <FilterPill icon="yensign" label={amountLabel} active={amountSet} onPress={() => setOpenFilter('amount')} />
-          {filtersActive ? <ResetPill onPress={clearFilters} /> : null}
+          <FilterPill
+            icon="yensign"
+            label={amountLabel}
+            active={amountSet}
+            onPress={() => setOpenFilter('amount')}
+            disabled={filterControlsLocked}
+          />
+          {filtersActive ? <ResetPill onPress={clearFilters} disabled={filterControlsLocked} /> : null}
         </ScrollView>
 
         <View style={[styles.separator, { backgroundColor: palette.separator }]} />
 
         {/* 主体：搜索历史 / 校验提示 / 结果 / 空结果 */}
-        {!hasQuery ? (
+        {presentation === 'invalid' ? (
+          <InvalidFiltersEmptyState />
+        ) : presentation === 'history' ? (
           <HistoryCloud history={history} onPick={setKeyword} />
-        ) : !valid ? (
-          <View style={styles.center}>
-            <SymbolView name="exclamationmark.circle" tintColor={palette.textTertiary} size={44} />
-            <Text style={{ color: palette.textSecondary }}>筛选条件有误，请检查金额 / 日期区间</Text>
-          </View>
+        ) : presentation === 'skeleton' ? (
+          <SearchResultsSkeleton />
         ) : groups.length === 0 ? (
           <NoResultEmpty filtersActive={filtersActive} onClearFilters={clearFilters} />
         ) : (
-          <Host style={styles.flex}>
-            <List modifiers={[listStyle('insetGrouped'), listSectionSpacing(Space[3])]}>
-              {groups.map((g) => (
-                <DayGroup
-                  key={g.key}
-                  label={g.label}
-                  totalCents={g.totalCents}
-                  rows={g.rows}
-                  onRowPress={onRowPress}
-                  onEdit={openEdit}
-                  onDelete={confirmDelete}
-                  headerHorizontalInset={SEARCH_LIST_HORIZONTAL_INSET}
-                  rowInsets={SEARCH_RESULT_ROW_INSETS}
-                />
-              ))}
-              <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
-                <VStack
-                  modifiers={[
-                    listRowInsets({ top: Space[2], bottom: Space[6], leading: Space[4], trailing: Space[4] }),
-                  ]}
-                >
-                  <EndOfListHint />
-                </VStack>
-              </Section>
-            </List>
-          </Host>
+          <SearchResults
+            groups={groups}
+            palette={palette}
+            onRowPress={onRowPress}
+            onEdit={openEdit}
+            onDelete={confirmDelete}
+          />
         )}
       </SafeAreaView>
 
@@ -394,6 +436,9 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       <FilterDropdown
         kind={openFilter}
         onClose={() => setOpenFilter(null)}
+        isSearching={isSearching}
+        filterControlsLocked={filterControlsLocked}
+        onFilterChange={runFilterChange}
         types={types}
         setType={setType}
         typeIsAll={typeIsAll}
@@ -434,6 +479,94 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         recorderId={myId ?? ''}
         onClose={() => setEditing(null)}
       />
+    </View>
+  );
+}
+
+const SearchResults = memo(function SearchResults({
+  groups,
+  palette,
+  onRowPress,
+  onEdit,
+  onDelete,
+}: {
+  groups: ResultGroup[];
+  palette: ReturnType<typeof usePalette>;
+  onRowPress: (id: string) => void;
+  onEdit: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <Host style={styles.flex}>
+      <List modifiers={[listStyle('insetGrouped'), listSectionSpacing(Space[3])]}>
+        {groups.map((g) => (
+          <DayGroup
+            key={g.key}
+            label={g.label}
+            totalCents={g.totalCents}
+            rows={g.rows}
+            onRowPress={onRowPress}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            headerHorizontalInset={SEARCH_LIST_HORIZONTAL_INSET}
+            rowInsets={SEARCH_RESULT_ROW_INSETS}
+          />
+        ))}
+        <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
+          <VStack
+            modifiers={[listRowInsets({ top: Space[2], bottom: Space[6], leading: Space[4], trailing: Space[4] })]}
+          >
+            <EndOfListHint />
+          </VStack>
+        </Section>
+      </List>
+    </Host>
+  );
+});
+
+function SearchResultsSkeleton() {
+  const palette = usePalette();
+  const [opacity] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    Animated.timing(opacity, {
+      toValue: 1,
+      duration: 160,
+      useNativeDriver: true,
+    }).start();
+  }, [opacity]);
+
+  return (
+    <Animated.View style={[styles.flex, { opacity }]}>
+      <View style={styles.resultsSkeleton} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+        {[0, 1, 2].map((group) => (
+          <View key={group} style={styles.skeletonGroup}>
+            <View style={[styles.skeletonDate, { backgroundColor: palette.cardPill }]} />
+            <View style={[styles.skeletonCard, { backgroundColor: palette.card }]}>
+              {[0, 1, 2].map((row) => (
+                <View key={row} style={styles.skeletonRow}>
+                  <View style={[styles.skeletonIcon, { backgroundColor: palette.cardPill }]} />
+                  <View style={styles.skeletonTextStack}>
+                    <View style={[styles.skeletonTitle, { backgroundColor: palette.cardPill }]} />
+                    <View style={[styles.skeletonSubtitle, { backgroundColor: palette.cardPill }]} />
+                  </View>
+                  <View style={[styles.skeletonAmount, { backgroundColor: palette.cardPill }]} />
+                </View>
+              ))}
+            </View>
+          </View>
+        ))}
+      </View>
+    </Animated.View>
+  );
+}
+
+function InvalidFiltersEmptyState() {
+  const palette = usePalette();
+  return (
+    <View style={styles.center}>
+      <SymbolView name="exclamationmark.circle" tintColor={palette.textTertiary} size={44} />
+      <Text style={{ color: palette.textSecondary }}>筛选条件有误，请检查金额 / 日期区间</Text>
     </View>
   );
 }
@@ -534,18 +667,24 @@ function FilterPill({
   label,
   active,
   onPress,
+  disabled,
 }: {
   icon: SymbolViewProps['name'];
   label: string;
   active: boolean;
   onPress: () => void;
+  disabled: boolean;
 }) {
   const palette = usePalette();
-  const fg = active ? palette.info : palette.textPrimary;
-  const bg = active ? 'rgba(0,122,255,0.12)' : palette.cardPill;
+  const fg = active ? palette.accent : palette.textPrimary;
+  const bg = active ? palette.accentTint : palette.cardPill;
   return (
-    <Pressable onPress={onPress} style={[styles.pill, { backgroundColor: bg }]}>
-      <SymbolView name={icon} tintColor={palette.info} size={13} />
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={[styles.pill, { backgroundColor: bg }, disabled && styles.disabledControl]}
+    >
+      <SymbolView name={icon} tintColor={palette.accent} size={13} />
       <Text numberOfLines={1} style={{ color: fg, fontSize: 13, maxWidth: 140, fontWeight: active ? '500' : '400' }}>
         {label}
       </Text>
@@ -554,11 +693,16 @@ function FilterPill({
   );
 }
 
-function ResetPill({ onPress }: { onPress: () => void }) {
+function ResetPill({ onPress, disabled }: { onPress: () => void; disabled: boolean }) {
   const palette = usePalette();
   return (
-    <Pressable onPress={onPress} hitSlop={6} style={styles.resetPill}>
-      <Text style={{ color: palette.info, fontSize: 13, fontWeight: '500' }}>重置</Text>
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={6}
+      style={[styles.resetPill, disabled && styles.disabledControl]}
+    >
+      <Text style={{ color: palette.accent, fontSize: 13, fontWeight: '500' }}>重置</Text>
     </Pressable>
   );
 }
@@ -573,7 +717,7 @@ function NoResultEmpty({ filtersActive, onClearFilters }: { filtersActive: boole
       <Text style={[styles.emptySubtitle, { color: palette.textSecondary }]}>试试更换关键词或放宽筛选条件</Text>
       {filtersActive ? (
         <Pressable onPress={onClearFilters} hitSlop={10} style={{ marginTop: Space[4] }}>
-          <Text style={{ color: palette.info, fontSize: 15 }}>清除筛选条件</Text>
+          <Text style={{ color: palette.accent, fontSize: 15 }}>清除筛选条件</Text>
         </Pressable>
       ) : null}
     </View>
@@ -634,7 +778,7 @@ function HistoryCloud({
               <Text style={[styles.historyHintInline, { color: palette.textTertiary }]}>长按可删除</Text>
             </View>
             <Pressable hitSlop={8} onPress={history.clear} accessibilityRole="button">
-              <Text style={[styles.historyClear, { color: palette.info }]}>清空</Text>
+              <Text style={[styles.historyClear, { color: palette.accent }]}>清空</Text>
             </Pressable>
           </View>
           <View style={styles.cloud}>
@@ -671,6 +815,9 @@ function HistoryCloud({
 type DropdownProps = {
   kind: FilterKind | null;
   onClose: () => void;
+  isSearching: boolean;
+  filterControlsLocked: boolean;
+  onFilterChange: (change: () => void) => void;
   types: Set<TxnType>;
   setType: (v: TxnType | null) => void;
   typeIsAll: boolean;
@@ -717,9 +864,8 @@ function matchesQuickRange(minYuan: string, maxYuan: string, range: (typeof AMOU
 }
 
 function FilterDropdown(props: DropdownProps) {
-  const { kind, onClose } = props;
+  const { kind, onClose, isSearching } = props;
   const palette = usePalette();
-  const insets = useSafeAreaInsets();
   return (
     <Modal visible={kind !== null} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.flex}>
@@ -729,17 +875,21 @@ function FilterDropdown(props: DropdownProps) {
           style={styles.sheetAnchor}
           pointerEvents="box-none"
         >
-          <View
-            style={[styles.sheet, { backgroundColor: palette.elevated, paddingBottom: insets.bottom + Space[3] }]}
-            onStartShouldSetResponder={() => true}
-          >
+          <View style={[styles.sheet, { backgroundColor: palette.elevated }]} onStartShouldSetResponder={() => true}>
             <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
             <View style={styles.sheetHeader}>
               <View style={styles.sheetHeaderSide} />
               <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>{kind ? TITLES[kind] : ''}</Text>
-              <Pressable style={styles.sheetHeaderSide} hitSlop={8} onPress={onClose}>
-                <Text style={[styles.sheetDone, { color: palette.info }]}>完成</Text>
-              </Pressable>
+              <View style={styles.sheetHeaderSide}>
+                {isSearching ? (
+                  <ActivityIndicator
+                    color={palette.accent}
+                    size="small"
+                    accessibilityRole="progressbar"
+                    accessibilityLabel="正在搜索"
+                  />
+                ) : null}
+              </View>
             </View>
             {kind ? <DropdownContent {...props} kind={kind} /> : null}
           </View>
@@ -777,26 +927,42 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
     setAmountMaxYuan,
     amountError,
     toggle,
+    filterControlsLocked,
+    onFilterChange,
   } = props;
 
   if (kind === 'type') {
     return (
       <View>
-        <OptionRow label="不限" active={typeIsAll} onPress={() => setType(null)} />
-        <OptionRow label="支出" active={types.has('expense')} onPress={() => setType('expense')} />
-        <OptionRow label="收入" active={types.has('income')} onPress={() => setType('income')} />
+        <OptionRow label="不限" active={typeIsAll} onPress={() => setType(null)} disabled={filterControlsLocked} />
+        <OptionRow
+          label="支出"
+          active={types.has('expense')}
+          onPress={() => setType('expense')}
+          disabled={filterControlsLocked}
+        />
+        <OptionRow
+          label="收入"
+          active={types.has('income')}
+          onPress={() => setType('income')}
+          disabled={filterControlsLocked}
+        />
       </View>
     );
   }
 
   if (kind === 'date') {
     const onCustomFrom = (d: Date) => {
-      setCustomFrom(d);
-      setDatePreset('custom');
+      onFilterChange(() => {
+        setCustomFrom(d);
+        setDatePreset('custom');
+      });
     };
     const onCustomTo = (d: Date) => {
-      setCustomTo(d);
-      setDatePreset('custom');
+      onFilterChange(() => {
+        setCustomTo(d);
+        setDatePreset('custom');
+      });
     };
     return (
       <View style={styles.sheetBody}>
@@ -807,13 +973,14 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
               label={p.label}
               active={datePreset === p.key}
               onPress={() => onPickPreset(p.key)}
+              disabled={filterControlsLocked}
               showDivider={i < DATE_PRESET_OPTIONS.length - 1}
             />
           ))}
         </View>
         <View style={[styles.customDateCard, { backgroundColor: palette.card }]}>
           <Text style={[styles.customDateTitle, { color: palette.textPrimary }]}>自定义日期</Text>
-          <View style={styles.customDateFields}>
+          <View style={styles.customDateFields} pointerEvents={filterControlsLocked ? 'none' : 'auto'}>
             <DateFieldBox label="开始日期" date={customFrom} onChange={onCustomFrom} />
             <Text style={[styles.customDateDash, { color: palette.textTertiary }]}>—</Text>
             <DateFieldBox label="结束日期" date={customTo} onChange={onCustomTo} />
@@ -827,13 +994,19 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
   if (kind === 'category') {
     return (
       <ScrollView style={styles.sheetScroll} keyboardShouldPersistTaps="handled">
-        <OptionRow label="全部分类" active={categoryIds.size === 0} onPress={() => setCategoryIds(new Set())} />
+        <OptionRow
+          label="全部分类"
+          active={categoryIds.size === 0}
+          onPress={() => onFilterChange(() => setCategoryIds(new Set()))}
+          disabled={filterControlsLocked}
+        />
         {categories.map((c) => (
           <OptionRow
             key={c.id}
             label={c.name}
             active={categoryIds.has(c.id)}
             onPress={() => toggle(categoryIds, setCategoryIds, c.id)}
+            disabled={filterControlsLocked}
           />
         ))}
       </ScrollView>
@@ -843,13 +1016,19 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
   if (kind === 'member') {
     return (
       <ScrollView style={styles.sheetScroll} keyboardShouldPersistTaps="handled">
-        <OptionRow label="全部成员" active={recorderIds.size === 0} onPress={() => setRecorderIds(new Set())} />
+        <OptionRow
+          label="全部成员"
+          active={recorderIds.size === 0}
+          onPress={() => onFilterChange(() => setRecorderIds(new Set()))}
+          disabled={filterControlsLocked}
+        />
         {members.map((m) => (
           <OptionRow
             key={m.id}
             label={m.id === myId ? '我' : m.nickname}
             active={recorderIds.has(m.id)}
             onPress={() => toggle(recorderIds, setRecorderIds, m.id)}
+            disabled={filterControlsLocked}
           />
         ))}
       </ScrollView>
@@ -857,50 +1036,111 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
   }
 
   // amount
+  const amountFilterIsUnrestricted = isAmountFilterUnrestricted(amountMinYuan, amountMaxYuan);
   return (
     <View style={styles.amountSheet}>
-      <View style={styles.amountInputsRow}>
-        <AmountField label="最低金额" value={amountMinYuan} onChange={setAmountMinYuan} />
-        <AmountField label="最高金额" value={amountMaxYuan} onChange={setAmountMaxYuan} />
+      <View style={styles.amountSectionHeader}>
+        <Text style={[styles.quickRangeTitle, { color: palette.textPrimary }]}>自定义</Text>
+        {!amountFilterIsUnrestricted ? (
+          <Pressable
+            style={styles.amountClearButton}
+            disabled={filterControlsLocked}
+            onPress={() =>
+              onFilterChange(() => {
+                setAmountMinYuan('');
+                setAmountMaxYuan('');
+              })
+            }
+            accessibilityRole="button"
+            accessibilityLabel="清空金额筛选"
+          >
+            <Text style={[styles.amountClearText, { color: palette.accent }]}>清空</Text>
+          </Pressable>
+        ) : null}
       </View>
-      <Text style={[styles.quickRangeTitle, { color: palette.textPrimary }]}>快捷区间</Text>
+      <View style={styles.amountInputsRow}>
+        <AmountField
+          label="最低金额"
+          value={amountMinYuan}
+          onChange={setAmountMinYuan}
+          editable={!filterControlsLocked}
+        />
+        <AmountField
+          label="最高金额"
+          value={amountMaxYuan}
+          onChange={setAmountMaxYuan}
+          editable={!filterControlsLocked}
+        />
+      </View>
+      <View style={styles.amountSectionHeader}>
+        <Text style={[styles.quickRangeTitle, { color: palette.textPrimary }]}>快捷区间</Text>
+      </View>
       <View style={styles.quickRangeRow}>
         {AMOUNT_RANGES.map((range) => {
           const selected = matchesQuickRange(amountMinYuan, amountMaxYuan, range);
           return (
-            <Pressable
+            <QuickRangeChip
               key={range.label}
-              style={[
-                styles.quickRangeChip,
-                {
-                  backgroundColor: selected ? 'rgba(0,122,255,0.12)' : palette.cardPill,
-                },
-              ]}
-              onPress={() => {
-                setAmountMinYuan(range.min);
-                setAmountMaxYuan(range.max);
-              }}
-            >
-              <Text
-                style={{
-                  color: selected ? palette.info : palette.textPrimary,
-                  fontSize: 14,
-                  fontWeight: selected ? '500' : '400',
-                }}
-              >
-                {range.label}
-              </Text>
-            </Pressable>
+              label={range.label}
+              selected={selected}
+              disabled={filterControlsLocked}
+              onPress={() =>
+                onFilterChange(() => {
+                  setAmountMinYuan(range.min);
+                  setAmountMaxYuan(range.max);
+                })
+              }
+            />
           );
         })}
       </View>
-      <Text style={[styles.amountHint, { color: palette.textTertiary }]}>可单独填写最低或最高金额</Text>
       {amountError ? <Text style={[styles.errorText, { color: palette.danger }]}>最小金额不能大于最大金额</Text> : null}
     </View>
   );
 }
 
-function AmountField({ label, value, onChange }: { label: string; value: string; onChange: (s: string) => void }) {
+function QuickRangeChip({
+  label,
+  selected,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const palette = usePalette();
+  return (
+    <Pressable
+      style={[styles.quickRangeChip, { backgroundColor: selected ? palette.accentTint : palette.cardPill }]}
+      disabled={disabled}
+      onPress={onPress}
+    >
+      <Text
+        style={{
+          color: selected ? palette.accent : palette.textPrimary,
+          fontSize: 14,
+          fontWeight: selected ? '500' : '400',
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function AmountField({
+  label,
+  value,
+  onChange,
+  editable,
+}: {
+  label: string;
+  value: string;
+  onChange: (s: string) => void;
+  editable: boolean;
+}) {
   const palette = usePalette();
   return (
     <View style={[styles.amountFieldBox, { backgroundColor: palette.cardPill }]}>
@@ -914,6 +1154,7 @@ function AmountField({ label, value, onChange }: { label: string; value: string;
           placeholder="0"
           placeholderTextColor={palette.textTertiary}
           keyboardType="decimal-pad"
+          editable={editable}
         />
       </View>
     </View>
@@ -924,10 +1165,10 @@ function DateFieldBox({ label, date, onChange }: { label: string; date: Date | n
   const palette = usePalette();
   return (
     <View style={[styles.dateFieldBox, { backgroundColor: palette.cardPill, borderColor: palette.separator }]}>
-      <Text style={[styles.dateFieldLabel, { color: palette.textTertiary }]}>{label}</Text>
-      <View style={styles.dateFieldValueRow}>
-        <Text style={[styles.dateFieldValue, { color: palette.textPrimary }]}>
-          {date ? formatSlashDate(date) : '选择日期'}
+      {date ? <Text style={[styles.dateFieldLabel, { color: palette.textTertiary }]}>{label}</Text> : null}
+      <View style={[styles.dateFieldValueRow, !date && styles.dateFieldPlaceholderRow]}>
+        <Text style={[styles.dateFieldValue, { color: date ? palette.textPrimary : palette.textTertiary }]}>
+          {date ? formatSlashDate(date) : label}
         </Text>
         <SymbolView name="calendar" tintColor={palette.textTertiary} size={15} />
       </View>
@@ -947,20 +1188,22 @@ function OptionRow({
   label,
   active,
   onPress,
+  disabled,
   showDivider = false,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
+  disabled: boolean;
   showDivider?: boolean;
 }) {
   const palette = usePalette();
   return (
     <>
-      <Pressable style={styles.optionRow} onPress={onPress}>
-        <Text style={{ color: active ? palette.info : palette.textPrimary, fontSize: 16 }}>{label}</Text>
+      <Pressable style={[styles.optionRow, disabled && styles.disabledControl]} onPress={onPress} disabled={disabled}>
+        <Text style={{ color: active ? palette.accent : palette.textPrimary, fontSize: 16 }}>{label}</Text>
         <View style={styles.flex} />
-        {active ? <SymbolView name="checkmark" tintColor={palette.info} size={18} /> : null}
+        {active ? <SymbolView name="checkmark" tintColor={palette.accent} size={18} /> : null}
       </Pressable>
       {showDivider ? <View style={[styles.optionDivider, { backgroundColor: palette.separator }]} /> : null}
     </>
@@ -1016,6 +1259,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Space[2],
   },
+  disabledControl: { opacity: 0.5 },
   separator: { height: StyleSheet.hairlineWidth, marginTop: Space[1] },
   center: {
     flex: 1,
@@ -1057,6 +1301,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   defaultEmptyText: { fontSize: 14, textAlign: 'center', lineHeight: 20, paddingHorizontal: Space[6] },
+  resultsSkeleton: { flex: 1, paddingHorizontal: Space[4], paddingTop: Space[4], gap: Space[4] },
+  skeletonGroup: { gap: Space[2] },
+  skeletonDate: { width: 72, height: 14, borderRadius: Radius.sm },
+  skeletonCard: { borderRadius: Radius.lg, overflow: 'hidden' },
+  skeletonRow: {
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[3],
+    padding: Space[3],
+  },
+  skeletonIcon: { width: 34, height: 34, borderRadius: Radius.full },
+  skeletonTextStack: { flex: 1, gap: Space[2] },
+  skeletonTitle: { width: '48%', height: 14, borderRadius: Radius.sm },
+  skeletonSubtitle: { width: '30%', height: 11, borderRadius: Radius.sm },
+  skeletonAmount: { width: 52, height: 14, borderRadius: Radius.sm },
   backdrop: { backgroundColor: 'rgba(0,0,0,0.35)' },
   sheetAnchor: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
@@ -1073,7 +1333,6 @@ const styles = StyleSheet.create({
   },
   sheetHeaderSide: { width: 48, alignItems: 'flex-end' },
   sheetTitle: { fontSize: 16, fontWeight: '600' },
-  sheetDone: { fontSize: 16 },
   sheetBody: { gap: Space[3], paddingBottom: Space[2] },
   sheetScroll: { maxHeight: 360 },
   optionCard: { borderRadius: Radius.lg, overflow: 'hidden' },
@@ -1100,6 +1359,7 @@ const styles = StyleSheet.create({
   },
   dateFieldLabel: { fontSize: 12, marginBottom: Space[1] },
   dateFieldValueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  dateFieldPlaceholderRow: { flex: 1 },
   dateFieldValue: { fontSize: 15, fontVariant: ['tabular-nums'] },
   datePickerOverlay: {
     position: 'absolute',
@@ -1110,6 +1370,10 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   amountSheet: { paddingVertical: Space[2], gap: Space[4] },
+  // 无论“清空”是否出现，都为该行保留同样的 iOS 最小触控高度，避免 Sheet 跳动。
+  amountSectionHeader: { minHeight: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  amountClearButton: { minHeight: 16, justifyContent: 'center', paddingHorizontal: Space[2], marginRight: -Space[2] },
+  amountClearText: { fontSize: 15, fontWeight: '500' },
   amountInputsRow: { flexDirection: 'row', gap: Space[3] },
   amountFieldBox: {
     flex: 1,
@@ -1123,7 +1387,7 @@ const styles = StyleSheet.create({
   amountFieldPrefix: { fontSize: 18, fontWeight: '600', marginRight: Space[1] },
   amountFieldInput: { flex: 1, fontSize: 18, fontWeight: '600', paddingVertical: 0, fontVariant: ['tabular-nums'] },
   quickRangeTitle: { fontSize: 15, fontWeight: '600' },
-  quickRangeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Space[2] },
+  quickRangeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Space[2], paddingBottom: Space[4] },
   quickRangeChip: {
     paddingHorizontal: Space[4],
     paddingVertical: Space[2],
@@ -1131,6 +1395,5 @@ const styles = StyleSheet.create({
     minHeight: 36,
     justifyContent: 'center',
   },
-  amountHint: { fontSize: 12 },
   errorText: { fontSize: 12, paddingTop: Space[1] },
 });
