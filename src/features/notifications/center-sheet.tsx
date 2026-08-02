@@ -3,10 +3,11 @@
  * 系统推送（channel=push）需 expo-notifications + APNs，与手机登录一并延后到上线前，本期不做。
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAllNotifications, useMarkAllNotificationsRead, useMarkNotificationRead, type Notification } from '@/api';
+import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 
@@ -55,9 +56,9 @@ function timeLabel(iso: string): string {
 
 export function NotificationCenterSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <Body /> : null}
-    </Modal>
+    <PageSheet visible={visible} onClose={onClose}>
+      <Body />
+    </PageSheet>
   );
 }
 

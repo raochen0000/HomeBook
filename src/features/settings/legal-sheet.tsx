@@ -4,9 +4,10 @@
  * 登录页与「关于家账」共用本组件（单一信源）。正文为产品发布前的公开文本草稿，正式上线前仍应完成法律审核。
  */
 import { useState } from 'react';
-import { Modal, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { ThemedText } from '@/components/themed-text';
 import { Space, useSheetPalette } from '@/constants/design';
@@ -96,19 +97,15 @@ const SECTIONS: Record<LegalKind, { h: string; p: string }[]> = {
 };
 
 export function LegalSheet({ kind, onClose }: { kind: LegalKind | null; onClose: () => void }) {
-  const palette = useSheetPalette();
   // iOS 的 pageSheet 在拖拽关闭时会先触发 onRequestClose，再继续原生退出动画。
   // 保留最后打开的正文到 onDismiss，避免动画期间露出 Modal 默认的白色容器。
   const [presentedKind, setPresentedKind] = useState<LegalKind | null>(null);
   const displayedKind = kind ?? presentedKind;
 
   return (
-    <Modal
+    <PageSheet
       visible={kind !== null}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      backdropColor={palette.sheet}
-      onRequestClose={() => {
+      onClose={() => {
         setPresentedKind(kind);
         onClose();
       }}
@@ -117,7 +114,7 @@ export function LegalSheet({ kind, onClose }: { kind: LegalKind | null; onClose:
       }}
     >
       {displayedKind !== null ? <Body kind={displayedKind} /> : null}
-    </Modal>
+    </PageSheet>
   );
 }
 

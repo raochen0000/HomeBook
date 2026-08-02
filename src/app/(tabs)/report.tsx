@@ -13,7 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, type Href } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Polyline, Rect, Text as SvgText } from 'react-native-svg';
@@ -32,6 +32,7 @@ import {
   type Transaction,
   type TxnRange,
 } from '@/api';
+import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, TabBarInset, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
@@ -1006,7 +1007,7 @@ function ReportFilterSheet({
   const reset = () => onChange(EMPTY_FILTERS);
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <PageSheet visible={visible} onClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="全局筛选" />
@@ -1075,7 +1076,7 @@ function ReportFilterSheet({
           </View>
         </SafeAreaView>
       </View>
-    </Modal>
+    </PageSheet>
   );
 }
 
@@ -1298,7 +1299,7 @@ function IncomeTargetSheet({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <PageSheet visible={visible} onClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="收入目标" onClose={onClose} onConfirm={save} />
@@ -1317,7 +1318,7 @@ function IncomeTargetSheet({
           </View>
         </SafeAreaView>
       </View>
-    </Modal>
+    </PageSheet>
   );
 }
 
@@ -1585,7 +1586,7 @@ function FinancialInsightsDetailSheet({
   });
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <PageSheet visible={visible} onClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="财务洞察" />
@@ -1631,7 +1632,7 @@ function FinancialInsightsDetailSheet({
           </ScrollView>
         </SafeAreaView>
       </View>
-    </Modal>
+    </PageSheet>
   );
 }
 
@@ -1652,7 +1653,7 @@ function MoreStatsSheet({
 }) {
   const palette = useSheetPalette();
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <PageSheet visible={visible} onClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="更多统计" />
@@ -1661,7 +1662,7 @@ function MoreStatsSheet({
           </ScrollView>
         </SafeAreaView>
       </View>
-    </Modal>
+    </PageSheet>
   );
 }
 
@@ -2920,7 +2921,7 @@ function CustomRangeSheet({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <PageSheet visible={visible} onClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="自定义周期" />
@@ -2970,7 +2971,7 @@ function CustomRangeSheet({
           </View>
         </SafeAreaView>
       </View>
-    </Modal>
+    </PageSheet>
   );
 }
 
@@ -3048,7 +3049,7 @@ function CategoryDetailSheet({
   const maxGroupAmount = Math.max(1, ...noteGroups.map((item) => item.amount));
 
   return (
-    <Modal visible={!!detail} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <PageSheet visible={!!detail} onClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title={detail?.name ?? ''} />
@@ -3143,7 +3144,7 @@ function CategoryDetailSheet({
           </ScrollView>
         </SafeAreaView>
       </View>
-    </Modal>
+    </PageSheet>
   );
 }
 
@@ -3315,7 +3316,7 @@ function MemberAnalysisSheet({
     dimension === 'week' ? '本周' : dimension === 'year' ? '全年' : dimension === 'custom' ? '本期' : '本月';
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <PageSheet visible={visible} onClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title="家庭成员分析" />
@@ -3448,7 +3449,7 @@ function MemberAnalysisSheet({
           </ScrollView>
         </SafeAreaView>
       </View>
-    </Modal>
+    </PageSheet>
   );
 }
 

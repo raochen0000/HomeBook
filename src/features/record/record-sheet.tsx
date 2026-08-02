@@ -38,6 +38,7 @@ import {
   type FamilyMembership,
   type Transaction,
 } from '@/api';
+import { PageSheet } from '@/components/page-sheet';
 import { toast } from '@/components/toast';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
@@ -82,17 +83,9 @@ function rawToCents(raw: string): number {
 /** 外壳：原生 pageSheet。内部表单只在打开时挂载，靠 useState 初值按 editing 还原（避免 setState-in-effect）。 */
 export function RecordSheet({ visible, onClose, onDismiss, familyId, recorderId, editing, onSaved }: RecordSheetProps) {
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-      onDismiss={onDismiss}
-    >
-      {visible ? (
-        <RecordForm familyId={familyId} recorderId={recorderId} editing={editing} onClose={onClose} onSaved={onSaved} />
-      ) : null}
-    </Modal>
+    <PageSheet visible={visible} onClose={onClose} onDismiss={onDismiss}>
+      <RecordForm familyId={familyId} recorderId={recorderId} editing={editing} onClose={onClose} onSaved={onSaved} />
+    </PageSheet>
   );
 }
 

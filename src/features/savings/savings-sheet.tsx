@@ -6,17 +6,7 @@
  */
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -31,6 +21,7 @@ import {
   useUpdateGoal,
   type SavingsGoal,
 } from '@/api';
+import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { toast } from '@/components/toast';
 import { Radius, Space, usePalette, useSheetPalette } from '@/constants/design';
@@ -70,9 +61,9 @@ export function SavingsSheet({
   initialGoalId?: string | null;
 }) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <Body initialGoalId={initialGoalId} /> : null}
-    </Modal>
+    <PageSheet visible={visible} onClose={onClose}>
+      <Body initialGoalId={initialGoalId} />
+    </PageSheet>
   );
 }
 

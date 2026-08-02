@@ -12,7 +12,6 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -23,6 +22,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { PageSheet } from '@/components/page-sheet';
 import { toast } from '@/components/toast';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 import { singleLineTextInputStyle } from '@/constants/text-input';
@@ -134,11 +134,9 @@ export function ForgotPasswordSheet({
   };
 
   return (
-    <Modal
+    <PageSheet
       visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      onClose={onClose}
       onShow={() => {
         // 每次打开用登录页已填的邮箱预填，并清掉上次的验证码/密码/倒计时残留。
         setEmail(initialEmail ?? '');
@@ -263,7 +261,7 @@ export function ForgotPasswordSheet({
           </KeyboardAvoidingView>
         </SafeAreaView>
       </View>
-    </Modal>
+    </PageSheet>
   );
 }
 

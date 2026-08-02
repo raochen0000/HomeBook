@@ -9,7 +9,7 @@ import { Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -25,6 +25,7 @@ import {
   type Category,
   type CategoryType,
 } from '@/api';
+import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { categoryColorKey } from '@/lib/category-style';
@@ -259,9 +260,9 @@ const PROTECTED_SYSTEM_NAMES = new Set(['其他支出', '其他收入']);
 
 export function CategoryManageSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <Body /> : null}
-    </Modal>
+    <PageSheet visible={visible} onClose={onClose}>
+      <Body />
+    </PageSheet>
   );
 }
 

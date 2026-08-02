@@ -6,7 +6,7 @@
  */
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActionSheetIOS, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActionSheetIOS, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -17,6 +17,7 @@ import {
   useTransferOwnership,
   type FamilyMembership,
 } from '@/api';
+import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
@@ -43,15 +44,9 @@ export function MemberManageSheet({
   onDismiss?: () => void;
 }) {
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-      onDismiss={onDismiss}
-    >
-      {visible ? <Body onClose={onClose} onRequestInvite={onRequestInvite} /> : null}
-    </Modal>
+    <PageSheet visible={visible} onClose={onClose} onDismiss={onDismiss}>
+      <Body onClose={onClose} onRequestInvite={onRequestInvite} />
+    </PageSheet>
   );
 }
 

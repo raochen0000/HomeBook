@@ -5,7 +5,7 @@
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -18,6 +18,7 @@ import {
   useTransactions,
   type Category,
 } from '@/api';
+import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { budgetLevel, daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
@@ -28,9 +29,9 @@ const toCents = (raw: string) => Math.round(Number(raw || '0') * 100);
 
 export function BudgetSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <Body /> : null}
-    </Modal>
+    <PageSheet visible={visible} onClose={onClose}>
+      <Body />
+    </PageSheet>
   );
 }
 

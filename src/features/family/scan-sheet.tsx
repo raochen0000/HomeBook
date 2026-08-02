@@ -15,20 +15,11 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Image } from 'expo-image';
 import { useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type FamilyPreview, type JoinImpact, useJoinFamily, usePreviewFamily } from '@/api';
+import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useAvatarTints, usePalette, useSheetPalette } from '@/constants/design';
 import { MAX_FAMILY_MEMBERS } from '@/constants/family';
@@ -43,9 +34,9 @@ const STATUS_MESSAGE: Record<Exclude<FamilyPreview['status'], 'ok'>, string> = {
 
 export function ScanSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <ScanBody onClose={onClose} /> : null}
-    </Modal>
+    <PageSheet visible={visible} onClose={onClose}>
+      <ScanBody onClose={onClose} />
+    </PageSheet>
   );
 }
 

@@ -33,6 +33,7 @@ import {
   type FamilyMembership,
   type RecurringRule,
 } from '@/api';
+import { PageSheet } from '@/components/page-sheet';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 
@@ -76,17 +77,15 @@ function firstOfCurrentMonth(): string {
 
 export function RecurringSheet({ visible, onClose, familyId, recorderId, editing, onSaved }: RecurringSheetProps) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? (
-        <RecurringForm
-          familyId={familyId}
-          recorderId={recorderId}
-          editing={editing}
-          onClose={onClose}
-          onSaved={onSaved}
-        />
-      ) : null}
-    </Modal>
+    <PageSheet visible={visible} onClose={onClose}>
+      <RecurringForm
+        familyId={familyId}
+        recorderId={recorderId}
+        editing={editing}
+        onClose={onClose}
+        onSaved={onSaved}
+      />
+    </PageSheet>
   );
 }
 

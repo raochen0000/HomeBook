@@ -7,11 +7,12 @@ import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createInvitation, type Invitation, useMyFamily, useMyProfile } from '@/api';
+import { PageSheet } from '@/components/page-sheet';
 import { SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 
@@ -20,9 +21,9 @@ type QRRef = { toDataURL: (cb: (data: string) => void) => void };
 
 export function InviteSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <InviteBody /> : null}
-    </Modal>
+    <PageSheet visible={visible} onClose={onClose}>
+      <InviteBody />
+    </PageSheet>
   );
 }
 

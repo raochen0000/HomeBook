@@ -31,6 +31,7 @@ import {
   useUploadFamilyAvatar,
   useUploadFamilyCover,
 } from '@/api';
+import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 
@@ -45,9 +46,9 @@ function compactTimezone(timezone: string | null | undefined): string {
 
 export function FamilySettingsSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      {visible ? <Body onClose={onClose} /> : null}
-    </Modal>
+    <PageSheet visible={visible} onClose={onClose}>
+      <Body onClose={onClose} />
+    </PageSheet>
   );
 }
 
