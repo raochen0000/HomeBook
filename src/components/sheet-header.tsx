@@ -13,19 +13,19 @@
  * 使用：置于 sheet 根视图的**最后一个子元素**（浮层最后渲染）；滚动内容区需自行加
  * `paddingTop: SHEET_CONTENT_TOP_PADDING`，否则首屏内容会被标题区压住。
  */
-import MaskedView from '@react-native-masked-view/masked-view';
-import { BlurView } from 'expo-blur';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Button, Host, type ButtonProps } from '@expo/ui/swift-ui';
 import {
   buttonStyle,
   controlSize,
-  disabled as swiftUIDisabled,
-  frame,
   foregroundColor,
+  frame,
   glassEffect,
   labelStyle,
+  disabled as swiftUIDisabled,
 } from '@expo/ui/swift-ui/modifiers';
+import MaskedView from '@react-native-masked-view/masked-view';
+import { BlurView } from 'expo-blur';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, Rect, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
 
@@ -54,8 +54,8 @@ function ProgressiveBlur() {
           <Defs>
             <SvgLinearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
               <Stop offset="0" stopColor="#000" stopOpacity="1" />
-              <Stop offset="0.55" stopColor="#000" stopOpacity="1" />
-              <Stop offset="0.8" stopColor="#000" stopOpacity="0.4" />
+              <Stop offset="0.4" stopColor="#000" stopOpacity="1" />
+              <Stop offset="0.7" stopColor="#000" stopOpacity="0.5" />
               <Stop offset="1" stopColor="#000" stopOpacity="0" />
             </SvgLinearGradient>
           </Defs>
