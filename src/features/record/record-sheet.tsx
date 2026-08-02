@@ -24,7 +24,6 @@ import {
   View,
   type DimensionValue,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   useAccountingPrefs,
@@ -40,6 +39,7 @@ import {
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
 import { toast } from '@/components/toast';
+import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 
@@ -416,28 +416,23 @@ function MemberPickerSheet({
   onClose: () => void;
 }) {
   const palette = usePalette();
-  const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         {/* 内层吞掉点击，避免点列表关弹层 */}
         <Pressable
-          style={[styles.memberSheet, { backgroundColor: palette.elevated, paddingBottom: insets.bottom + Space[3] }]}
+          style={[styles.memberSheet, { backgroundColor: palette.elevated, paddingBottom: Space[4] }]}
           onPress={() => {}}
         >
           <View style={[styles.grabber, { backgroundColor: palette.separator, marginTop: Space[2] }]} />
           <View style={styles.memberHeader}>
-            <View style={styles.memberHeaderSide} />
             <Text style={[styles.memberTitle, { color: palette.textPrimary }]}>记账人</Text>
-            <Pressable style={styles.memberHeaderSide} hitSlop={8} onPress={onClose}>
-              <SymbolView name="xmark" tintColor={palette.textTertiary} size={16} />
-            </Pressable>
           </View>
           {members.map((m) => {
             const active = m.userId === selectedUserId;
             return (
               <Pressable key={m.id} style={styles.memberRow} onPress={() => onSelect(m.userId)}>
-                <SymbolView name="person.crop.circle.fill" tintColor={palette.textTertiary} size={32} />
+                <UserAvatar avatarUrl={m.avatarUrl} nickname={m.nickname} size={32} />
                 <Text style={[styles.memberName, { color: palette.textPrimary }]}>{m.nickname}</Text>
                 <View style={styles.rowSpacer} />
                 {active ? <SymbolView name="checkmark" tintColor={palette.info} size={18} /> : null}
@@ -519,10 +514,9 @@ const styles = StyleSheet.create({
   memberHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     paddingVertical: Space[3],
   },
-  memberHeaderSide: { width: 24, alignItems: 'flex-end' },
   memberTitle: { fontSize: 16, fontWeight: '600' },
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: Space[3], paddingVertical: Space[3] },
   memberName: { fontSize: 16, fontWeight: '500' },
