@@ -7,8 +7,8 @@
  * - 返回态（onBack）：单壳内子视图（编辑器 / 详情）左侧圆形返回按钮，语义为退回上一视图；
  * - 确认态（onConfirm）：显式保存型——左 ✕（onClose，放弃并关闭）或返回（onBack）+ 右 ✓（提交）。
  *
- * 按钮对齐提醒事项的原生圆形玻璃操作：44pt 独立表面 + 轻描边 / 阴影。确认按钮用主题墨色，
- * 左右各占 44pt 定宽槽位，标题保持严格居中。
+ * 按钮对齐提醒事项的原生圆形玻璃操作：44pt 独立表面 + 轻描边 / 阴影。确认按钮与返回按钮
+ * 共享同一表面，左右各占 44pt 定宽槽位，标题保持严格居中。
  *
  * 使用：置于 sheet 根视图的**最后一个子元素**（浮层最后渲染）；滚动内容区需自行加
  * `paddingTop: SHEET_CONTENT_TOP_PADDING`，否则首屏内容会被标题区压住。
@@ -72,7 +72,6 @@ function HeaderIconButton({
   icon,
   label,
   tintColor,
-  prominent,
   disabled,
   onPress,
 }: {
@@ -80,15 +79,12 @@ function HeaderIconButton({
   /** 图标隐藏时保留给 VoiceOver 的原生按钮标签。 */
   label: string;
   tintColor: string;
-  /** ✓ 保存操作采用主题墨色实底；其余为可见的玻璃表面。 */
-  prominent?: boolean;
   disabled?: boolean;
   onPress: () => void;
 }) {
   const palette = useSheetPalette();
-  const isProminent = prominent && !disabled;
   const supportsLiquidGlass = Platform.OS === 'ios' && Number(Platform.Version) >= 26;
-  const nativeIconColor = disabled ? palette.textTertiary : isProminent ? palette.onInk : palette.textPrimary;
+  const nativeIconColor = disabled ? palette.textTertiary : palette.textPrimary;
 
   // 仅在支持 Liquid Glass 的 iOS 上启用原生 interactive glass。
   // 低版本走下方的 RN 表面，避免 SwiftUI `bordered` 降级成不符合页面层级的灰色按钮。
@@ -109,7 +105,6 @@ function HeaderIconButton({
               glass: {
                 variant: 'regular',
                 interactive: !disabled,
-                ...(isProminent ? { tint: palette.ink } : {}),
               },
               shape: 'circle',
             }),
@@ -129,13 +124,11 @@ function HeaderIconButton({
       style={({ pressed }) => [
         styles.btn,
         {
-          backgroundColor: isProminent ? palette.ink : palette.sheetHeaderControl,
-          borderColor: isProminent ? palette.ink : palette.separator,
+          backgroundColor: palette.sheetHeaderControl,
+          borderColor: palette.separator,
           shadowColor: palette.shadow,
         },
-        isProminent ? styles.btnProminent : null,
         pressed ? styles.btnPressed : null,
-        disabled ? styles.btnDisabled : null,
       ]}
     >
       <SymbolView name={icon} tintColor={tintColor} size={18} weight="semibold" />
@@ -184,8 +177,7 @@ export function SheetHeader({
             <HeaderIconButton
               icon="checkmark"
               label="保存"
-              tintColor={confirmDisabled ? palette.textTertiary : palette.onInk}
-              prominent
+              tintColor={confirmDisabled ? palette.textTertiary : palette.textPrimary}
               disabled={confirmDisabled}
               onPress={onConfirm}
             />
@@ -233,8 +225,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
-  btnProminent: { borderWidth: 0 },
   btnPressed: { opacity: 0.72, transform: [{ scale: 0.97 }] },
-  btnDisabled: { opacity: 0.48 },
   title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
 });
