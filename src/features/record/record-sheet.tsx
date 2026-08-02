@@ -11,10 +11,11 @@
 import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useMemo, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Modal,
   Pressable,
   ScrollView,
@@ -67,6 +68,9 @@ const KEY_ROWS = [
   ['7', '8', '9'],
   ['.', '0', '⌫'],
 ] as const;
+
+/** 记账人弹层下拉超过此位移（pt）即关闭，否则回弹。 */
+const MEMBER_PICKER_DISMISS_THRESHOLD = 80;
 
 /** 把正在输入的金额字符串拆为「整数（含千分位） + 小数」用于展示。 */
 function displayParts(raw: string): { integer: string; decimal: string; hasDot: boolean } {
@@ -387,16 +391,18 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
       </View>
 
       {/* 记账人选择（底部 sheet） */}
-      <MemberPickerSheet
-        visible={showRecorder && memberOpen}
-        members={members}
-        selectedUserId={recorderUserId}
-        onSelect={(uid) => {
-          setRecorderUserId(uid);
-          setMemberOpen(false);
-        }}
-        onClose={() => setMemberOpen(false)}
-      />
+      {showRecorder && memberOpen ? (
+        <MemberPickerSheet
+          visible
+          members={members}
+          selectedUserId={recorderUserId}
+          onSelect={(uid) => {
+            setRecorderUserId(uid);
+            setMemberOpen(false);
+          }}
+          onClose={() => setMemberOpen(false)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -416,15 +422,58 @@ function MemberPickerSheet({
   onClose: () => void;
 }) {
   const palette = usePalette();
+  const [translateY] = useState(() => new Animated.Value(0));
+  const dragStartY = useRef(0);
+  const currentDragY = useRef(0);
+
+  useLayoutEffect(() => {
+    if (visible) translateY.setValue(0);
+  }, [translateY, visible]);
+
+  const closeWithDrag = useCallback(() => {
+    Animated.timing(translateY, { toValue: 600, duration: 180, useNativeDriver: true }).start(onClose);
+  }, [onClose, translateY]);
+
+  const finishDrag = () => {
+    if (currentDragY.current > MEMBER_PICKER_DISMISS_THRESHOLD) closeWithDrag();
+    else Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        {/* 内层吞掉点击，避免点列表关弹层 */}
-        <Pressable
-          style={[styles.memberSheet, { backgroundColor: palette.elevated, paddingBottom: Space[4] }]}
-          onPress={() => {}}
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+      onShow={() => translateY.setValue(0)}
+    >
+      <View style={styles.backdrop}>
+        {/* 遮罩独立为弹层的同级节点，避免与抓手 responder 竞争触摸事件。 */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <Animated.View
+          style={[
+            styles.memberSheet,
+            { backgroundColor: palette.elevated, paddingBottom: Space[4], transform: [{ translateY }] },
+          ]}
         >
-          <View style={[styles.grabber, { backgroundColor: palette.separator, marginTop: Space[2] }]} />
+          <View
+            style={styles.memberGrabberArea}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={(event) => {
+              dragStartY.current = event.nativeEvent.pageY;
+              currentDragY.current = 0;
+            }}
+            onResponderMove={(event) => {
+              const dy = Math.max(0, event.nativeEvent.pageY - dragStartY.current);
+              currentDragY.current = dy;
+              translateY.setValue(dy);
+            }}
+            onResponderRelease={finishDrag}
+            onResponderTerminate={finishDrag}
+          >
+            <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
+          </View>
           <View style={styles.memberHeader}>
             <Text style={[styles.memberTitle, { color: palette.textPrimary }]}>记账人</Text>
           </View>
@@ -439,8 +488,8 @@ function MemberPickerSheet({
               </Pressable>
             );
           })}
-        </Pressable>
-      </Pressable>
+        </Animated.View>
+      </View>
     </Modal>
   );
 }
@@ -509,8 +558,10 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: Radius.lg,
     borderTopRightRadius: Radius.lg,
     paddingHorizontal: Space[4],
+    overflow: 'hidden',
     alignItems: 'stretch',
   },
+  memberGrabberArea: { alignItems: 'center', justifyContent: 'center', paddingTop: Space[2], paddingBottom: Space[1] },
   memberHeader: {
     flexDirection: 'row',
     alignItems: 'center',
