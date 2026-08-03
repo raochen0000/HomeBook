@@ -66,7 +66,12 @@ import {
 import { resolveCardLayout, type ReportCardId } from '@/lib/report-cards';
 
 type CatSlice = { id: string; name: string; amount: number; color: string; symbol: string };
+/** 分类下钻：单类用 id；「其它」聚合用 categoryIds。 */
+type CategoryDetail = { id: string; name: string; categoryIds?: string[] };
+type DisplayCatSlice = CatSlice & { categoryIds?: string[] };
 type Member = { id: string; name: string; amount: number; count: number };
+const EXPENSE_CATEGORY_TOP_COUNT = 5;
+const EXPENSE_CATEGORY_OTHER_ID = '__other__';
 type ReportScope = 'expense' | 'income' | 'balance';
 type ReportFilters = { memberIds: string[]; categoryIds: string[] };
 type IncomeTargets = { annual: number; custom: number; activeRatio: number };
@@ -256,7 +261,7 @@ export default function ReportScreen() {
   });
   const [customEnd, setCustomEnd] = useState(() => startOfLocalDay(new Date()));
   const [customOpen, setCustomOpen] = useState(false);
-  const [detail, setDetail] = useState<{ id: string; name: string } | null>(null);
+  const [detail, setDetail] = useState<CategoryDetail | null>(null);
   const [memberAnalysisOpen, setMemberAnalysisOpen] = useState(false);
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [moreStatsOpen, setMoreStatsOpen] = useState(false);
@@ -2658,6 +2663,25 @@ function MonthlyBudgetCard({
   );
 }
 
+function buildExpenseCategoryRows(categories: CatSlice[], otherColor: string): DisplayCatSlice[] {
+  if (categories.length <= EXPENSE_CATEGORY_TOP_COUNT) return categories;
+  const top = categories.slice(0, EXPENSE_CATEGORY_TOP_COUNT);
+  const rest = categories.slice(EXPENSE_CATEGORY_TOP_COUNT);
+  const otherAmount = rest.reduce((sum, item) => sum + item.amount, 0);
+  if (otherAmount <= 0) return top;
+  return [
+    ...top,
+    {
+      id: EXPENSE_CATEGORY_OTHER_ID,
+      name: '其它',
+      amount: otherAmount,
+      color: otherColor,
+      symbol: 'ellipsis.circle',
+      categoryIds: rest.map((item) => item.id),
+    },
+  ];
+}
+
 function MonthlyExpenseCategoryCard({
   categories,
   total,
@@ -2670,10 +2694,14 @@ function MonthlyExpenseCategoryCard({
   total: number;
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
-  onOpenDetail: (detail: { id: string; name: string }) => void;
+  onOpenDetail: (detail: CategoryDetail) => void;
   emptyText?: string;
 }) {
-  const [selected, setSelected] = useState<CatSlice | null>(null);
+  const [selected, setSelected] = useState<DisplayCatSlice | null>(null);
+  const rows = useMemo(
+    () => buildExpenseCategoryRows(categories, palette.textTertiary),
+    [categories, palette.textTertiary],
+  );
   const selectedPercent = selected && total > 0 ? Math.round((selected.amount / total) * 100) : 0;
   return (
     <View
@@ -2684,7 +2712,7 @@ function MonthlyExpenseCategoryCard({
       <View style={styles.cardHeaderRow}>
         <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>支出构成</ThemedText>
         {categories.length > 0 ? (
-          <ThemedText style={[styles.categoryHint, { color: palette.accent }]}>点击类别查看明细</ThemedText>
+          <ThemedText style={[styles.categoryCaption, { color: palette.textSecondary }]}>只统计前 6 项支出</ThemedText>
         ) : null}
       </View>
       {categories.length === 0 ? (
@@ -2695,12 +2723,12 @@ function MonthlyExpenseCategoryCard({
       ) : (
         <View style={styles.monthlyCategoryBody}>
           <Donut
-            slices={categories.map((c) => ({ value: c.amount, color: c.color }))}
-            size={150}
-            strokeWidth={24}
+            slices={rows.map((c) => ({ value: c.amount, color: c.color }))}
+            size={140}
+            strokeWidth={22}
             trackColor={palette.base}
-            accessibilityLabel={`支出构成环形图，最大分类 ${categories[0]?.name ?? '暂无'}`}
-            onSlicePress={(index) => setSelected(categories[index] ?? null)}
+            accessibilityLabel={`支出构成环形图，最大分类 ${rows[0]?.name ?? '暂无'}`}
+            onSlicePress={(index) => setSelected(rows[index] ?? null)}
           >
             <ThemedText style={[styles.donutCaption, { color: palette.textSecondary }]}>总支出</ThemedText>
             <ThemedText style={[styles.monthlyDonutTotal, { color: palette.textPrimary }]}>
@@ -2708,22 +2736,34 @@ function MonthlyExpenseCategoryCard({
             </ThemedText>
           </Donut>
           <View style={styles.monthlyCategoryList}>
-            {categories.slice(0, 5).map((category) => {
+            {rows.map((category) => {
               const percent = total > 0 ? Math.round((category.amount / total) * 100) : 0;
               return (
                 <Pressable
                   key={category.id}
                   style={styles.monthlyCategoryRow}
-                  onPress={() => onOpenDetail({ id: category.id, name: category.name })}
+                  hitSlop={{ top: 4, bottom: 4 }}
+                  onPress={() =>
+                    onOpenDetail({
+                      id: category.id,
+                      name: category.name,
+                      categoryIds: category.categoryIds,
+                    })
+                  }
                   accessibilityRole="button"
                   accessibilityLabel={`${category.name}，占支出 ${percent}%，${formatAmount(category.amount, '-')}`}
                   accessibilityHint="点按查看二级分类与流水明细"
                 >
-                  <View style={[styles.categoryColorDot, { backgroundColor: category.color }]} />
-                  <ThemedText style={[styles.monthlyCategoryName, { color: palette.textPrimary }]} numberOfLines={1}>
-                    {category.name}
-                  </ThemedText>
-                  <ThemedText style={[styles.monthlyCategoryPercent, { color: palette.textSecondary }]}>
+                  <View style={styles.monthlyCategoryLabel}>
+                    <View style={[styles.categoryColorDot, { backgroundColor: category.color }]} />
+                    <ThemedText style={[styles.monthlyCategoryName, { color: palette.textPrimary }]} numberOfLines={1}>
+                      {category.name}
+                    </ThemedText>
+                  </View>
+                  <ThemedText
+                    style={[styles.monthlyCategoryPercent, { color: palette.textSecondary }]}
+                    numberOfLines={1}
+                  >
                     {percent}%
                   </ThemedText>
                   <ThemedText style={[styles.monthlyCategoryAmount, { color: palette.textPrimary }]} numberOfLines={1}>
@@ -2984,7 +3024,7 @@ function CategoryDetailSheet({
   hidden,
   onClose,
 }: {
-  detail: { id: string; name: string } | null;
+  detail: CategoryDetail | null;
   range: { start: Date; end: Date };
   dimension: Dimension;
   transactions: Transaction[];
@@ -3002,6 +3042,7 @@ function CategoryDetailSheet({
     };
     if (!detail) return empty;
 
+    const matchIds = new Set(detail.categoryIds?.length ? detail.categoryIds : [detail.id]);
     const periodRows: Transaction[] = [];
     let categoryAmount = 0;
     let allExpense = 0;
@@ -3012,7 +3053,7 @@ function CategoryDetailSheet({
       const inPeriod = inRange(t.occurred_at, range.start, range.end);
       if (!isConsumExpense || !inPeriod) continue;
       allExpense += t.amount;
-      if (t.category_id !== detail.id) continue;
+      if (!matchIds.has(t.category_id)) continue;
 
       categoryAmount += t.amount;
       periodRows.push(t);
@@ -3025,7 +3066,7 @@ function CategoryDetailSheet({
     }
 
     const categoryTxns = transactions.filter(
-      (t) => t.category_id === detail.id && t.type === 'expense' && t.source === 'normal',
+      (t) => matchIds.has(t.category_id) && t.type === 'expense' && t.source === 'normal',
     );
     const series =
       dimension === 'custom'
@@ -3641,19 +3682,37 @@ const styles = StyleSheet.create({
   budgetInsightIcon: { width: 20, alignItems: 'center' },
   budgetInsightText: { flex: 1, fontSize: 13, lineHeight: 18 },
   chartMeta: { fontSize: 13, fontWeight: '500', fontVariant: ['tabular-nums'] },
-  categoryHint: { fontSize: 13, fontWeight: '500' },
-  monthlyCategoryBody: { flexDirection: 'row', alignItems: 'center', gap: Space[3], paddingTop: Space[3] },
+  categoryCaption: { fontSize: 12, fontWeight: '400' },
+  monthlyCategoryBody: { alignItems: 'center', gap: Space[3], paddingTop: Space[3] },
   monthlyDonutTotal: { fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  monthlyCategoryList: { flex: 1, minWidth: 0, gap: Space[2] },
-  monthlyCategoryRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Space[2], paddingVertical: 2 },
+  monthlyCategoryList: { alignSelf: 'stretch', gap: 0 },
+  monthlyCategoryRow: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[2],
+    paddingVertical: 0,
+  },
+  monthlyCategoryLabel: {
+    flex: 4,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[2],
+  },
   categoryColorDot: { width: 8, height: 8, borderRadius: Radius.full },
   monthlyCategoryName: { flex: 1, minWidth: 0, fontSize: 14, fontWeight: '500' },
-  monthlyCategoryPercent: { fontSize: 13, fontVariant: ['tabular-nums'], width: 34, textAlign: 'right' },
+  monthlyCategoryPercent: {
+    flex: 2,
+    fontSize: 13,
+    fontVariant: ['tabular-nums'],
+    textAlign: 'center',
+  },
   monthlyCategoryAmount: {
+    flex: 3.5,
     fontSize: 13,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
-    width: 60,
     textAlign: 'right',
   },
   waterfallList: { gap: Space[3] },
