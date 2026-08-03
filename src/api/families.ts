@@ -5,9 +5,9 @@ import {
   pickAndUploadAvatar,
   pickAndUploadFamilyAvatar,
   pickAndUploadFamilyCover,
+  uploadCroppedFamilyCover,
   type FamilyCoverCrop,
   type PickedFamilyCover,
-  uploadCroppedFamilyCover,
 } from '@/adapters/storage';
 import type { Tables } from '@/lib/database.types';
 import { validateNickname } from '@/lib/profile';
@@ -18,8 +18,8 @@ import { queryKeys } from './keys';
 export type Profile = Tables<'profiles'>;
 export type Family = Tables<'families'>;
 export type Invitation = Tables<'invitations'>;
-export type { FamilyCoverCrop, PickedFamilyCover } from '@/adapters/storage';
 export { defaultFamilyCoverCrop, pickFamilyCoverImage } from '@/adapters/storage';
+export type { FamilyCoverCrop, PickedFamilyCover } from '@/adapters/storage';
 
 /** 当前登录用户的 profile；未登录返回 null。 */
 export async function fetchMyProfile(): Promise<Profile | null> {
@@ -37,6 +37,7 @@ export function useMyProfile() {
 }
 
 export type FamilyMember = Pick<Profile, 'id' | 'nickname' | 'avatar_url'>;
+const FAMILY_MEMBERS_STALE_TIME = 5 * 60 * 1000;
 
 /** 同家庭成员（含自己）的昵称/头像；RLS（shares_family）只返回同家庭成员。 */
 export async function fetchFamilyMembers(): Promise<FamilyMember[]> {
@@ -46,7 +47,11 @@ export async function fetchFamilyMembers(): Promise<FamilyMember[]> {
 }
 
 export function useFamilyMembers() {
-  return useQuery({ queryKey: queryKeys.familyMembers, queryFn: fetchFamilyMembers });
+  return useQuery({
+    queryKey: queryKeys.familyMembers,
+    queryFn: fetchFamilyMembers,
+    staleTime: FAMILY_MEMBERS_STALE_TIME,
+  });
 }
 
 /** 家庭成员（含身份 owner/member）。memberships 与 profiles 分开取后在 JS 合并（生成类型未含外键嵌入）。 */

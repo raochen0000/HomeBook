@@ -10,15 +10,16 @@ import { useEffect, useState } from 'react';
 
 type AvatarSource = { id: string; avatar_url: string | null };
 
-export function useAvatarFiles(members: AvatarSource[]): Map<string, string> {
+export function useAvatarFiles(members: AvatarSource[], visibleMemberIds?: ReadonlySet<string>): Map<string, string> {
   const [files, setFiles] = useState<Map<string, string>>(new Map());
-  // 用稳定签名做依赖，避免 members 数组每次渲染换引用导致 effect 抖动。
-  const signature = members.map((m) => `${m.id}:${m.avatar_url ?? ''}`).join('|');
+  // 首页传入成员集合时只预取已加载流水实际涉及的成员；其他页面保持原有全量预取行为。
+  const membersInFeed = members.filter((member) => !visibleMemberIds || visibleMemberIds.has(member.id));
+  const signature = membersInFeed.map((m) => `${m.id}:${m.avatar_url ?? ''}`).join('|');
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const withUrl = members.filter((m) => m.avatar_url);
+      const withUrl = membersInFeed.filter((m) => m.avatar_url);
       if (withUrl.length === 0) {
         if (!cancelled) setFiles((prev) => (prev.size === 0 ? prev : new Map()));
         return;

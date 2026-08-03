@@ -430,6 +430,30 @@ function ProgressBar({
  *   80%/超支由进度条变色 + 主数字翻转内联表达（不再用独立顶部红条，DESIGN §5.8）。
  * - 未设预算：降级为现金流摘要（结余 + 支出/收入）+「设置预算」引导（户主可点）。
  */
+export function PulseCardSkeleton({
+  contentInsets = { horizontal: Space[4], vertical: Space[4] },
+  message = '加载中…',
+}: {
+  contentInsets?: ContentInsets;
+  message?: string;
+}) {
+  const palette = usePalette();
+
+  return (
+    <VStack
+      alignment="leading"
+      spacing={Space[2]}
+      modifiers={[
+        listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }),
+        padding({ horizontal: contentInsets.horizontal, vertical: contentInsets.vertical }),
+      ]}
+    >
+      <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>本月概览</Text>
+      <Text modifiers={[font({ size: 22, weight: 'bold' }), foregroundColor(palette.textTertiary)]}>{message}</Text>
+    </VStack>
+  );
+}
+
 export function PulseCard({
   hasBudget,
   totalCents,

@@ -15,4 +15,5 @@ export const queryKeys = {
   savingsGoals: ['savings_goals'] as const,
   savingsEntries: (goalId: string) => ['savings_entries', goalId] as const,
   budget: (period: string) => ['budget', period] as const,
+  homeDashboard: (period: string) => ['home_dashboard', period] as const,
 };

@@ -2,7 +2,7 @@
  * 首页（Tab 1）：本月概览卡 + 月度总结条 + 按日分组流水列表。
  * 内容主体用 @expo/ui/swift-ui 原生渲染；外层脚手架（标题栏 / FAB / 状态页）用 RN。
  */
-import { Button, Host, List, Section, Spacer, VStack } from '@expo/ui/swift-ui';
+import { Button, Host, Image, List, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
 import {
   accessibilityHint,
   accessibilityLabel,
@@ -20,6 +20,7 @@ import {
   listRowSeparator,
   listSectionSpacing,
   listStyle,
+  onAppear,
   shadow,
   shapes,
 } from '@expo/ui/swift-ui/modifiers';
@@ -34,15 +35,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   DEFAULT_ACCOUNTING_PREFS,
   useAccountingPrefs,
-  useBudget,
   useCategories,
   useCreateFamily,
   useFamilyMembers,
+  useHomeDashboard,
+  useHomeTransactionFeed,
   useMyFamily,
   useMyProfile,
   useSaveAccountingPrefs,
   useSoftDeleteTransaction,
-  useTransactions,
   type Transaction,
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
@@ -54,10 +55,12 @@ import {
   EndOfListHint,
   InsightBanner,
   PulseCard,
+  PulseCardSkeleton,
   type AvatarInfo,
   type RowData,
 } from '@/features/home/components';
-import { HomeSkeleton } from '@/features/home/home-skeleton';
+import { toPulseCardData } from '@/features/home/home-dashboard';
+import { flattenHomeTransactionPages } from '@/features/home/home-data';
 import { TransactionDetailSheet } from '@/features/home/transaction-detail-sheet';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { FirstRecordCelebration } from '@/features/record/first-record-celebration';
@@ -65,7 +68,7 @@ import { RecordSheet } from '@/features/record/record-sheet';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { useSession } from '@/lib/auth';
-import { daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
+import { daysToMonthEnd } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { clockTime, currentPeriod, dayKey, greetingForHour, humanDay, previousPeriod, signForType } from '@/lib/format';
 
@@ -174,29 +177,23 @@ export default function HomeScreen() {
   const familyQ = useMyFamily();
   const membersQ = useFamilyMembers();
   const categoriesQ = useCategories();
-  const transactionsQ = useTransactions();
-  const budgetQ = useBudget(currentPeriod());
+  const period = currentPeriod();
+  const prevPeriodStr = previousPeriod(period);
+  const familyId = familyQ.data?.id ?? profileQ.data?.current_family_id ?? null;
+  const dashboardQ = useHomeDashboard(period, !!session);
+  const previousDashboardQ = useHomeDashboard(prevPeriodStr, !!session && new Date().getDate() <= 7);
+  const transactionsQ = useHomeTransactionFeed(familyId);
   const createFamilyM = useCreateFamily();
 
   // 记账设置偏好（accounting_preferences，个人级）：金额隐私 + 首页月度总结横幅开关等。
   const accountingPrefs = useAccountingPrefs().data ?? DEFAULT_ACCOUNTING_PREFS;
   const saveAccountingPrefs = useSaveAccountingPrefs();
 
-  // 本月脉搏卡数据（流程 8）：预算总额 + 已用（排除储蓄类）+ 是否户主。
-  const budget = budgetQ.data?.budget ?? null;
-  const hasBudget = !!budget && budget.total_amount > 0;
-  const usedTotal = useMemo(
-    () => expenseUsedInPeriod(transactionsQ.data ?? [], currentPeriod()).total,
-    [transactionsQ.data],
-  );
-  const isOwner = familyQ.data?.owner_user_id === profileQ.data?.id;
+  // 脉搏卡只消费完整账期的服务端概览；不再依赖首页流水首屏页。
+  const pulseData = dashboardQ.data ? toPulseCardData(dashboardQ.data) : null;
 
   // 月初「上月总结来啦」轻提醒（前 7 天，且上月有记账）。
-  const prevPeriodStr = previousPeriod(currentPeriod());
-  const prevMonthHasData = useMemo(
-    () => (transactionsQ.data ?? []).some((t) => currentPeriod(new Date(t.occurred_at)) === prevPeriodStr),
-    [transactionsQ.data, prevPeriodStr],
-  );
+  const prevMonthHasData = (previousDashboardQ.data?.transaction_count ?? 0) > 0;
   const [lastMonthReminderDismissed, setLastMonthReminderDismissed] = useState(false);
   // 月度总结横幅入口可在「记账设置」关闭（show_monthly_summary_entry，默认开）。
   const showLastMonthReminder =
@@ -254,22 +251,32 @@ export default function HomeScreen() {
     setLastMonthReminderDismissed(true);
   }, [prevPeriodStr]);
 
-  // 成员头像 → 本地缓存路径（供原生流水行的真实头像同步读取）。
-  const avatarFiles = useAvatarFiles(membersQ.data ?? []);
+  const transactions = useMemo(
+    () => flattenHomeTransactionPages(transactionsQ.data?.pages ?? []),
+    [transactionsQ.data?.pages],
+  );
+  const avatarMemberIds = useMemo(
+    () =>
+      new Set(
+        transactions.flatMap((transaction) =>
+          transaction.last_editor_user_id && transaction.last_editor_user_id !== transaction.recorder_user_id
+            ? [transaction.recorder_user_id, transaction.last_editor_user_id]
+            : [transaction.recorder_user_id],
+        ),
+      ),
+    [transactions],
+  );
+  // 成员头像 → 本地缓存路径（仅预取已加载流水中涉及的成员）。
+  const avatarFiles = useAvatarFiles(membersQ.data ?? [], avatarMemberIds);
 
-  const { groups, balance, expense, income, monthCount } = useMemo(() => {
-    const txns = transactionsQ.data ?? [];
+  const { groups } = useMemo(() => {
+    const txns = transactions;
     const cats = categoriesQ.data ?? [];
     const members = membersQ.data ?? [];
     const catById = new Map(cats.map((c) => [c.id, c]));
     const memberById = new Map(members.map((m) => [m.id, m]));
     const myId = profileQ.data?.id;
     const myNick = profileQ.data?.nickname;
-    const period = currentPeriod();
-
-    let inc = 0;
-    let exp = 0;
-    let cnt = 0;
 
     // 用户 → 头像信息（真实照片本地路径，缺图回退为共用的昵称渐变头像）。
     const avatarOf = (userId: string): AvatarInfo => {
@@ -279,13 +286,6 @@ export default function HomeScreen() {
 
     const map = new Map<string, Group>();
     for (const t of txns) {
-      const tp = currentPeriod(new Date(t.occurred_at));
-      if (tp === period) {
-        cnt += 1;
-        if (t.type === 'income') inc += t.amount;
-        else exp += t.amount;
-      }
-
       const cat = catById.get(t.category_id);
       const ttype = (t.type === 'income' ? 'income' : 'expense') as 'income' | 'expense';
       const key = dayKey(t.occurred_at);
@@ -317,12 +317,8 @@ export default function HomeScreen() {
 
     return {
       groups: Array.from(map.values()),
-      balance: inc - exp,
-      expense: exp,
-      income: inc,
-      monthCount: cnt,
     };
-  }, [transactionsQ.data, categoriesQ.data, membersQ.data, profileQ.data, avatarFiles, catColors, palette]);
+  }, [transactions, categoriesQ.data, membersQ.data, profileQ.data, avatarFiles, catColors, palette]);
 
   // 记一笔：若当前用户还没有家庭，先自动建「单人家庭」（M1：登录 + 单人家庭自动创建）。
   const openCreate = async () => {
@@ -345,13 +341,13 @@ export default function HomeScreen() {
   };
 
   const openEdit = (id: string) => {
-    const txn = (transactionsQ.data ?? []).find((t) => t.id === id);
+    const txn = transactions.find((t) => t.id === id);
     if (txn) setSheet({ open: true, editing: txn, familyId: txn.family_id });
   };
 
   // 点击列表项 → 只读详情弹窗。
   const openDetail = (id: string) => {
-    const txn = (transactionsQ.data ?? []).find((t) => t.id === id);
+    const txn = transactions.find((t) => t.id === id);
     if (txn) setDetail({ open: true, txn });
   };
 
@@ -366,27 +362,20 @@ export default function HomeScreen() {
   const month = new Date().getMonth() + 1;
   // 月末（25 日~月底）才展示「家里记下 N 笔」计数条，且本月未被关闭；月初提醒优先。
   const showCountBanner =
-    !showLastMonthReminder && new Date().getDate() >= 25 && monthCount > 0 && !countBannerDismissed;
-  const loading = profileQ.isLoading || transactionsQ.isLoading || categoriesQ.isLoading;
+    !showLastMonthReminder &&
+    new Date().getDate() >= 25 &&
+    (dashboardQ.data?.transaction_count ?? 0) > 0 &&
+    !countBannerDismissed;
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <View style={styles.flex}>
-        {loading ? (
-          // 骨架是普通 RN 视图，不像 SwiftUI List 那样会自动避开顶部安全区；
-          // 必须预留完整的悬浮标题高度，避免首屏内容被标题覆盖。
-          <HomeSkeleton topPadding={headerHeight + Space[2]} />
-        ) : !session ? (
+        {!session ? (
           <View style={styles.center}>
             <ThemedText style={{ color: palette.textSecondary }}>请先登录</ThemedText>
             <Link href={'/mine' as Href}>
               <ThemedText style={{ color: palette.info }}>去「我的」登录</ThemedText>
             </Link>
-          </View>
-        ) : groups.length === 0 ? (
-          <View style={styles.center}>
-            <SymbolView name="tray" tintColor={palette.textTertiary} size={48} />
-            <ThemedText style={{ color: palette.textSecondary }}>还没有记账，点 + 记一笔</ThemedText>
           </View>
         ) : (
           <Host style={styles.flex}>
@@ -412,22 +401,23 @@ export default function HomeScreen() {
                 }
                 modifiers={[listRowBackground(palette.card), listRowSeparator('hidden')]}
               >
-                <PulseCard
-                  hasBudget={hasBudget}
-                  totalCents={budget?.total_amount ?? 0}
-                  usedCents={usedTotal}
-                  balanceCents={balance}
-                  expenseCents={expense}
-                  incomeCents={income}
-                  daysLeft={daysToMonthEnd()}
-                  isOwner={isOwner}
-                  hidden={amountsHidden}
-                  onToggleHidden={toggleAmounts}
-                  onPress={() => openSummary(currentPeriod())}
-                  onSetBudget={() => setBudgetOpen(true)}
-                  contentInsets={HOME_CONTENT_INSETS.hero}
-                  pageHorizontalInset={HOME_CONTENT_INSETS.dayHeaderHorizontal}
-                />
+                {pulseData ? (
+                  <PulseCard
+                    {...pulseData}
+                    daysLeft={daysToMonthEnd()}
+                    hidden={amountsHidden}
+                    onToggleHidden={toggleAmounts}
+                    onPress={() => openSummary(period)}
+                    onSetBudget={() => setBudgetOpen(true)}
+                    contentInsets={HOME_CONTENT_INSETS.hero}
+                    pageHorizontalInset={HOME_CONTENT_INSETS.dayHeaderHorizontal}
+                  />
+                ) : (
+                  <PulseCardSkeleton
+                    contentInsets={HOME_CONTENT_INSETS.hero}
+                    message={dashboardQ.isError ? '暂时无法加载' : '加载中…'}
+                  />
+                )}
               </Section>
               {showLastMonthReminder ? (
                 <Section modifiers={[listRowBackground(palette.bannerTint), listRowSeparator('hidden')]}>
@@ -442,34 +432,76 @@ export default function HomeScreen() {
               ) : showCountBanner ? (
                 <Section modifiers={[listRowBackground(palette.bannerTint), listRowSeparator('hidden')]}>
                   <InsightBanner
-                    title={`${month} 月家里一起记下了 ${monthCount} 笔`}
+                    title={`${month} 月家里一起记下了 ${dashboardQ.data?.transaction_count ?? 0} 笔`}
                     subtitle="每一笔都是一家人生活的痕迹"
                     onDismiss={dismissCountBanner}
                     contentInsets={{ horizontal: 0, vertical: 0 }}
                   />
                 </Section>
               ) : null}
-              {groups.map((g) => (
-                <DayGroup
-                  key={g.key}
-                  label={g.label}
-                  totalCents={g.totalCents}
-                  rows={g.rows}
-                  onRowPress={openDetail}
-                  onEdit={openEdit}
-                  onDelete={confirmDelete}
-                  headerHorizontalInset={HOME_CONTENT_INSETS.dayHeaderHorizontal}
-                  rowInsets={HOME_CONTENT_INSETS.transactionRow}
-                />
-              ))}
+              {transactionsQ.isLoading ? (
+                <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
+                  <VStack
+                    modifiers={[
+                      listRowInsets({ top: Space[2], bottom: Space[2], leading: Space[4], trailing: Space[4] }),
+                    ]}
+                  >
+                    <EndOfListHint text="正在加载流水…" />
+                  </VStack>
+                </Section>
+              ) : groups.length === 0 ? (
+                <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
+                  <VStack
+                    alignment="center"
+                    spacing={Space[2]}
+                    modifiers={[
+                      listRowInsets({ top: Space[6], bottom: Space[6], leading: Space[4], trailing: Space[4] }),
+                    ]}
+                  >
+                    <Image systemName="tray" size={48} color={palette.textTertiary} />
+                    <Text modifiers={[font({ size: 15 }), foregroundStyle(palette.textSecondary)]}>
+                      还没有记账，点 + 记一笔
+                    </Text>
+                  </VStack>
+                </Section>
+              ) : (
+                groups.map((g) => (
+                  <DayGroup
+                    key={g.key}
+                    label={g.label}
+                    totalCents={g.totalCents}
+                    rows={g.rows}
+                    onRowPress={openDetail}
+                    onEdit={openEdit}
+                    onDelete={confirmDelete}
+                    headerHorizontalInset={HOME_CONTENT_INSETS.dayHeaderHorizontal}
+                    rowInsets={HOME_CONTENT_INSETS.transactionRow}
+                  />
+                ))
+              )}
               {/* 末尾「没有更多了」提示 + 底部留白 */}
               <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
                 <VStack
                   modifiers={[
                     listRowInsets({ top: Space[2], bottom: Space[6], leading: Space[4], trailing: Space[4] }),
+                    ...(transactionsQ.hasNextPage
+                      ? [
+                          onAppear(() => {
+                            if (!transactionsQ.isFetchingNextPage) transactionsQ.fetchNextPage();
+                          }),
+                        ]
+                      : []),
                   ]}
                 >
-                  <EndOfListHint />
+                  <EndOfListHint
+                    text={
+                      transactionsQ.isFetchingNextPage
+                        ? '正在加载更多…'
+                        : transactionsQ.hasNextPage
+                          ? '继续加载…'
+                          : '暂无更多数据'
+                    }
+                  />
                 </VStack>
               </Section>
             </List>

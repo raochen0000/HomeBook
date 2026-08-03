@@ -1,6 +1,13 @@
 /** 流水数据访问 + React Query hooks。金额单位：分（bigint）。 */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import {
+  createHomeTransactionPage,
+  HOME_TRANSACTION_PAGE_SIZE,
+  homeTransactionCursorFilter,
+  type HomeTransactionPage,
+  type TransactionCursor,
+} from '@/features/home/home-data';
 import type { Tables, TablesInsert } from '@/lib/database.types';
 import { supabase } from '@/lib/supabase';
 
@@ -27,8 +34,7 @@ export type EditTransaction = {
 
 /**
  * 一次拉取的流水条数上限（减轻后端压力；暂不做真正分页）。
- * 注意：脉搏卡的本月汇总仍由前端基于该结果集计算，所以上限必须足够覆盖「本月」全部流水；
- * 200 对绝大多数家庭都绰绰有余，后续如需更大历史再升级为分页 + 服务端汇总。
+ * 搜索、记账等既有页面沿用该上限；首页改用独立的游标分页和服务端概览。
  */
 export const TXN_FETCH_LIMIT = 200;
 
@@ -71,6 +77,44 @@ export function useTransactions(range?: TxnRange) {
   });
 }
 
+export type HomeTransactionFeedPage = HomeTransactionPage<Transaction>;
+
+async function fetchHomeTransactionFeedPage(
+  familyId: string,
+  cursor: TransactionCursor | undefined,
+): Promise<HomeTransactionFeedPage> {
+  let query = supabase
+    .from('transactions')
+    .select('*')
+    .eq('family_id', familyId)
+    .eq('is_deleted', false)
+    .order('occurred_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(HOME_TRANSACTION_PAGE_SIZE);
+
+  if (cursor) {
+    query = query.or(homeTransactionCursorFilter(cursor));
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return createHomeTransactionPage(data);
+}
+
+/**
+ * 首页专用流水 feed：显式按家庭过滤，首屏 30 条，后续页用 (occurred_at, id) 复合游标追加。
+ * query key 保持在 transactions 前缀下，现有记账 mutation 会同时使其失效。
+ */
+export function useHomeTransactionFeed(familyId: string | null | undefined) {
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.transactions, 'home-feed', familyId] as const,
+    queryFn: ({ pageParam }) => fetchHomeTransactionFeedPage(familyId as string, pageParam),
+    initialPageParam: undefined as TransactionCursor | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    enabled: !!familyId,
+  });
+}
+
 export async function createTransaction(input: NewTransaction): Promise<Transaction> {
   const { data, error } = await supabase.from('transactions').insert(input).select('*').single();
   if (error) throw error;
@@ -81,7 +125,11 @@ export function useCreateTransaction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: createTransaction,
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+        qc.invalidateQueries({ queryKey: ['home_dashboard'] }),
+      ]),
   });
 }
 
@@ -97,7 +145,11 @@ export function useUpdateTransaction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: updateTransaction,
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+        qc.invalidateQueries({ queryKey: ['home_dashboard'] }),
+      ]),
   });
 }
 
@@ -111,6 +163,10 @@ export function useSoftDeleteTransaction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: softDeleteTransaction,
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: queryKeys.transactions }),
+        qc.invalidateQueries({ queryKey: ['home_dashboard'] }),
+      ]),
   });
 }

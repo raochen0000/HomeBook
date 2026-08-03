@@ -1,0 +1,46 @@
+# home-progressive-loading Specification
+
+## Purpose
+TBD - created by archiving change home-load-optimization. Update Purpose after archive.
+## Requirements
+### Requirement: 非关键首页数据不得阻塞首屏
+
+系统 SHALL 将首页概览、流水、分类、成员资料和头像缓存作为独立加载单元。分类、成员资料和头像下载 MUST NOT 阻塞 Hero 或首个流水页的展示。
+
+#### Scenario: 成员头像下载缓慢
+
+- **WHEN** 成员头像尚未下载到本地缓存
+- **THEN** 首页 MUST 显示流水及头像回退内容，且不得等待头像下载完成
+
+### Requirement: 头像预取必须限于已加载流水
+
+系统 SHALL 仅预取当前已加载首页流水中记录人或最后编辑人对应的远程头像。
+
+#### Scenario: 家庭中存在未出现在首屏的成员
+
+- **WHEN** 家庭成员没有出现在当前已加载的流水页中
+- **THEN** 首页 MUST NOT 仅为该成员预取头像
+
+#### Scenario: 追加流水页引入新成员
+
+- **WHEN** 加载下一页流水后出现此前未加载成员的头像 URL
+- **THEN** 系统 MUST 在不阻塞列表展示的情况下预取该头像
+
+### Requirement: 定时收支补记不得竞争首屏关键请求
+
+系统 SHALL 在首页首次可交互渲染之后执行当天首次定时收支补记。补记成功并新增流水时，系统 MUST 使首页概览和流水缓存失效。
+
+#### Scenario: 启动时有待补记流水
+
+- **WHEN** 用户首次打开应用且当天存在待补记流水
+- **THEN** 首页 MUST 先开始加载概览和首个流水页，补记完成后 MUST 自动刷新受影响的首页数据
+
+### Requirement: 缓存时间必须反映数据变化频率
+
+系统 SHALL 为分类和家庭成员查询配置比交易查询更长的缓存新鲜期，同时 MUST 保留交易变更后的即时缓存失效行为。
+
+#### Scenario: 交易变更后分类缓存仍有效
+
+- **WHEN** 分类查询仍在其新鲜期内且用户保存一笔流水
+- **THEN** 系统 MUST 刷新首页概览和流水，但 MUST NOT 因该流水变更而强制重新请求分类
+

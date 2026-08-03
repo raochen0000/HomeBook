@@ -113,7 +113,10 @@ export function useGenerateDueRecurring() {
   return useMutation({
     mutationFn: generateDueRecurring,
     onSuccess: (n) => {
-      if (n > 0) qc.invalidateQueries({ queryKey: queryKeys.transactions });
+      if (n > 0) {
+        qc.invalidateQueries({ queryKey: queryKeys.transactions });
+        qc.invalidateQueries({ queryKey: ['home_dashboard'] });
+      }
     },
   });
 }

@@ -738,6 +738,19 @@ export type Database = {
     };
     Views: { [_ in never]: never };
     Functions: {
+      get_home_dashboard: {
+        Args: { p_period: string };
+        Returns: {
+          family_id: string;
+          is_owner: boolean;
+          budget_total_amount: number | null;
+          income_amount: number;
+          expense_amount: number;
+          balance_amount: number;
+          transaction_count: number;
+          budget_used_amount: number;
+        }[];
+      };
       generate_due_recurring_transactions: {
         Args: Record<string, never>;
         Returns: number;

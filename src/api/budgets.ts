@@ -76,6 +76,11 @@ export function useSaveBudget() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: saveBudget,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['budget'] }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ['budget'] }),
+        // 首页 Hero 的预算总额来自 get_home_dashboard，保存后需一并刷新。
+        qc.invalidateQueries({ queryKey: ['home_dashboard'] }),
+      ]),
   });
 }
