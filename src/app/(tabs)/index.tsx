@@ -84,7 +84,7 @@ const RECORD_FAB_ICON_SIZE = 28;
  * - transactionRow：流水 Item 内容相对分组卡片边缘的内边距。
  */
 const HOME_CONTENT_INSETS = {
-  hero: { horizontal: Space[4] },
+  hero: { horizontal: Space[1] },
   dayHeaderHorizontal: Space[6],
   transactionRow: { vertical: Space[1] },
 } as const;
