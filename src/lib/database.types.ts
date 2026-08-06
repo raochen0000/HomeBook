@@ -129,6 +129,7 @@ export type Database = {
           family_id: string | null;
           name: string;
           icon: string | null;
+          color_key: string | null;
           type: string;
           is_system: boolean;
           status: string;
@@ -140,6 +141,7 @@ export type Database = {
           family_id?: string | null;
           name: string;
           icon?: string | null;
+          color_key?: string | null;
           type: string;
           is_system?: boolean;
           status?: string;
@@ -151,6 +153,7 @@ export type Database = {
           family_id?: string | null;
           name?: string;
           icon?: string | null;
+          color_key?: string | null;
           type?: string;
           is_system?: boolean;
           status?: string;

@@ -2,6 +2,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { Tables } from '@/lib/database.types';
+import type { CustomCategoryColorKey } from '@/lib/category-style';
 import { supabase } from '@/lib/supabase';
 
 import { queryKeys } from './keys';
@@ -56,7 +57,13 @@ export function useHiddenCategoryIds() {
 // ── 自定义分类管理（流程 11）─────────────────────────────────────────────────
 // RLS：家庭成员可对 family_id 非空的分类增改；系统分类（family_id=null）全局只读。
 
-export type NewCategory = { family_id: string; name: string; icon: string; type: CategoryType };
+export type NewCategory = {
+  family_id: string;
+  name: string;
+  icon: string;
+  type: CategoryType;
+  color_key: CustomCategoryColorKey;
+};
 
 export async function createCategory(input: NewCategory): Promise<Category> {
   const { data, error } = await supabase
@@ -68,7 +75,10 @@ export async function createCategory(input: NewCategory): Promise<Category> {
   return data;
 }
 
-export async function updateCategory(id: string, patch: { name?: string; icon?: string }): Promise<Category> {
+export async function updateCategory(
+  id: string,
+  patch: { name?: string; icon?: string; color_key?: CustomCategoryColorKey },
+): Promise<Category> {
   const { data, error } = await supabase.from('categories').update(patch).eq('id', id).select().single();
   if (error) throw error;
   return data;
@@ -115,8 +125,9 @@ export function useCreateCategory() {
 }
 
 export function useUpdateCategory() {
-  return useCategoryMutation(({ id, ...patch }: { id: string; name?: string; icon?: string }) =>
-    updateCategory(id, patch),
+  return useCategoryMutation(
+    ({ id, ...patch }: { id: string; name?: string; icon?: string; color_key?: CustomCategoryColorKey }) =>
+      updateCategory(id, patch),
   );
 }
 

@@ -218,7 +218,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   /** 单个分类圆底项（横滑与网格两种布局复用）。 */
   const renderCat = (c: Category, itemWidth: DimensionValue) => {
     const active = c.id === effectiveCategoryId;
-    const color = catColors[categoryColorKey(c.name, type)];
+    const color = catColors[categoryColorKey(c.name, type, c.color_key)];
     return (
       <Pressable key={c.id} style={[styles.catItem, { width: itemWidth }]} onPress={() => setCategoryId(c.id)}>
         <View

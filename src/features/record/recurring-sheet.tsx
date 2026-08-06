@@ -182,7 +182,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
 
   const renderCat = (c: Category) => {
     const active = c.id === effectiveCategoryId;
-    const color = catColors[categoryColorKey(c.name, type)];
+    const color = catColors[categoryColorKey(c.name, type, c.color_key)];
     return (
       <Pressable key={c.id} style={styles.catItem} onPress={() => setCategoryId(c.id)}>
         <View

@@ -110,7 +110,7 @@ function Body({
   const avatarOf = (id: string) =>
     members.find((m) => m.id === id)?.avatar_url ?? (id === myId ? (profileQ.data?.avatar_url ?? null) : null);
 
-  const iconColor = catColors[categoryColorKey(cat?.name ?? '', ttype)];
+  const iconColor = catColors[categoryColorKey(cat?.name ?? '', ttype, cat?.color_key)];
   const amountColor = ttype === 'income' ? palette.income : palette.expense;
   const editedByOther = !!t.last_editor_user_id && t.last_editor_user_id !== t.recorder_user_id;
 

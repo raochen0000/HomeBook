@@ -83,7 +83,7 @@ export default function RecurringScreen() {
                 const cat = catById.get(rule.category_id);
                 const catName = cat?.name ?? (rtype === 'income' ? '其他收入' : '未分类');
                 const icon = categorySymbol(cat?.icon ?? null, rtype) as IconName;
-                const color = catColors[categoryColorKey(catName, rtype)];
+                const color = catColors[categoryColorKey(catName, rtype, cat?.color_key)];
                 const title = rule.note?.trim() ? rule.note : catName;
                 const amount = formatAmount(rule.amount, rtype === 'income' ? '+' : '-');
                 const amountColor = rtype === 'income' ? palette.income : palette.expense;

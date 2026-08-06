@@ -157,7 +157,12 @@ function BudgetView({
                 <View key={bc.category_id}>
                   {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
                   <View style={styles.catRow}>
-                    <View style={[styles.catDot, { backgroundColor: catColors[categoryColorKey(name, 'expense')] }]}>
+                    <View
+                      style={[
+                        styles.catDot,
+                        { backgroundColor: catColors[categoryColorKey(name, 'expense', cat?.color_key)] },
+                      ]}
+                    >
                       <SymbolView
                         name={(cat?.icon ?? 'circle.fill') as SymbolViewProps['name']}
                         tintColor="#FFFFFF"
@@ -298,7 +303,12 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
               <View key={c.id}>
                 {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
                 <View style={styles.catEditRow}>
-                  <View style={[styles.catDot, { backgroundColor: catColors[categoryColorKey(c.name, 'expense')] }]}>
+                  <View
+                    style={[
+                      styles.catDot,
+                      { backgroundColor: catColors[categoryColorKey(c.name, 'expense', c.color_key)] },
+                    ]}
+                  >
                     <SymbolView
                       name={(c.icon ?? 'circle.fill') as SymbolViewProps['name']}
                       tintColor="#FFFFFF"

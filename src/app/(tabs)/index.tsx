@@ -304,7 +304,7 @@ export default function HomeScreen() {
         id: t.id,
         title: cat?.name ?? '未分类',
         symbol: categorySymbol(cat?.icon ?? null, ttype),
-        iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype)],
+        iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype, cat?.color_key)],
         amountCents: t.amount,
         sign: signForType(ttype),
         amountColor: ttype === 'income' ? palette.income : palette.expense,

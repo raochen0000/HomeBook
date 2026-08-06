@@ -218,7 +218,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         title: cat?.name ?? '未分类',
         note,
         symbol: categorySymbol(cat?.icon ?? null, ttype),
-        iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype)],
+        iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype, cat?.color_key)],
         amountCents: t.amount,
         sign: signForType(ttype),
         amountColor: ttype === 'income' ? palette.income : palette.expense,

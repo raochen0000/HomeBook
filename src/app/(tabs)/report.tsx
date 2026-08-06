@@ -354,7 +354,7 @@ export default function ReportScreen() {
       const cname = cat?.name ?? (type === 'income' ? '其他收入' : '未分类');
       return {
         name: cname,
-        color: catColors[categoryColorKey(cname, type)],
+        color: catColors[categoryColorKey(cname, type, cat?.color_key)],
         symbol: categorySymbol(cat?.icon ?? null, type),
       };
     };
@@ -3332,7 +3332,7 @@ function MemberAnalysisSheet({
         const entry = row.categoryMap.get(t.category_id) ?? {
           name,
           amount: 0,
-          color: catColors[categoryColorKey(name, 'expense')],
+          color: catColors[categoryColorKey(name, 'expense', cat?.color_key)],
         };
         entry.amount += t.amount;
         row.categoryMap.set(t.category_id, entry);

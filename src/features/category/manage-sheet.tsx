@@ -28,7 +28,12 @@ import {
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
-import { categoryColorKey } from '@/lib/category-style';
+import {
+  categoryColorKey,
+  CUSTOM_CATEGORY_COLORS,
+  customCategoryColorKey,
+  DEFAULT_CUSTOM_CATEGORY_COLOR,
+} from '@/lib/category-style';
 
 type SymbolName = Extract<SymbolViewProps['name'], string>;
 type IconGroup = { title: string; icons: readonly SymbolName[] };
@@ -348,7 +353,7 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
   };
 
   const renderRow = (c: Category, editable: boolean) => {
-    const color = catColors[categoryColorKey(c.name, type)];
+    const color = catColors[categoryColorKey(c.name, type, c.color_key)];
     const isHidden = c.is_system && hidden.has(c.id);
     const isProtected = c.is_system && PROTECTED_SYSTEM_NAMES.has(c.name);
     return (
@@ -454,11 +459,14 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
   const [name, setName] = useState(isEdit ? view.category.name : '');
   const defaultIcon = type === 'expense' ? DEFAULT_EXPENSE_ICON : DEFAULT_INCOME_ICON;
   const [icon, setIcon] = useState(isEdit ? (view.category.icon ?? defaultIcon) : defaultIcon);
+  const [colorKey, setColorKey] = useState(
+    isEdit ? customCategoryColorKey(view.category.color_key) : DEFAULT_CUSTOM_CATEGORY_COLOR,
+  );
 
   const saving = createM.isPending || updateM.isPending;
   const trimmed = name.trim();
   const nameTooLong = trimmed.length > CATEGORY_NAME_MAX_LENGTH;
-  const color = catColors[categoryColorKey(trimmed, type)];
+  const color = catColors[colorKey];
 
   const handleSave = async () => {
     if (!trimmed) return;
@@ -476,14 +484,14 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
     }
     try {
       if (isEdit) {
-        await updateM.mutateAsync({ id: view.category.id, name: trimmed, icon });
+        await updateM.mutateAsync({ id: view.category.id, name: trimmed, icon, color_key: colorKey });
       } else {
         const fid = familyQ.data?.id;
         if (!fid) {
           Alert.alert('暂时无法创建', '请先创建或加入一个家庭。');
           return;
         }
-        await createM.mutateAsync({ family_id: fid, name: trimmed, icon, type });
+        await createM.mutateAsync({ family_id: fid, name: trimmed, icon, type, color_key: colorKey });
       }
       onBack();
     } catch (e) {
@@ -511,6 +519,50 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
           style={styles.iconSymbol}
         />
       </Pressable>
+    );
+  };
+
+  const renderColorChoice = ({ key, label }: (typeof CUSTOM_CATEGORY_COLORS)[number]) => {
+    const active = key === colorKey;
+    return (
+      <Pressable
+        key={key}
+        onPress={() => setColorKey(key)}
+        accessibilityRole="radio"
+        accessibilityState={{ selected: active }}
+        accessibilityLabel={`${label}色${active ? '，已选择' : ''}`}
+        style={[
+          styles.colorCell,
+          { backgroundColor: catColors[key] },
+          active && { borderColor: palette.textPrimary, borderWidth: 2 },
+        ]}
+      >
+        {active ? <SymbolView name="checkmark" tintColor="#FFFFFF" size={17} weight="bold" /> : null}
+      </Pressable>
+    );
+  };
+
+  const renderColorGrid = () => {
+    const rows: (typeof CUSTOM_CATEGORY_COLORS)[number][][] = [];
+    for (let i = 0; i < CUSTOM_CATEGORY_COLORS.length; i += 6) {
+      rows.push(CUSTOM_CATEGORY_COLORS.slice(i, i + 6));
+    }
+
+    return (
+      <View style={styles.colorGrid} accessibilityRole="radiogroup">
+        {rows.map((row, index) => (
+          <View key={`color-row-${index}`} style={styles.colorRow}>
+            {Array.from({ length: 6 }, (_, slotIndex) => {
+              const item = row[slotIndex];
+              return (
+                <View key={item?.key ?? `empty-color-${index}-${slotIndex}`} style={styles.colorSlot}>
+                  {item ? renderColorChoice(item) : null}
+                </View>
+              );
+            })}
+          </View>
+        ))}
+      </View>
     );
   };
 
@@ -577,6 +629,11 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
             returnKeyType="done"
           />
 
+          <View style={styles.colorSection}>
+            <Text style={[styles.colorTitle, { color: palette.textPrimary }]}>分类颜色</Text>
+            <View style={[styles.colorCard, { backgroundColor: palette.card }]}>{renderColorGrid()}</View>
+          </View>
+
           <ScrollView
             style={styles.iconScroll}
             contentContainerStyle={styles.iconScrollContent}
@@ -639,6 +696,22 @@ const styles = StyleSheet.create({
   previewDot: { width: 64, height: 64, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
   previewType: { fontSize: 13 },
   nameInput: { height: 50, borderRadius: Radius.md, paddingHorizontal: Space[4], fontSize: 17 },
+  colorSection: { gap: Space[1] },
+  colorTitle: { fontSize: 15, fontWeight: '600' },
+  colorCard: { padding: Space[3], borderRadius: Radius.lg, marginTop: Space[1] },
+  colorGrid: {
+    gap: Space[3],
+  },
+  colorRow: { flexDirection: 'row', alignItems: 'center' },
+  colorSlot: { flex: 1, alignItems: 'center' },
+  colorCell: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderColor: 'transparent',
+  },
   iconScroll: { flex: 1 },
   iconScrollContent: {},
   iconGroupList: { gap: Space[4] },
