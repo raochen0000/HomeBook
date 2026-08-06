@@ -27,6 +27,19 @@ import { currentPeriod, formatAmount, monthLabel } from '@/lib/format';
 
 const toCents = (raw: string) => Math.round(Number(raw || '0') * 100);
 
+/** 金额输入：仅保留数字与至多一个小数点，小数最多两位。 */
+function sanitizeAmountInput(raw: string): string {
+  const cleaned = raw.replace(/[^\d.]/g, '');
+  const dot = cleaned.indexOf('.');
+  if (dot < 0) return cleaned;
+  const intPart = cleaned.slice(0, dot);
+  const fracPart = cleaned
+    .slice(dot + 1)
+    .replace(/\./g, '')
+    .slice(0, 2);
+  return `${intPart}.${fracPart}`;
+}
+
 export function BudgetSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
     <PageSheet visible={visible} onClose={onClose}>
@@ -284,7 +297,7 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
             placeholder="0.00"
             placeholderTextColor={palette.textTertiary}
             value={total}
-            onChangeText={setTotal}
+            onChangeText={(v) => setTotal(sanitizeAmountInput(v))}
             keyboardType="decimal-pad"
             autoFocus
           />
@@ -321,7 +334,7 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
                     placeholder="不限"
                     placeholderTextColor={palette.textTertiary}
                     value={catAmounts[c.id] ?? ''}
-                    onChangeText={(v) => setCatAmounts((prev) => ({ ...prev, [c.id]: v }))}
+                    onChangeText={(v) => setCatAmounts((prev) => ({ ...prev, [c.id]: sanitizeAmountInput(v) }))}
                     keyboardType="decimal-pad"
                   />
                 </View>
