@@ -3157,7 +3157,7 @@ function CategoryDetailSheet({
             <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
               <View style={styles.cardHeaderRow}>
                 <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>明细流水</Text>
-                <Text style={[styles.detailSectionMeta, { color: palette.accent }]}>全部 {rows.length} 笔</Text>
+                <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>全部 {rows.length} 笔</Text>
               </View>
               {rows.length === 0 ? (
                 <View style={styles.emptyBox}>
