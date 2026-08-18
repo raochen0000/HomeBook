@@ -31,7 +31,7 @@ export type ReportCardMeta = {
   title: string;
   /** SF Symbol 名（管理页图标）。 */
   icon: string;
-  /** 锁定卡：强制常驻、不可隐藏、不可拖动（仅「收支概览」）。 */
+  /** 锁定卡：强制常驻置顶、不可隐藏、不可拖动（仅「收支概览」）。 */
   locked?: boolean;
 };
 
@@ -97,15 +97,17 @@ export function resolveCardLayout(
     }
   }
 
-  // 2) 显隐：锁定卡永不隐藏。
+  // 2) 显隐：锁定卡永不隐藏；且锁定卡固定置顶（与报表页 / 管理页不可拖语义一致）。
   const hiddenSet = new Set(hidden);
-  const visible: ReportCardId[] = [];
+  const unlocked: ReportCardId[] = [];
+  const locked: ReportCardId[] = [];
   const hiddenOut: ReportCardId[] = [];
   for (const id of ordered) {
-    if (hiddenSet.has(id) && !LOCKED_IDS.has(id)) hiddenOut.push(id);
-    else visible.push(id);
+    if (LOCKED_IDS.has(id)) locked.push(id);
+    else if (hiddenSet.has(id)) hiddenOut.push(id);
+    else unlocked.push(id);
   }
-  return { visible, hidden: hiddenOut };
+  return { visible: [...locked, ...unlocked], hidden: hiddenOut };
 }
 
 export function isLockedCard(id: string): boolean {

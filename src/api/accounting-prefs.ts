@@ -79,8 +79,11 @@ export function useSaveAccountingPrefs() {
   return useMutation({
     mutationFn: saveAccountingPrefs,
     onMutate: async (next: AccountingPrefs) => {
-      await qc.cancelQueries({ queryKey: queryKeys.accountingPrefs });
+      // 先同步写入缓存，再 cancel：SwiftUI List.onMove 要求回调内数据源立刻变序，
+      // 若先 await cancelQueries，松手时仍是旧序会弹回。
       const prev = qc.getQueryData<AccountingPrefs>(queryKeys.accountingPrefs);
+      qc.setQueryData(queryKeys.accountingPrefs, next);
+      await qc.cancelQueries({ queryKey: queryKeys.accountingPrefs });
       qc.setQueryData(queryKeys.accountingPrefs, next);
       return { prev };
     },
