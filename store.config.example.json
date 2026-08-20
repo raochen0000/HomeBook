@@ -1,0 +1,35 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "copyright": "2026 HomeBook",
+    "categories": ["FINANCE", "PRODUCTIVITY"],
+    "info": {
+      "zh-Hans": {
+        "title": "家账",
+        "subtitle": "和家人一起记账",
+        "description": "家账是一款面向家庭协作的记账工具。\n\n你可以记录日常收支，与家人共享家庭账本，管理预算和储蓄目标，并通过清晰的统计报表了解家庭资金状况。\n\n主要功能：\n• 家庭协作账本\n• 收支、预算与储蓄目标\n• 分类统计与报表\n• 家庭邀请二维码\n• 数据导出与账号注销\n\n家账不提供支付、投资、借贷或税务建议，所有数据仅供家庭记账与分析参考。",
+        "keywords": ["家庭记账", "记账", "账本", "预算", "储蓄", "收支"],
+        "releaseNotes": "家账 1.0：首次发布。",
+        "privacyPolicyUrl": "https://example.com/privacy/",
+        "supportUrl": "https://example.com/support/"
+      }
+    },
+    "advisory": {
+      "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+      "gamblingSimulated": "NONE",
+      "medicalOrTreatmentInformation": "NONE",
+      "profanityOrCrudeHumor": "NONE",
+      "sexualContentGraphicAndNudity": "NONE",
+      "sexualContentOrNudity": "NONE",
+      "horrorOrFearThemes": "NONE",
+      "matureOrSuggestiveThemes": "NONE",
+      "violenceCartoonOrFantasy": "NONE",
+      "violenceRealistic": "NONE",
+      "violenceRealisticProlongedGraphicOrSadistic": "NONE",
+      "contests": "NONE",
+      "gambling": false,
+      "unrestrictedWebAccess": false,
+      "seventeenPlus": false
+    }
+  }
+}

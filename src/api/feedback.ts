@@ -75,7 +75,7 @@ export async function submitFeedback(input: SubmitFeedbackInput): Promise<string
   } = await supabase.auth.getUser();
   if (!user) throw new Error('未登录');
 
-  // 截图先传 storage（路径前缀=本人 uid，RLS 兜底），提交失败仅留孤儿对象，MVP 可接受。
+  // 截图先传私有 storage（路径前缀=本人 uid，RLS 兜底），提交失败仅留孤儿对象，MVP 可接受。
   const imagePaths = images.length ? await uploadFeedbackImages(user.id, images) : [];
 
   const { data, error } = await supabase.rpc('submit_feedback', {

@@ -29,7 +29,7 @@ import { supabase } from '@/lib/supabase';
 export const AVATAR_BUCKET = 'homebook-user-avatars';
 export const FAMILY_AVATAR_BUCKET = 'homebook-family-covers';
 export const FAMILY_BACKGROUND_BUCKET = 'homebook-family-background';
-/** 意见反馈截图桶（public；见迁移 0025）。路径 {userId}_{rand}.jpg，写策略校验前缀=本人 uid。 */
+/** 意见反馈截图桶（private；见迁移 0039）。路径 {userId}_{rand}.jpg，仅服务端可读取。 */
 export const FEEDBACK_IMAGE_BUCKET = 'homebook-feedback-images';
 
 /** 头像方形边长（px）。自托管无服务端变换，故落地即最终尺寸。 */
@@ -248,7 +248,7 @@ async function compressFeedbackImage(img: PickedImage): Promise<string> {
   throw new Error('图片过大，压缩后仍超过 2MB');
 }
 
-/** 上传反馈截图到 public 桶，返回桶内对象路径数组（供 submit_feedback 落库）。任一张失败即抛。 */
+/** 上传反馈截图到私有桶，返回桶内对象路径数组（供 submit_feedback 落库）。任一张失败即抛。 */
 export async function uploadFeedbackImages(userId: string, images: PickedImage[]): Promise<string[]> {
   const paths: string[] = [];
   for (const img of images) {

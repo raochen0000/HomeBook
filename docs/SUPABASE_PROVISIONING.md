@@ -75,23 +75,22 @@ Studio → **Storage** → 新建这些 **Public** 桶（策略已由迁移建�
   - 定时触发器 `@every 1m` 不变（见 [`services/push-fc/README.md`](../services/push-fc/README.md)）。
   - 需实例**已开「允许实例访问公网」**，push-fc 才能连到公网 IP。
 
-## 5. 客户端 `.env` + `app.json`（HTTP 要加 ATS）
+## 5. 客户端 `.env`（发布必须 HTTPS）
 
 项目根 `.env`：
 
 ```
-EXPO_PUBLIC_SUPABASE_URL=http://112.124.220.11
+EXPO_PUBLIC_SUPABASE_URL=https://api.example.com
 EXPO_PUBLIC_SUPABASE_KEY=<新 AnonKey>
 ```
 
-`app.json`（URL 是**纯 HTTP 裸 IP**，iOS ATS 会拦明文，必须加例外；IP 用不了 `NSExceptionDomains`，只能全局）：
+生产、preview 与 TestFlight **必须使用有有效 TLS 证书的 HTTPS 域名**。`app.config.ts` 会在
+这些构建中移除 ATS 例外，且客户端会拒绝启动时使用 HTTP 地址，防止登录凭据和家庭财务数据明文传输。
+只有迁移期的 development client 可通过 `APP_VARIANT=development` 临时启用 ATS 例外；请用
+`pnpm ios:prebuild:dev` 重建，不得将该变量配置到 preview 或 production。
 
-```json
-"ios": { "infoPlist": { "NSAppTransportSecurity": { "NSAllowsArbitraryLoads": true } } }
-```
-
-> ⚠️ 拿到 HTTPS / 上架 App Store 前**必须删掉这个例外**（否则审核卡 + 明文裸奔）。Android 若跑另配 `usesCleartextTraffic`。
-> 改完 `npx expo start --clear`（`EXPO_PUBLIC_*` 打包内联，必须清缓存）。`infoPlist` 是**原生配置** → 现有 dev client 连不上（日志见 `cleartext`）时要**重建 dev client**。客户端**代码一行不用动**。
+> ⚠️ 不要把 `APP_VARIANT=development` 配进 preview / production。Android 若跑另配 `usesCleartextTraffic`，但生产同样必须关闭。
+> 改完 `npx expo start --clear`（`EXPO_PUBLIC_*` 打包内联，必须清缓存）。HTTPS 域名生效后必须用生产配置重建 TestFlight 包；development client 的原生 ATS 例外只用于临时联调。
 
 ## 6. 验证清单
 
@@ -107,15 +106,15 @@ EXPO_PUBLIC_SUPABASE_KEY=<新 AnonKey>
 
 ## 常见坑速查
 
-| 症状 | 处置 |
-| --- | --- |
-| 手机 OTP `422 weak_password` | 自建版：Email → Password Requirements=`No required characters`；**托管版无此入口 → 工单**（第 3 步） |
-| 手机收不到码 | SMS Webhook 的 **Hook 密钥 ≠ FC 的 `HOOK_SECRET`** → 同步一致（第 3 步） |
-| 短信/邮件 `hook_timeout` | 自建版 Hook URI 必须 FC 内网/VPC 地址；**托管版可能与 FC 不同 VPC → 开「允许实例访问公网」改用公网地址** |
-| 邮件发不出 | 未开「允许实例访问公网」，或 SMTP 密码填成了 AccessKey（第 3 步） |
-| 邮件里没验证码 | 模板正文要含 `{{ .Token }}`（你的流程是验证码、非魔法链接） |
-| iOS 连不上 Supabase | app.json 缺 ATS 例外，或改后 dev client 未重建（第 5 步） |
-| FC 子域名 `Subdomain is invalid` | FC 函数名**别带连字符**（如 `homebooksms`） |
-| 头像上传 `violates row-level security` | 存储策略按 owner 列判定（迁移 0022 已含），且桶要 public（第 2 步） |
+| 症状                                   | 处置                                                                                                     |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 手机 OTP `422 weak_password`           | 自建版：Email → Password Requirements=`No required characters`；**托管版无此入口 → 工单**（第 3 步）     |
+| 手机收不到码                           | SMS Webhook 的 **Hook 密钥 ≠ FC 的 `HOOK_SECRET`** → 同步一致（第 3 步）                                 |
+| 短信/邮件 `hook_timeout`               | 自建版 Hook URI 必须 FC 内网/VPC 地址；**托管版可能与 FC 不同 VPC → 开「允许实例访问公网」改用公网地址** |
+| 邮件发不出                             | 未开「允许实例访问公网」，或 SMTP 密码填成了 AccessKey（第 3 步）                                        |
+| 邮件里没验证码                         | 模板正文要含 `{{ .Token }}`（你的流程是验证码、非魔法链接）                                              |
+| iOS 连不上 Supabase                    | 发布环境必须检查 HTTPS 域名、证书链与反向代理；仅 development client 可按第 5 步临时启用 ATS 例外        |
+| FC 子域名 `Subdomain is invalid`       | FC 函数名**别带连字符**（如 `homebooksms`）                                                              |
+| 头像上传 `violates row-level security` | 存储策略按 owner 列判定（迁移 0022 已含），且桶要 public（第 2 步）                                      |
 
 关联记忆：[[supabase-deploy-constraint]] · [[supabase-phone-otp-native-aliyun]] · [[email-hook-fc-no-smtp]] · [[supabase-storage-rls-no-identity]] · [[supabase-client-setup]] · [[supabase-instance-provisioning]]

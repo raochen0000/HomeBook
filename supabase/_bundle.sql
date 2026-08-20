@@ -1,4 +1,4 @@
--- 家账 HomeBook · 全量建库脚本（38 个迁移按序合并）
+-- 家账 HomeBook · 全量建库脚本（40 个迁移按序合并）
 -- 用法：在自托管实例的 Studio → SQL Editor 整段粘贴执行一次。
 -- 全程包在一个事务里，任一步出错整体回滚，便于安全重试。
 -- 注意：表无 IF NOT EXISTS，仅供首次建库；重复执行会因对象已存在而报错（属预期）。
@@ -3340,5 +3340,76 @@ grant execute on function public.get_home_dashboard(text) to authenticated;
 
 comment on function public.get_home_dashboard(text) is
   '当前活动家庭指定账期的首页 Hero 聚合；预算已用仅统计普通支出。';
+
+-- ============================================================
+-- >>> migrations/20260803224919_add_category_color_key.sql
+-- ============================================================
+-- 自定义分类识别色：保存颜色令牌，由客户端按浅色 / 深色主题解析实际色值。
+-- 系统分类继续使用既有的名称映射；历史自定义分类按 id 稳定分配一色，避免升级后仍显示灰色。
+
+alter table public.categories
+  add column color_key text;
+
+alter table public.categories
+  add constraint categories_color_key_check
+  check (
+    color_key is null
+    or color_key in (
+      'food', 'apricot', 'coral', 'shopping', 'rose', 'entertainment',
+      'plum', 'lavender', 'periwinkle', 'transit', 'sky', 'education',
+      'aqua', 'mint', 'home', 'olive', 'ochre', 'amber',
+      'saving', 'sand', 'medical', 'incomeGeneric', 'slate', 'social'
+    )
+  );
+
+with palette as (
+  select array[
+    'food', 'apricot', 'coral', 'shopping', 'rose', 'entertainment',
+    'plum', 'lavender', 'periwinkle', 'transit', 'sky', 'education',
+    'aqua', 'mint', 'home', 'olive', 'ochre', 'amber',
+    'saving', 'sand', 'medical', 'incomeGeneric', 'slate', 'social'
+  ]::text[] as keys
+)
+update public.categories as category
+set color_key = palette.keys[1 + mod((hashtextextended(category.id::text, 0) & 2147483647), 24)::int]
+from palette
+where not category.is_system
+  and category.color_key is null;
+
+alter table public.categories
+  add constraint categories_custom_color_key_required
+  check (is_system or color_key is not null);
+
+-- ============================================================
+-- >>> migrations/20260819213000_secure_feedback_images.sql
+-- ============================================================
+-- 0039 · 发布前收紧反馈截图访问控制
+-- -----------------------------------------------------------------------------
+-- 反馈截图可能包含账单、联系方式或设备信息；公开 bucket 会让持有 URL 的任何人读取对象。
+-- 客户端只需上传并把路径交给 submit_feedback，读取仅供运营侧使用 service_role，故不需要
+-- 客户端 SELECT 策略，也不应继续使用 public bucket。
+
+do $$
+begin
+  if not exists (select 1 from storage.buckets where id = 'homebook-feedback-images') then
+    raise exception 'storage bucket homebook-feedback-images does not exist';
+  end if;
+end
+$$;
+
+update storage.buckets
+set public = false
+where id = 'homebook-feedback-images';
+
+drop policy if exists "feedback_images_select" on storage.objects;
+drop policy if exists "feedback_images_insert_own" on storage.objects;
+
+-- 上传必须来自已登录用户；owner / owner_id 由 Storage 服务端根据 JWT 填入，客户端不能伪造。
+create policy "feedback_images_insert_own" on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'homebook-feedback-images'
+    and starts_with(name, coalesce(owner::text, owner_id) || '_')
+  );
 
 commit;

@@ -10,11 +10,10 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.raochen.homebook-app",
+      "appleTeamId": "K47Q5Y7ANG",
       "usesAppleSignIn": true,
-      "infoPlist": {
-        "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true
-        }
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
@@ -74,7 +73,8 @@
             "imageWidth": 76
           }
         }
-      ]
+      ],
+      "./plugins/with-expo-precompiled-modules"
     ],
     "experiments": {
       "typedRoutes": true,
