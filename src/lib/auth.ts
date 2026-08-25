@@ -6,8 +6,9 @@
  *
  * 用户主表 = `auth.users`（Supabase Auth）+ `public.profiles`（业务字段，由 handle_new_user 触发器自动建行）。
  */
-import * as AppleAuthentication from 'expo-apple-authentication';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session } from '@supabase/supabase-js';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
@@ -15,6 +16,33 @@ import { unregisterCurrentDevice } from '@/api/device-tokens';
 
 import { normalizeDefaultNickname } from './profile';
 import { supabase } from './supabase';
+
+/** GoTrue 持久化会话键（`sb-<ref>-auth-token` 及其 -user / -code-verifier 后缀）。 */
+function isAuthStorageKey(key: string): boolean {
+  return key.includes('-auth-token') || key === 'supabase.auth.token';
+}
+
+/**
+ * 清掉本机会话。服务端会话已删或账号已封禁时，默认 `signOut({ scope: 'global' })`
+ * 会先请求 `/logout`；若返回非 401/403/404（例如 banned 用户 400），GoTrue 不会走
+ * `_removeSession`，AsyncStorage 里的 JWT 会留下「已注销用户」僵尸会话。
+ */
+async function clearLocalSession(): Promise<void> {
+  try {
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
+    if (!error) {
+      const leftover = (await AsyncStorage.getAllKeys()).filter(isAuthStorageKey);
+      if (leftover.length === 0) return;
+    }
+  } catch {
+    // 服务端拒绝登出时仍继续抹本地存储。
+  }
+
+  const leftover = (await AsyncStorage.getAllKeys()).filter(isAuthStorageKey);
+  if (leftover.length > 0) await AsyncStorage.multiRemove(leftover);
+  const { error } = await supabase.auth.signOut({ scope: 'local' });
+  if (error) throw error;
+}
 
 /** 订阅当前会话；loading 用于首帧避免登录页闪现。 */
 export function useSession(): { session: Session | null; loading: boolean } {
@@ -264,7 +292,7 @@ export async function signOut(): Promise<void> {
   // 先注销本设备推送令牌（此时 session 仍有效；未注册过则内部直接返回）。
   await unregisterCurrentDevice();
   const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  if (error) await clearLocalSession();
 }
 
 /**
@@ -277,6 +305,6 @@ export async function deleteAccount(): Promise<void> {
   await unregisterCurrentDevice();
   const { error } = await supabase.rpc('delete_account');
   if (error) throw error;
-  // 服务端已删会话，这里再清本地存储，触发 onAuthStateChange → 路由回登录页。
-  await supabase.auth.signOut();
+  // 服务端已删会话并封禁账号，只能清本地；global signOut 可能失败且不触发 SIGNED_OUT。
+  await clearLocalSession();
 }

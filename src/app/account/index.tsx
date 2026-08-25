@@ -92,8 +92,8 @@ export default function AccountScreen() {
     );
   };
 
-  // 二次销毁确认：打开危险确认弹层（输入「我确认注销」解锁滑块）。成功后会话失效，
-  // onAuthStateChange 自动把用户导航回登录页，无需手动跳转。
+  // 二次销毁确认：打开危险确认弹层（输入「我确认注销」解锁滑块）。成功后本地会话被清掉，
+  // 根布局 Stack.Protected 把本页从栈里摘掉并落到登录页。
   const onDeleteAccount = () => setDeleteOpen(true);
 
   return (

@@ -7,8 +7,8 @@
  * 未部署完成前「获取验证码」会失败，开发阶段用邮箱登录推进；由 `PHONE_OTP_ENABLED` 开关控制。
  *
  * 单屏内 phone / email 两态切换（「其它方式登录」互跳）；手机号单屏放「手机号 + 验证码」，
- * 「获取验证码」带 60s 倒计时。以全屏覆盖层渲染于 Tab 之上（无 session 时显示），
- * 登录成功后随 session 变化自动卸载（见 _layout.tsx）。
+ * 「获取验证码」带 60s 倒计时。作为 `/login` 路由全屏渲染（无 session 时由 Stack.Protected 落到本页），
+ * 登录成功后随 session 变化切回已登录栈（见 _layout.tsx）。
  *
  * 设计取舍（2026-06-26 与用户确认）：纯品牌头无插画；忘记密码先占位（toast）；
  * 用户协议 / 隐私政策复用 settings/legal-sheet（与「关于家账」同一信源）。
@@ -859,7 +859,7 @@ function SecondaryButton({
 }
 
 const styles = StyleSheet.create({
-  root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10 },
+  root: { flex: 1 },
   flex: { flex: 1 },
   // height 由 artHeight 动态给（跟随卡片顶边）。
   backgroundArt: {

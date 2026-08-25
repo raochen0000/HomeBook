@@ -6,7 +6,6 @@ import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-c
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ToastHost } from '@/components/toast';
-import { LoginScreen } from '@/features/auth/login-screen';
 import { NotificationGate } from '@/features/notifications/notification-gate';
 import { usePushRegistration } from '@/features/notifications/use-push-registration';
 import { useRecurringCatchup } from '@/features/record/use-recurring-catchup';
@@ -19,8 +18,13 @@ import { supabase } from '@/lib/supabase';
 
 export default function RootLayout() {
   // 登录态变化时刷新所有查询，避免切换账号后读到上一个用户的缓存数据。
+  // SIGNED_OUT 直接清空：注销后 profile 已是墓碑「已注销用户」，invalidate 会把墓碑写回 UI。
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        queryClient.clear();
+        return;
+      }
       queryClient.invalidateQueries();
     });
     return () => sub.subscription.unsubscribe();
@@ -46,6 +50,8 @@ export default function RootLayout() {
 function AppShell() {
   const colorScheme = useColorScheme();
   const { session, loading } = useSession();
+  const signedIn = !loading && !!session;
+  const signedOut = !loading && !session;
 
   // 推送设备令牌注册（层级二骨架）：PUSH_DELIVERY_ENABLED 关时 no-op；APNs 配好翻开即通。
   usePushRegistration();
@@ -59,21 +65,37 @@ function AppShell() {
       {/* 搜索入口上下文：各 Tab 顶栏 🔍 共用跳转逻辑（流程 14）。 */}
       <SearchProvider>
         {/*
-         * 根导航栈：四 Tab 组 `(tabs)` 无头（各 Tab 自带折叠头）；「我的」子页为 push 全屏，
-         * 由各子页自行 `<Stack.Screen options>` 开启原生返回头（IA §6 G / DESIGN §10.4/§10.5）。
+         * 根导航栈：已登录页用 Stack.Protected 守住。注销后账号与安全等原生页会从栈里摘掉，
+         * 落到 login（覆盖层无法盖住 Native Stack，这是停留在账号页的根因）。
          */}
         <Stack screenOptions={{ headerShown: false, headerBackButtonDisplayMode: 'minimal' }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="search" />
-          <Stack.Screen name="summary" />
+          <Stack.Protected guard={signedIn}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="search" />
+            <Stack.Screen name="summary" />
+            <Stack.Screen name="about" />
+            <Stack.Screen name="export" />
+            <Stack.Screen name="feedback" />
+            <Stack.Screen name="help" />
+            <Stack.Screen name="account/index" />
+            <Stack.Screen name="account/phone" />
+            <Stack.Screen name="account/email" />
+            <Stack.Screen name="account/apple" />
+            <Stack.Screen name="account/password" />
+            <Stack.Screen name="settings/notifications" />
+            <Stack.Screen name="settings/record" />
+            <Stack.Screen name="settings/recurring" />
+            <Stack.Screen name="settings/report-cards" />
+          </Stack.Protected>
+          <Stack.Protected guard={signedOut}>
+            <Stack.Screen name="login" />
+          </Stack.Protected>
         </Stack>
       </SearchProvider>
       {/* 已登录：关键通知兜底（被移除/解散/转让，流程 13）。 */}
       {session ? <NotificationGate /> : null}
-      {/* 未登录时以全屏覆盖层显示登录页（流程 1）；session 出现后自动卸载。 */}
-      {!loading && !session ? <LoginScreen /> : null}
-      {/* 全局轻提示：置于所有覆盖层（含登录页）之上，故排在最后。 */}
-      <ToastHost />
+      {/* 已登录时的全局轻提示；未登录由 login 路由自己挂 ToastHost。 */}
+      {session ? <ToastHost /> : null}
     </ThemeProvider>
   );
 }
