@@ -2,19 +2,19 @@
 
 把「层级二 · 远程推送」的**服务端投递**落到阿里云函数计算 FC：定时器每 ~1min 调用本函数，
 它以 `service_role` 拉取待推通知 → 按 `notification_preferences` 决定 → 查 `device_tokens` →
-调 **Expo Push API** 发出 → 标记 `pushed_at`。链路与取舍见 [`index.js`](index.js) 顶部注释。
+调 **Expo Push API** 发出。只有 Expo 接收成功才标记 `pushed_at`；临时失败保留消息并按指数退避重试。链路与取舍见 [`index.js`](index.js) 顶部注释。
 
 **为什么轮询**：自建 Supabase 出网受限（SMTP 被墙、未启用 `pg_net`），DB 侧没有可靠外发通道；
 而 FC 到公网（Supabase REST + Expo）可达，故由 FC 主动拉取，绕开「DB 能否出网」的不确定性。
 
-**语义**：App 内通知中心（流程 13）始终可见，push 只是唤回副本。整体「至多一次、尽力而为」，
-优先不重复刷屏而非绝对不丢；漏推一条不影响用户在 App 内看到该通知。
+**语义**：App 内通知中心（流程 13）始终可见，push 只是唤回副本。Expo ticket 成功只表示 Expo 接受，
+不等同于手机已经展示；API/ticket 的临时失败会在 1 分钟至 1 小时间隔内重试，App 内消息始终是可靠兜底。
 
 ---
 
 ## 前置
 
-- 迁移 **0028** 已在 Studio 应用（`notifications` 加 `pushed_at` + 回填 + 部分索引）。
+- 迁移 **0028、0041、0042** 需已在 Studio 应用（通知生产者、`pushed_at` 与重试字段/索引）。
 - 客户端 `PUSH_DELIVERY_ENABLED=true`、真机已取到 `ExponentPushToken` 并入 `device_tokens`。
 - 拿到自建实例的 **`service_role`** 密钥（Studio → Project Settings → API）。
 
@@ -30,7 +30,7 @@
 2. **环境变量**（见 [`.env.example`](.env.example)）：
    - `SUPABASE_URL`：实例地址（与客户端 `EXPO_PUBLIC_SUPABASE_URL` 同一个）
    - `SUPABASE_SERVICE_ROLE_KEY`：service_role 密钥（高权限，只放这里）
-   - 可选：`PUSH_LOOKBACK_MINUTES` / `PUSH_BATCH_LIMIT` / `EXPO_ACCESS_TOKEN`
+  - 可选：`PUSH_BATCH_LIMIT` / `EXPO_ACCESS_TOKEN`
 
 ## 2. 加定时触发器
 
@@ -57,12 +57,12 @@ node test-send.mjs      # 先打印 describe 自检，再跑一次真实轮询
    values ('<A 的 user_id>', 'transfer', 'in_app', '{"family_name":"调试之家"}');
    ```
 3. 等 ≤1min（或本地手动 `node test-send.mjs`）→ 真机 A 应收到系统推送「户主变更 · 你已成为「调试之家」的户主」。
-4. Studio 查该通知行的 `pushed_at` 已落定（非 null）即投递流程走通。
+4. Studio 查该通知行：Expo 接收后 `pushed_at` 落定；若临时失败，`pushed_at` 仍为 null，`push_attempts` 与 `push_next_attempt_at` 会更新，等待下一轮重试。
 
 ## 排障
 
 - **发不出去 / Expo 报错**：确认 `.p8` 已在 Expo Credentials 里配好（`eas credentials`），bundle id、
   Team ID 对得上；Expo 后台若开了 Enhanced Security 要填 `EXPO_ACCESS_TOKEN`。
-- **收不到但 `pushed_at` 已落定**：多半是该用户 `notification_preferences` 关了该类，或 `device_tokens`
-  没有其令牌（未授权/未登录/令牌失效被清）。
+- **长期没有 `pushed_at`**：检查 FC 日志、Expo 返回的错误和 `push_attempts`。短暂 API/网络失败会自动重试；
+  该用户关闭分类或没有令牌时会作为明确跳过落定，不会无限轮询。
 - **令牌被删**：回执 `DeviceNotRegistered`（卸载/关推送/令牌轮换）会自动从 `device_tokens` 删除，属正常。

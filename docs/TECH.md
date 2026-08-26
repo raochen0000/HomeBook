@@ -35,10 +35,10 @@
 | 动画 / 手势     | **react-native-reanimated** + **react-native-gesture-handler** | 滑动确认控件、庆祝动效                                                                                                                                                                                            |
 | 图表            | **react-native-svg 自绘**（见 §3）                             | 报表环形 / 条形 / 折线 / 双柱 / 瀑布 / 热力图，全部手绘覆盖                                                                                                                                                       |
 | 安全存储        | **expo-secure-store**                                          | Token / 登录态                                                                                                                                                                                                    |
-| 推送            | **阿里云移动推送 EMAS**（厂商通道 + APNs）                     | **国内 FCM/Expo Push 不可用**，安卓走华为/小米/OPPO/vivo/魅族厂商通道，iOS 走 APNs（见 §7.5）                                                                                                                     |
+| 推送            | **Expo Push → APNs**                                           | 第一版仅保障 iOS；阿里云 FC 定时轮询投递，Android 厂商渠道不在本期范围（见 §7.5）                                                                                                                                |
 | OTA 热更新      | **EAS Update（expo-updates）**                                 | JS 层 bug 免审核直推                                                                                                                                                                                              |
 | 后端基座        | **阿里云境内托管的 Supabase**（RDS 内置 / 自建）               | Postgres + Auth + Realtime + Storage + Edge Functions + pg_cron（见 §7）                                                                                                                                          |
-| 后端区域服务    | **阿里云短信 / 移动推送 / OSS / CDN / SLS**                    | 短信验证码、推送、对象存储、加速、日志（见 §7.2）                                                                                                                                                                 |
+| 后端区域服务    | **阿里云短信 / FC / OSS / CDN / SLS**                          | 短信验证码、推送投递、对象存储、加速、日志（见 §7.2）                                                                                                                                                             |
 
 > 备注：内容层不主动施加 `glassEffect`（保持实心，保金额清晰）；系统 chrome（导航 / Tab / 原生 Sheet）顺应 iOS 26 系统材质（含 Liquid Glass），由 NativeTabs / 原生件自动获得（见 DESIGN.md §3）。NativeTabs 为 alpha/unstable API，上线前需 spike 验证（见 DESIGN §5.2）。
 
@@ -197,7 +197,7 @@ git --version
 | 实时        | **Supabase Realtime**（websocket）                             | 自建须确保境内可达                                  |
 | 对象存储    | Supabase Storage（S3 兼容，后端可指向 OSS）                    | **阿里云 OSS**（头像、家庭封面、目标封面）          |
 | 短信验证码  | —                                                              | **阿里云短信认证(PNVS)**（个人免资质，经 FC Send SMS Hook 下发，见 §7.3） |
-| 推送        | NOTIFICATION 表 + Realtime 站内红点                            | **阿里云移动推送 EMAS**（厂商通道 + APNs，见 §7.5） |
+| 推送        | NOTIFICATION 表 + Realtime 站内红点                            | **Expo Push → APNs**（第一版仅 iOS，见 §7.5） |
 | 加速        | —                                                              | **阿里云 CDN**                                      |
 | 备份 / 恢复 | RDS 自动备份 + **PITR**（记账数据必须）                        | —                                                   |
 | 日志 / 监控 | Supabase 日志                                                  | **阿里云 SLS 日志服务 + ARMS**；RN 端接 Sentry      |
@@ -223,11 +223,12 @@ git --version
 
 > 落地状态：上述约束已在 `supabase/migrations/` 实现（建表 + 部分唯一索引 + 触发器 + RLS + 核心 RPC），清单见 §7.8。
 
-### 7.5 推送通道（国内重点）
+### 7.5 推送通道（第一版 iOS）
 
-- **关键事实**：FCM 与依赖 FCM 的 **Expo Push 在中国大陆安卓不可用**（Google 服务被屏蔽）；iOS APNs 在国内正常。
-- **方案**：采用**阿里云移动推送 EMAS**，整合华为/小米/OPPO/vivo/魅族**厂商通道**（安卓）与 **APNs**（iOS）；Edge Function / FC 在事件触发时调推送。
-- **可移植**：客户端与服务端之间抽象 `PushAdapter` 接口，全球化阶段可切回 Expo Push / FCM（见 §7.7）。
+- **方案**：客户端获取 Expo Push Token；阿里云 FC 定时轮询待投递通知并调用 Expo Push，由 Expo 转交 **APNs**。
+- **范围**：第一版只保障 iOS。Android 厂商渠道、通知渠道配置及适配均不在本期范围。
+- **可靠性**：授权后立即登记 token，前台恢复与 token 轮换会同步；FC 仅在 Expo 接受后写 `pushed_at`，临时失败按 1 分钟至 1 小时退避重试。推送点按（含冷启动）仅跳转 App 内白名单路由。
+- **上线验收**：发布前验证 Apple Push Key、Bundle ID、Expo 项目、FC 环境变量和真机端到端到达；未完成验收前，不将远程推送视为已上线能力。
 
 ### 7.6 合规（需专业确认，非法律意见）
 
@@ -241,7 +242,7 @@ git --version
 ### 7.7 国内 → 全球演进路径
 
 - **保持底座为标准 Postgres**：表、RLS、RPC、薄客户端数据访问层，不深耦「仅某托管特有」的能力。
-- **区域适配层可替换**：短信（阿里云短信 ↔ Twilio）、推送（EMAS ↔ Expo Push/FCM）、存储（OSS ↔ Supabase Storage/S3）、CDN，全部走接口抽象。
+- **区域适配层可替换**：短信（阿里云短信 ↔ Twilio）、推送（Expo Push/APNs ↔ 未来 Android 厂商通道或 FCM）、存储（OSS ↔ Supabase Storage/S3）、CDN，全部走接口抽象。
 - **全球化两种形态**：① 迁/扩到 Supabase Cloud 多区域；② 「境内一套 + 海外一套」双部署，按用户区域路由。
 - **结论**：因底座是标准 Postgres + RLS + RPC，扩展到全球是**配置与部署问题，不是重写**。
 
@@ -342,7 +343,7 @@ supabase/                 # 后端工程（与客户端同仓或独立仓）
 | **M1 账号 + 记账** | 流程 1 登录（MVP = 邮箱 / Apple；**手机 OTP 移至发布前**，见 §7.9 / MVP §2.4）、流程 2 记一笔、流程 10 编辑 / 删除 | 记账 Sheet（大金额输入）、流水列表（按日分组 + 左滑）、离线同步队列                                                                                                                                                                                     | Supabase Auth（MVP 邮箱 + Apple）、流水 RPC、WatermelonDB 同步函数（pull/push）；**阿里云短信 OTP 发布前接入**                                                          |
 | **M2 家庭协作**    | 流程 3 邀请二维码、流程 4 扫码加入、流程 5 转让 / 退出 / 解散、流程 13 关键通知                                    | expo-camera 扫码、qrcode-svg 生成、滑动确认控件、被移除全屏兜底                                                                                                                                                                                         | 家庭/成员流转 RPC（在线）、邀请码校验、NOTIFICATION + Realtime                                                                                                          |
 | **M3 基础报表**    | 流程 9 基础版（本月收支结余 + 分类占比环形图）                                                                     | react-native-svg 环形图 + 概览环比角标 + 结余率（值）+ 分类明细下钻                                                                                                                                                                                    | 报表聚合视图 / RPC（排除储蓄类流水口径；输出本期 + 上期对比值供环比）                                                                                                   |
-| **M4 增值（P1）**  | 分类管理 → 预算 → 储蓄目标 → 完整报表 / 月度总结 → 移除成员 → 通知体系                                             | 进度条 / 目标卡 / 庆祝动效、Banner；报表完整版：成员参与度（原生横向条）/ 发生额折线 / 累计同期双线 / 收支双柱 / 分类环比 / 大额 Top N 列表 / 结余率仪表 / 月度总结卡（**报表图表实现为 react-native-svg 自绘，非 Victory**；月度总结为客户端实时计算） | 储蓄存取 RPC、pg_cron（预算重置/继任判定）、报表聚合扩展（分类环比 / 同期累计 / Top N 聚合）；**系统推送（阿里云 EMAS）、月度总结服务端快照 移至发布前（见 MVP §2.4）** |
+| **M4 增值（P1）**  | 分类管理 → 预算 → 储蓄目标 → 完整报表 / 月度总结 → 移除成员 → 通知体系                                             | 进度条 / 目标卡 / 庆祝动效、Banner；报表完整版：成员参与度（原生横向条）/ 发生额折线 / 累计同期双线 / 收支双柱 / 分类环比 / 大额 Top N 列表 / 结余率仪表 / 月度总结卡（**报表图表实现为 react-native-svg 自绘，非 Victory**；月度总结为客户端实时计算） | 储蓄存取 RPC、pg_cron（预算重置/继任判定）、报表聚合扩展（分类环比 / 同期累计 / Top N 聚合）；**iOS 系统推送（Expo Push → APNs）上线验收、月度总结服务端快照 移至发布前（见 MVP §2.4）** |
 
 每批结束应可独立验收（与 MVP §4 一致）。
 

@@ -439,8 +439,9 @@ export type Database = {
           type: string;
           channel: string;
           payload: Json | null;
-          read_at: string | null;
           pushed_at: string | null;
+          push_attempts: number;
+          push_next_attempt_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -450,8 +451,9 @@ export type Database = {
           type: string;
           channel: string;
           payload?: Json | null;
-          read_at?: string | null;
           pushed_at?: string | null;
+          push_attempts?: number;
+          push_next_attempt_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -461,8 +463,9 @@ export type Database = {
           type?: string;
           channel?: string;
           payload?: Json | null;
-          read_at?: string | null;
           pushed_at?: string | null;
+          push_attempts?: number;
+          push_next_attempt_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

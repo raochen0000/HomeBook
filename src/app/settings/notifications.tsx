@@ -3,7 +3,7 @@
  *
  * 顶部权限引导条：读真实系统授权态（usePushPermission）——未授权且可弹框 → 点按弹系统授权框；
  *   已拒（不可再弹）→ 点按跳系统设置；已授权 → 展示「已开启」并可点按去系统设置管理。
- *   远程推送投递（APNs token + 服务端发送）属层级二，另行接入（PRD §18.3.3）。
+ *   远程推送由 iOS Expo Push → APNs 链路处理；上线前仍需完成真机端到端验收（PRD §18.3.3）。
  * 分类开关：家庭动态 / 预算超支预警 / 储蓄目标进展 / 月度总结提醒 / 成员与邀请变动 / 账号安全，
  *   六类服务端持久化（notification_preferences，见 DATAMODEL §5.6）——直读 + upsert，乐观更新。
  *   本页只做开关面板，触达规则以流程 13（§15）为准；关掉某类仅停系统推送，App 内通知中心仍可见。
@@ -23,6 +23,7 @@ import {
 } from '@/api';
 import { Space, usePalette } from '@/constants/design';
 import { usePushPermission } from '@/features/notifications/use-push-permission';
+import { registerPushDevice } from '@/features/notifications/use-push-registration';
 import { Caption, SettingsList, ToggleRow } from '@/features/settings/native-list';
 
 type IconName = ComponentProps<typeof Image>['systemName'];
@@ -52,6 +53,7 @@ export default function NotificationSettingsScreen() {
     if (!granted && canAskAgain) {
       const res = await request();
       if (res && !res.granted && !res.canAskAgain) Linking.openSettings();
+      if (res?.granted) await registerPushDevice().catch(() => {});
       return;
     }
     Linking.openSettings();

@@ -1377,6 +1377,8 @@ flowchart TD
 
 - **关键状态变更必须有 App 内兜底展示**（条幅 / 红点 / 通知中心），即使用户关闭了系统推送。
 - 系统推送仅作为**唤回增强**，可被用户在系统层关闭。
+- **第一版仅保障 iOS 通知体验**；Android 专项渠道和适配不在本期范围。
+- 通知中心只展示最新 100 条待处理消息；用户阅读或确认后立即删除，不做分页、归档或已读留存。
 
 ### 15.3 触达通道
 
@@ -1398,7 +1400,7 @@ flowchart TD
     C --> E([用户进入通知中心查看])
     D1 --> E
     D2 --> E
-    E --> F[标记已读]
+    E --> F[阅读 / 确认后删除]
     F --> Z([完成])
 
     style A fill:#FF8A4C,color:#fff
@@ -1414,8 +1416,10 @@ flowchart TD
 | 户主转让 / 继任完成 | ✅             | ✅                | 全家         |
 | 户主继任申请异议期  | ✅             | ✅（短信 + 推送） | 原户主       |
 | 储蓄目标达成        | ✅ 庆祝        | ✅                | 全家         |
-| 预算预警 / 超支     | ✅ 首页 hero「本月脉搏卡」内联 warning/danger 态 | 可选              | 全家（查看） |
+| 预算预警 / 超支     | ✅ 首页 hero「本月脉搏卡」内联 warning/danger 态 | ✅（可关闭）      | 全家         |
 | 月度总结生成        | ✅ 首页月初轻提醒「上月总结来啦」（前 7 天）→ 点击进全屏总结 | ✅                | 全家         |
+
+实现口径：目标首次达成、预算达到 80% / 超支（仅日常支出）与户主转让均由数据库事务生成全家 `in_app` 通知；预算同一账期每个阈值只触发一次。月度总结由 FC 定时任务在家庭时区每月前 7 天、08:00 后首次运行时生成，上月无记账则不生成。系统推送仅受个人分类开关控制，App 内消息仍会创建；点按通知会跳转到家庭页、首页或对应账期的月度总结。
 
 ---
 
@@ -1722,13 +1726,14 @@ flowchart TD
 
 - 顶部权限态（**层级一 · 已实现**）：读真实系统授权态（`expo-notifications` 权限 API `getPermissionsAsync`）——未授权且可弹框 → 点按弹系统授权框（`requestPermissionsAsync`，首次请求后系统才为本 App 建「通知」设置行）；已拒（不可再弹）→ 点按跳系统设置（`Linking.openSettings`）；已授权 → 显示「已开启」。
 - 远程推送投递（**层级二**）：
-  - **落库链路已建（不依赖 Apple 账号）**：`device_tokens` 表（DATAMODEL §5.7）+ `register_device_token` / `unregister_device_token` RPC；客户端登录注册、登出注销的骨架已就位，由 `PUSH_DELIVERY_ENABLED` 开关灰度（默认关）。
-  - **令牌链路（已通）**：真机取 `getExpoPushTokenAsync` → 经 RPC 存 `device_tokens`（`PUSH_DELIVERY_ENABLED=true`）。
-  - **服务端投递（已建，阿里云 FC 定时轮询）**：自建实例出网受限（SMTP 被墙、无 `pg_net`），故不走 DB 触发，改由 `services/push-fc/`（FC 定时器每 ~1min）以 `service_role` 拉取 `channel='in_app'` 且 `pushed_at is null` 的通知 → 按 `notification_preferences`（type→分类映射）决定是否推 → 查 `device_tokens` → 发 **Expo Push API** → 标记 `pushed_at`（迁移 0028）。失效令牌（`DeviceNotRegistered`）顺带清理。App 内通知中心（流程 13）始终可见，push 仅为唤回副本。
+  - **落库链路已建（不依赖 Apple 账号）**：`device_tokens` 表（DATAMODEL §5.7）+ `register_device_token` / `unregister_device_token` RPC；客户端在首次授权后立即登记令牌，前台恢复与 token 轮换时同步，登出时注销。`PUSH_DELIVERY_ENABLED=true`。
+  - **令牌链路（已通）**：真机取 `getExpoPushTokenAsync` → 经 RPC 存 `device_tokens`。
+  - **服务端投递（已建，阿里云 FC 定时轮询）**：自建实例出网受限（SMTP 被墙、无 `pg_net`），故不走 DB 触发，改由 `services/push-fc/`（FC 定时器每 ~1min）以 `service_role` 先生成到期月度总结，再拉取 `channel='in_app'`、`pushed_at is null` 且已到重试时间的通知 → 按 `notification_preferences`（type→分类映射）决定是否推 → 查 `device_tokens` → 发 **Expo Push API**。Expo 接收成功才写 `pushed_at`；临时失败保留消息并按 1 分钟至 1 小时指数退避重试（迁移 0042），失效令牌（`DeviceNotRegistered`）顺带清理。App 内通知中心（流程 13）始终可见，push 仅为唤回副本。
 - 分类开关：家庭动态、预算超支预警、储蓄目标进展、月度总结提醒、成员 / 邀请变动、账号安全。
 - **持久化（服务端）**：六类开关落 `notification_preferences` 表（**每用户一行、六列布尔**，见 DATAMODEL §5.6），RLS 仅本人可读写；客户端直读 + `upsert`（`onConflict = user_id`）。行不存在（老用户 / 从未改过）→ 回落**全开**默认。跨设备一致，不再仅存本机。
 - 语义：本表只落用户「愿不愿收该类系统推送」的意愿；关掉某类**仅停系统推送**，App 内通知中心（流程 13）该类消息**始终可见**。推送落地后由投递侧读取本表决定是否推送对应分类。
 - （远期）免打扰时段。
+- **第一版范围**：仅保障 iOS；通知中心只展示最新 100 条待处理消息，阅读或确认后即删除，不提供分页、归档、保留策略、免打扰或频率控制。Android 专项渠道与高级提醒能力后续版本再评估。
 - 通知类型与触达规则以**流程 13（§15）** 为准，本页只做开关面板。
 
 **18.3.4 深色模式（行内下拉菜单）**

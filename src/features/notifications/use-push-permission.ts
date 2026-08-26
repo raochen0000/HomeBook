@@ -1,9 +1,8 @@
 /**
  * 系统推送授权态（层级一 · 权限注册 / 本地通知）。通知设置页顶部引导条据此显隐「去开启」。
  *
- * 本期只做「读授权态 + 请求授权」：调过一次 requestPermissionsAsync 后，iOS 才会给本 App
- * 建「通知」设置行；此时读到的 granted/canAskAgain 即真实态。远程推送（APNs token + 投递）
- * 属层级二，需付费账号 + Push 能力 + 配置插件（aps-environment），另行接入。
+ * 调过一次 requestPermissionsAsync 后，iOS 才会给本 App 建「通知」设置行；此时读到的
+ * granted/canAskAgain 即真实态。远程推送还依赖 Apple Push 凭据和线上 FC 投递验收。
  *
  * 授权态可能在系统设置里被用户改动，故 mount + 每次 App 回前台都重新读一次。
  * 原生模块经 getNotifications() 惰性安全加载：缺席（旧包未重编）时降级为 available=false，不崩溃。

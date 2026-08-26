@@ -3,14 +3,13 @@
  * 登录且已授权时取推送令牌上报，撤销授权时注销；登出/注销的注销在 signOut/deleteAccount 里做
  * （那时 session 仍有效，见 src/api/device-tokens.ts unregisterCurrentDevice）。
  *
- * 灰度开关 PUSH_DELIVERY_ENABLED 默认关：令牌获取（getExpoPushTokenAsync / APNs）依赖
- * 付费 Apple Developer + Push 能力 + `aps-environment` 配置，未就绪前调用会抛错，故整段先短路
- * （连原生权限查询都不触发）。APNs 配好后把开关翻 true 即通——落库链路（device_tokens 表 +
- * register/unregister RPC）已就绪。
+ * PUSH_DELIVERY_ENABLED 已开启：令牌获取（getExpoPushTokenAsync / APNs）依赖 Apple Developer、
+ * Push 能力和 `aps-environment` 配置。落库链路（device_tokens 表 + register/unregister RPC）已就绪，
+ * 但生产投递仍需 APNs 与线上 FC 端到端验收。
  */
 import Constants from 'expo-constants';
 import { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import {
   registerDeviceToken,
@@ -23,7 +22,7 @@ import { useSession } from '@/lib/auth';
 
 import { getNotifications } from './expo-notifications-safe';
 
-/** 层级二灰度开关：APNs（付费 Apple Developer + Push 能力 + aps-environment）就绪后置 true。 */
+/** iOS 推送令牌注册开关；生产投递仍以 APNs 与 FC 的端到端验收为准。 */
 export const PUSH_DELIVERY_ENABLED = true;
 
 /** 取本设备推送令牌（有 EAS projectId 走 Expo 推送服务，否则回落直连 APNs）。失败/不可用回 null。 */
@@ -45,6 +44,27 @@ async function fetchPushToken(): Promise<{ token: string; provider: TokenProvide
   }
 }
 
+/**
+ * 将当前 iOS 设备的最新令牌与当前登录用户绑定。
+ * 授权刚完成、App 回到前台，以及 iOS 轮换 token 时都可安全重复调用（服务端按 token upsert）。
+ */
+export async function registerPushDevice(): Promise<void> {
+  if (!PUSH_DELIVERY_ENABLED) return;
+  const N = getNotifications();
+  if (!N) return;
+
+  const permission = await N.getPermissionsAsync();
+  if (!permission.granted) {
+    await unregisterCurrentDevice().catch(() => {});
+    return;
+  }
+
+  const result = await fetchPushToken();
+  if (!result) return;
+  await registerDeviceToken(result.token, Platform.OS as DevicePlatform, result.provider);
+  await rememberDeviceToken(result.token);
+}
+
 export function usePushRegistration() {
   const { session } = useSession();
   const userId = session?.user.id ?? null;
@@ -56,25 +76,22 @@ export function usePushRegistration() {
     const N = getNotifications();
     if (!N) return; // 原生模块缺席（旧包未重编）：降级跳过
 
-    let active = true;
-    N.getPermissionsAsync().then((perm) => {
-      if (!active) return;
-      if (!perm.granted) {
-        // 已登录但（在系统设置里）撤销了授权：注销令牌，服务端停止向本设备推送。
-        unregisterCurrentDevice().catch(() => {});
-        return;
-      }
-      fetchPushToken().then((res) => {
-        if (!active || !res) return;
-        registerDeviceToken(res.token, Platform.OS as DevicePlatform, res.provider)
-          .then(() => rememberDeviceToken(res.token))
-          .catch((e) => {
-            if (__DEV__) console.warn('[push] 上报令牌失败', e);
-          });
+    const register = () => {
+      registerPushDevice().catch((e) => {
+        if (__DEV__) console.warn('[push] 上报令牌失败', e);
       });
+    };
+    register();
+
+    // 用户从系统设置改完授权回到 App 时，立即同步令牌/注销状态。
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') register();
     });
+    // iOS/Expo 刷新设备 token 时重新上报，避免旧 token 静默失效。
+    const tokenSubscription = N.addPushTokenListener(() => register());
     return () => {
-      active = false;
+      appStateSubscription.remove();
+      tokenSubscription.remove();
     };
   }, [userId]);
 }

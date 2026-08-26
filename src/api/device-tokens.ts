@@ -3,7 +3,7 @@
  * 每台设备一行的推送令牌，供服务端投递侧按 notification_preferences 决定后发系统推送。
  * 写只走 SECURITY DEFINER RPC（register/unregister）——避免「同设备换登录用户认领他人 token 行」
  * 的 RLS 死角；投递侧以 service_role 读。令牌获取（getExpoPushTokenAsync / APNs）依赖付费
- * Apple Developer，故本层先建、由 use-push-registration 的 PUSH_DELIVERY_ENABLED 开关灰度。
+ * Apple Developer；客户端由 use-push-registration 注册，生产投递仍需 APNs 与 FC 端到端验收。
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 

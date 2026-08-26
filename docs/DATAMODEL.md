@@ -236,8 +236,12 @@ erDiagram
 | `type`    | enum      |         | `removed` / `transfer` / `succession` / `goal_achieved` / `budget_alert` / `monthly_summary` |
 | `channel` | enum      |         | `in_app` / `push`                                                                            |
 | `payload` | json      | null    | 事件附加数据                                                                                 |
-| `read_at` | timestamp | null    | 已读时间                                                                                     |
-| `pushed_at` | timestamp | null  | 系统推送已投递时间（`push-fc` 定时轮询标记；`in_app` 行推送后落定，避免重复推。迁移 0028）    |
+| `pushed_at` | timestamp | null  | Expo 已接受系统推送或该消息被明确跳过后的终态时间；不代表手机已展示 |
+| `push_attempts` | smallint | not null, default 0 | Expo/API 临时失败次数（迁移 0042） |
+| `push_next_attempt_at` | timestamp | null | 下次允许 FC 重试的时间；指数退避最长 1 小时（迁移 0042） |
+
+> 第一版通知中心只查询最新 100 条 `in_app` 消息；用户阅读或确认后，客户端物理删除该消息。没有已读状态、分页、归档或保留策略。
+> 事件去重键保存在仅服务端可访问的 `private.notification_event_keys`：预算每账期的 80% / 超支各一次，月度总结每家庭每月一次；它不保存用户可见消息内容。
 
 ### 5.4 MONTHLY_SUMMARY（月度总结，快照存储）
 

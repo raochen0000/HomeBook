@@ -26,7 +26,18 @@ const { runPollCycle, describe, TYPE_CATEGORY } = require('./index.js');
 // describe / 分类映射自检
 const cases = ['removed', 'transfer', 'succession', 'goal_achieved', 'budget_alert', 'monthly_summary', 'unknown'];
 for (const t of cases) {
-  const d = describe(t, { family_name: '调试之家', goal_name: '旅行基金', period: '2026-06', text: '本月已超支' });
+  const d = describe(
+    t,
+    {
+      family_name: '调试之家',
+      goal_name: '旅行基金',
+      period: '2026-06',
+      text: '本月已超支',
+      new_owner_user_id: 'owner-user',
+      new_owner_name: '小王',
+    },
+    t === 'transfer' ? 'owner-user' : 'member-user',
+  );
   console.log(`  ${t.padEnd(16)} → [${TYPE_CATEGORY[t] || '—'}] ${d.title} · ${d.body}`);
 }
 

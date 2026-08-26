@@ -4,7 +4,7 @@
  * 客户端直读 + upsert（onConflict = user_id）；行不存在（老用户 / 从未改过）→ 回落全开默认。
  *
  * 本表只落用户「愿不愿收该类系统推送」的意愿：关掉某类仅停系统推送，App 内通知中心始终可见。
- * 系统推送（expo-notifications + APNs）尚未接入，落地后由投递侧读取本表决定是否推送对应分类。
+ * iOS 系统推送由投递侧读取本表决定是否推送对应分类；上线前仍需完成 APNs 与 FC 端到端验收。
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 

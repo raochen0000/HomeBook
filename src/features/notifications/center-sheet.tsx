@@ -1,17 +1,19 @@
 /**
- * 通知中心（流程 13，App 内）：列出本人全部通知（含已读），点击标记已读、可一键全部已读。
- * 系统推送（channel=push）需 expo-notifications + APNs，与手机登录一并延后到上线前，本期不做。
+ * 通知中心（流程 13，App 内）：仅展示最新 100 条待处理通知；点按阅读后立即删除，可一键清除当前列表。
+ * 系统推送由 iOS 的 Expo Push → APNs 链路唤回；通知中心只展示 channel=in_app 的消息。
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAllNotifications, useMarkAllNotificationsRead, useMarkNotificationRead, type Notification } from '@/api';
+import { useAllNotifications, useDeleteNotification, useDeleteNotifications, type Notification } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, Typography, useSheetPalette } from '@/constants/design';
+import { notificationHrefForItem } from '@/features/notifications/notification-routes';
 
-type Payload = Record<string, string> | null;
+type Payload = Record<string, unknown> | null;
 type NotificationTone = 'accent' | 'danger' | 'info' | 'success' | 'warning';
 type NoticeDescription = {
   icon: SymbolViewProps['name'];
@@ -21,7 +23,7 @@ type NoticeDescription = {
 };
 
 function famName(p: Payload): string {
-  return p?.family_name ? `「${p.family_name}」` : '家庭';
+  return typeof p?.family_name === 'string' ? `「${p.family_name}」` : '家庭';
 }
 
 /** 通知 → 图标、语义色、标题与正文。 */
@@ -33,7 +35,14 @@ function describe(n: Notification): NoticeDescription {
         ? { icon: 'person.2.slash', title: '家庭已解散', body: `${famName(p)}已被户主解散`, tone: 'danger' }
         : { icon: 'person.2.slash', title: '你已被移出家庭', body: `你已被移出${famName(p)}`, tone: 'danger' };
     case 'transfer':
-      return { icon: 'arrow.left.arrow.right', title: '户主变更', body: `你已成为${famName(p)}的户主`, tone: 'info' };
+      return p?.new_owner_user_id === n.user_id
+        ? { icon: 'arrow.left.arrow.right', title: '户主变更', body: `你已成为${famName(p)}的户主`, tone: 'info' }
+        : {
+            icon: 'arrow.left.arrow.right',
+            title: '户主变更',
+            body: `${typeof p?.new_owner_name === 'string' ? `「${p.new_owner_name}」` : '一位家庭成员'}已成为${famName(p)}的户主`,
+            tone: 'info',
+          };
     case 'succession':
       return {
         icon: 'person.crop.circle.badge.exclamationmark',
@@ -45,18 +54,23 @@ function describe(n: Notification): NoticeDescription {
       return {
         icon: 'target',
         title: '储蓄目标达成',
-        body: `${p?.goal_name ? `「${p.goal_name}」` : '一个储蓄目标'}已达成 🎉`,
+        body: `${typeof p?.goal_name === 'string' ? `「${p.goal_name}」` : '一个储蓄目标'}已达成 🎉`,
         tone: 'success',
       };
     case 'budget_alert':
       return {
         icon: 'exclamationmark.triangle',
         title: '预算预警',
-        body: p?.text ?? '本月预算需要关注',
+        body: typeof p?.text === 'string' ? p.text : '本月预算需要关注',
         tone: 'warning',
       };
     case 'monthly_summary':
-      return { icon: 'doc.text', title: '月度总结', body: `${p?.period ?? '上月'}的家庭总结已生成`, tone: 'accent' };
+      return {
+        icon: 'doc.text',
+        title: '月度总结',
+        body: `${typeof p?.period === 'string' ? p.period : '上月'}的家庭总结已生成`,
+        tone: 'accent',
+      };
     default:
       return { icon: 'bell', title: '通知', body: '', tone: 'accent' };
   }
@@ -87,20 +101,19 @@ function timeLabel(iso: string): string {
 export function NotificationCenterSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
     <PageSheet visible={visible} onClose={onClose}>
-      <Body />
+      <Body onClose={onClose} />
     </PageSheet>
   );
 }
 
-function Body() {
+function Body({ onClose }: { onClose: () => void }) {
   const palette = useSheetPalette();
   const listQ = useAllNotifications();
-  const markRead = useMarkNotificationRead();
-  const markAll = useMarkAllNotificationsRead();
+  const deleteOne = useDeleteNotification();
+  const deleteAll = useDeleteNotifications();
+  const router = useRouter();
 
   const items = listQ.data ?? [];
-  const unreadCount = items.filter((n) => !n.read_at).length;
-  const hasUnread = unreadCount > 0;
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
@@ -121,25 +134,20 @@ function Body() {
         ) : (
           <ScrollView contentContainerStyle={styles.content}>
             <View style={styles.listToolbar}>
-              <Text
-                selectable
-                style={[styles.unreadSummary, { color: hasUnread ? palette.textPrimary : palette.textSecondary }]}
-              >
-                {hasUnread ? `未读 ${unreadCount} 条` : '已全部读完'}
+              <Text selectable style={[styles.unreadSummary, { color: palette.textPrimary }]}>
+                {`最新 ${items.length} 条`}
               </Text>
-              {hasUnread ? (
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={markAll.isPending}
-                  hitSlop={8}
-                  onPress={() => markAll.mutate()}
-                  style={({ pressed }) => [styles.markAllRow, pressed ? styles.pressed : null]}
-                >
-                  <Text selectable style={[styles.action, { color: palette.info }]}>
-                    全部标为已读
-                  </Text>
-                </Pressable>
-              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                disabled={deleteAll.isPending}
+                hitSlop={8}
+                onPress={() => deleteAll.mutate(items.map((item) => item.id))}
+                style={({ pressed }) => [styles.markAllRow, pressed ? styles.pressed : null]}
+              >
+                <Text selectable style={[styles.action, { color: palette.info }]}>
+                  全部清除
+                </Text>
+              </Pressable>
             </View>
 
             <Text selectable style={[styles.sectionTitle, { color: palette.textSecondary }]}>
@@ -151,7 +159,14 @@ function Body() {
                   key={n.id}
                   item={n}
                   isLast={index === items.length - 1}
-                  onMarkRead={() => markRead.mutate(n.id)}
+                  onRead={() =>
+                    deleteOne.mutate(n.id, {
+                      onSuccess: () => {
+                        onClose();
+                        router.push(notificationHrefForItem(n));
+                      },
+                    })
+                  }
                 />
               ))}
             </View>
@@ -162,25 +177,16 @@ function Body() {
   );
 }
 
-function NotificationRow({
-  item,
-  isLast,
-  onMarkRead,
-}: {
-  item: Notification;
-  isLast: boolean;
-  onMarkRead: () => void;
-}) {
+function NotificationRow({ item, isLast, onRead }: { item: Notification; isLast: boolean; onRead: () => void }) {
   const palette = useSheetPalette();
   const d = describe(item);
-  const unread = !item.read_at;
   const time = timeLabel(item.created_at);
   const iconColor = d.tone === 'accent' ? palette.accent : palette[d.tone];
-  const accessibilityLabel = `${unread ? '未读，' : ''}${d.title}${d.body ? `，${d.body}` : ''}${time ? `，${time}` : ''}`;
+  const accessibilityLabel = `${d.title}${d.body ? `，${d.body}` : ''}${time ? `，${time}` : ''}`;
 
   const content = (
     <>
-      {unread ? <View style={[styles.unreadIndicator, { backgroundColor: palette.accent }]} /> : null}
+      <View style={[styles.unreadIndicator, { backgroundColor: palette.accent }]} />
       <View style={[styles.iconWrap, { backgroundColor: palette.base }]}>
         <SymbolView name={d.icon} tintColor={iconColor} size={20} />
       </View>
@@ -206,25 +212,15 @@ function NotificationRow({
 
   return (
     <View>
-      {unread ? (
-        <Pressable
-          accessibilityHint="点按标为已读"
-          accessibilityLabel={accessibilityLabel}
-          accessibilityRole="button"
-          onPress={onMarkRead}
-          style={({ pressed }) => [
-            styles.row,
-            { backgroundColor: palette.accentTint },
-            pressed ? styles.pressed : null,
-          ]}
-        >
-          {content}
-        </Pressable>
-      ) : (
-        <View accessible accessibilityLabel={accessibilityLabel} style={styles.row}>
-          {content}
-        </View>
-      )}
+      <Pressable
+        accessibilityHint="点按阅读后删除"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityRole="button"
+        onPress={onRead}
+        style={({ pressed }) => [styles.row, { backgroundColor: palette.accentTint }, pressed ? styles.pressed : null]}
+      >
+        {content}
+      </Pressable>
       {!isLast ? <View style={[styles.separator, { backgroundColor: palette.separator }]} /> : null}
     </View>
   );

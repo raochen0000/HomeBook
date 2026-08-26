@@ -9,15 +9,16 @@
  * 以 service_role 主动拉取待推通知，绕开「DB 能否出网」的不确定性。
  *
  * 一个轮询周期（runPollCycle）：
- *   1) 拉取 channel='in_app' 且 pushed_at is null 的通知（近 PUSH_LOOKBACK_MINUTES 分钟内，防补推过旧）。
+ *   1) 先生成到期的月度总结通知，再拉取 channel='in_app'、pushed_at is null 且已到重试时间的通知。
  *   2) 逐条：type→分类，查 notification_preferences（无行=默认全开）判断该用户该类要不要推；
  *      要推则查该用户 device_tokens，拼 Expo 消息（标题/正文由 describe 按 type+payload 生成）。
- *   3) 批量发 Expo Push API（每 100 条一批，best-effort：单批失败仅记录、不阻断，不重发以免刷屏）。
+ *   3) 批量发 Expo Push API（每 100 条一批）；Expo/API 临时失败不标记 pushed_at，按指数退避重试。
  *   4) 回执里 DeviceNotRegistered 的令牌 → 从 device_tokens 删除。
- *   5) 把本轮处理过的通知（含被偏好跳过 / 无令牌的）统一标记 pushed_at，避免反复处理。
+ *   5) 仅把已被 Expo 接受、或被用户偏好/无令牌明确跳过的通知标记 pushed_at。
  *
  * 语义：App 内通知中心（流程 13）始终可见，push 只是唤回副本；漏推一条（如轮询期外发失败）不影响
- * 用户在 App 内看到该通知。故整体取「至多一次、尽力而为」，优先不重复刷屏而非绝对不丢。
+ * 用户在 App 内看到该通知。Expo 的 ticket 成功不等同于手机已展示；本实现保证临时投递失败可重试，
+ * 并保留 App 内消息作为可靠兜底。
  *
  * 形态＝FC 3.0 **事件函数**（handler=index.handler，Node.js 运行时）：由**定时触发器**周期调用，
  * 无公网 HTTP 入口、无需鉴权（平台内部调用）。本函数零第三方依赖，部署包极小。
@@ -43,7 +44,7 @@ function famName(p) {
   return p && p.family_name ? `「${p.family_name}」` : '家庭';
 }
 
-function describe(type, payload) {
+function describe(type, payload, userId) {
   const p = payload || {};
   switch (type) {
     case 'removed':
@@ -51,7 +52,9 @@ function describe(type, payload) {
         ? { title: '家庭已解散', body: `${famName(p)}已被户主解散` }
         : { title: '你已被移出家庭', body: `你已被移出${famName(p)}` };
     case 'transfer':
-      return { title: '户主变更', body: `你已成为${famName(p)}的户主` };
+      return p.new_owner_user_id === userId
+        ? { title: '户主变更', body: `你已成为${famName(p)}的户主` }
+        : { title: '户主变更', body: `${p.new_owner_name || '一位家庭成员'}已成为${famName(p)}的户主` };
     case 'succession':
       return { title: '户主继任', body: '有成员发起了户主继任申请' };
     case 'goal_achieved':
@@ -67,51 +70,84 @@ function describe(type, payload) {
 
 // ── 一个轮询周期 ────────────────────────────────────────────────────────────────
 async function runPollCycle() {
-  const lookbackMin = Number(process.env.PUSH_LOOKBACK_MINUTES) || 360;
   const limit = Number(process.env.PUSH_BATCH_LIMIT) || 200;
-  const sinceIso = new Date(Date.now() - lookbackMin * 60000).toISOString();
+  const now = new Date().toISOString();
+
+  // 月度总结事件由 DB 按每个家庭时区、每月前 7 天且 08:00 后幂等生成；生成失败不阻断既有通知投递。
+  let producedMonthly = 0;
+  try {
+    const result = await sbFetch('POST', 'rpc/emit_monthly_summary_notifications', {}, true);
+    producedMonthly = typeof result === 'number' ? result : 0;
+  } catch (e) {
+    console.error('[push-fc] monthly summary producer failed:', (e && e.message) || e);
+  }
 
   const notifs = await sbFetch(
     'GET',
-    'notifications?select=id,user_id,type,payload,created_at' +
+    'notifications?select=id,user_id,type,payload,push_attempts' +
       '&channel=eq.in_app&pushed_at=is.null' +
-      `&created_at=gte.${encodeURIComponent(sinceIso)}&order=created_at.asc&limit=${limit}`,
+      `&or=${encodeURIComponent(`(push_next_attempt_at.is.null,push_next_attempt_at.lte.${now})`)}` +
+      `&order=created_at.asc&limit=${limit}`,
   );
-  if (!notifs || !notifs.length) return { processed: 0, sent: 0, invalid: 0 };
+  if (!notifs || !notifs.length) return { producedMonthly, processed: 0, retried: 0, sent: 0, invalid: 0 };
 
   const prefCache = new Map(); // user_id → 偏好行（或 null=无行）
   const tokenCache = new Map(); // user_id → [token...]
-  const messages = []; // Expo 消息
-  const msgTokens = []; // 与 messages 平行：每条消息对应的 token（供失效清理）
-  const processedIds = [];
+  const messages = []; // { message, notification, token }，与 Expo ticket 同序
+  const terminalIds = []; // 不需要再尝试的通知（成功、偏好关闭或无有效设备）
+  const delivery = new Map(); // notification id → { notification, failed }
 
   for (const n of notifs) {
-    processedIds.push(n.id);
     const category = TYPE_CATEGORY[n.type];
-    if (!category) continue; // 未知类型：仅标记已处理，不推
-    if (!(await isEnabled(n.user_id, category, prefCache))) continue; // 该类被用户关掉
+    if (!category) {
+      terminalIds.push(n.id); // 未知类型：没有对应推送规则，保留 App 内消息即可
+      continue;
+    }
+    if (!(await isEnabled(n.user_id, category, prefCache))) {
+      terminalIds.push(n.id); // 用户明确关闭该分类
+      continue;
+    }
     const tokens = await tokensFor(n.user_id, tokenCache);
-    if (!tokens.length) continue; // 无设备令牌（未授权/未登录设备）
-    const { title, body } = describe(n.type, n.payload);
+    if (!tokens.length) {
+      terminalIds.push(n.id); // 无设备令牌：等待下次新通知，而不让旧消息无限轮询
+      continue;
+    }
+    const { title, body } = describe(n.type, n.payload, n.user_id);
+    delivery.set(n.id, { notification: n, failed: false });
+    const url = notificationUrl(n.type, n.payload);
     for (const token of tokens) {
-      messages.push({ to: token, title, body, sound: 'default', data: { type: n.type, id: n.id } });
-      msgTokens.push(token);
+      messages.push({
+        notification: n,
+        token,
+        message: { to: token, title, body, sound: 'default', data: { type: n.type, id: n.id, url } },
+      });
     }
   }
 
-  // 批量发 Expo（每 100 条一批）。single 批失败仅记录、不阻断（best-effort，不重发以免刷屏）。
+  // 批量发 Expo（每 100 条一批）。任一临时失败均保留该通知，并在后续轮询重试。
   let sent = 0;
   const invalidTokens = new Set();
   for (let i = 0; i < messages.length; i += 100) {
     const chunk = messages.slice(i, i + 100);
     try {
-      const tickets = await expoPush(chunk);
-      tickets.forEach((t, j) => {
-        if (t && t.status === 'ok') sent += 1;
-        else if (t && t.details && t.details.error === 'DeviceNotRegistered') invalidTokens.add(msgTokens[i + j]);
+      const tickets = await expoPush(chunk.map((entry) => entry.message));
+      chunk.forEach((entry, j) => {
+        const ticket = tickets[j];
+        const state = delivery.get(entry.notification.id);
+        if (ticket && ticket.status === 'ok') {
+          sent += 1;
+        } else if (ticket && ticket.details && ticket.details.error === 'DeviceNotRegistered') {
+          invalidTokens.add(entry.token);
+        } else if (state) {
+          state.failed = true;
+        }
       });
     } catch (e) {
       console.error('[push-fc] expo chunk failed:', (e && e.message) || e);
+      chunk.forEach((entry) => {
+        const state = delivery.get(entry.notification.id);
+        if (state) state.failed = true;
+      });
     }
   }
 
@@ -120,13 +156,46 @@ async function runPollCycle() {
     await sbFetch('DELETE', `device_tokens?token=eq.${encodeURIComponent(token)}`).catch(() => {});
   }
 
-  // 标记本轮处理过的通知（含被偏好跳过/无令牌的），避免下轮重复处理。
-  if (processedIds.length) {
-    const idList = processedIds.map((id) => `"${id}"`).join(',');
-    await sbFetch('PATCH', `notifications?id=in.(${idList})`, { pushed_at: new Date().toISOString() });
+  let retried = 0;
+  for (const state of delivery.values()) {
+    if (state.failed) {
+      await deferPush(state.notification);
+      retried += 1;
+    } else {
+      terminalIds.push(state.notification.id);
+    }
   }
+  await markPushed(terminalIds);
 
-  return { processed: processedIds.length, sent, invalid: invalidTokens.size };
+  return { producedMonthly, processed: terminalIds.length, retried, sent, invalid: invalidTokens.size };
+}
+
+/** App 内/系统推送共用的白名单深链；客户端还会再次校验。 */
+function notificationUrl(type, payload) {
+  const p = payload || {};
+  if (type === 'monthly_summary') return /^\d{4}-(0[1-9]|1[0-2])$/.test(p.period || '') ? `/summary?period=${p.period}` : '/summary';
+  if (type === 'goal_achieved' || type === 'transfer' || type === 'succession' || type === 'removed') return '/family';
+  return '/';
+}
+
+/** Expo 未接收时按 1m、2m、4m…退避，最长 1h；不会错误写入 pushed_at。 */
+async function deferPush(notification) {
+  const attempts = (Number(notification.push_attempts) || 0) + 1;
+  const delaySeconds = Math.min(60 * 2 ** Math.min(attempts - 1, 6), 3600);
+  const nextAttempt = new Date(Date.now() + delaySeconds * 1000).toISOString();
+  await sbFetch('PATCH', `notifications?id=eq.${encodeURIComponent(notification.id)}`, {
+    push_attempts: attempts,
+    push_next_attempt_at: nextAttempt,
+  });
+}
+
+async function markPushed(ids) {
+  if (!ids.length) return;
+  const idList = ids.map((id) => `"${id}"`).join(',');
+  await sbFetch('PATCH', `notifications?id=in.(${idList})`, {
+    pushed_at: new Date().toISOString(),
+    push_next_attempt_at: null,
+  });
 }
 
 /** 该用户该分类是否允许推送（无偏好行=默认全开；列值仅 false 才算关）。 */
@@ -154,12 +223,12 @@ function sbBase() {
   return env('SUPABASE_URL').replace(/\/+$/, '');
 }
 
-async function sbFetch(method, path, bodyObj) {
+async function sbFetch(method, path, bodyObj, returnRepresentation = false) {
   const key = env('SUPABASE_SERVICE_ROLE_KEY');
   const headers = { apikey: key, authorization: `Bearer ${key}`, accept: 'application/json' };
   if (method !== 'GET') {
     headers['content-type'] = 'application/json';
-    headers.prefer = 'return=minimal'; // 写操作不回读，省流量
+    headers.prefer = returnRepresentation ? 'return=representation' : 'return=minimal'; // 写操作默认不回读，省流量
   }
   const { status, text } = await httpJson(method, `${sbBase()}/rest/v1/${path}`, headers, bodyObj);
   if (status < 200 || status >= 300) {
@@ -229,4 +298,4 @@ async function handler(event, context) {
   }
 }
 
-module.exports = { handler, runPollCycle, describe, TYPE_CATEGORY };
+module.exports = { handler, runPollCycle, describe, notificationUrl, TYPE_CATEGORY };

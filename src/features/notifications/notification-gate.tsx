@@ -6,15 +6,15 @@ import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useMarkNotificationRead, useUnreadNotifications, type Notification } from '@/api';
+import { useDeleteNotification, useUnreadNotifications, type Notification } from '@/api';
 import { Radius, Space, usePalette } from '@/constants/design';
 
-type Payload = { reason?: string; family_name?: string } | null;
+type Payload = { reason?: string; family_name?: string; new_owner_user_id?: string; new_owner_name?: string } | null;
 
 export function NotificationGate() {
   const palette = usePalette();
   const { data } = useUnreadNotifications();
-  const markRead = useMarkNotificationRead();
+  const deleteNotification = useDeleteNotification();
 
   const removed = data?.find((n) => n.type === 'removed');
   const transfer = data?.find((n) => n.type === 'transfer');
@@ -35,7 +35,7 @@ export function NotificationGate() {
             {'\n'}你可以创建或加入新的家庭继续记账。
           </Text>
           <Pressable
-            onPress={() => markRead.mutate(removed.id)}
+            onPress={() => deleteNotification.mutate(removed.id)}
             style={[styles.fsButton, { backgroundColor: palette.ink }]}
           >
             <Text style={[styles.fsButtonText, { color: palette.onInk }]}>我知道了</Text>
@@ -48,7 +48,7 @@ export function NotificationGate() {
   if (transfer) {
     return (
       <SafeAreaView edges={['top']} style={styles.bannerWrap} pointerEvents="box-none">
-        <Banner notif={transfer} onDismiss={() => markRead.mutate(transfer.id)} />
+        <Banner notif={transfer} onDismiss={() => deleteNotification.mutate(transfer.id)} />
       </SafeAreaView>
     );
   }
@@ -60,10 +60,13 @@ function Banner({ notif, onDismiss }: { notif: Notification; onDismiss: () => vo
   const palette = usePalette();
   const payload = notif.payload as Payload;
   const famName = payload?.family_name ? `「${payload.family_name}」` : '家庭';
+  const isNewOwner = payload?.new_owner_user_id === notif.user_id;
   return (
     <View style={[styles.banner, { backgroundColor: palette.bannerTint }]}>
       <SymbolView name="checkmark.seal.fill" tintColor={palette.textSecondary} size={18} />
-      <Text style={[styles.bannerText, { color: palette.textPrimary }]}>你已成为{famName}的户主</Text>
+      <Text style={[styles.bannerText, { color: palette.textPrimary }]}>
+        {isNewOwner ? `你已成为${famName}的户主` : `${payload?.new_owner_name ?? '一位家庭成员'}已成为${famName}的户主`}
+      </Text>
       <Pressable hitSlop={8} onPress={onDismiss}>
         <SymbolView name="xmark" tintColor={palette.textTertiary} size={14} />
       </Pressable>

@@ -7,6 +7,7 @@ import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-c
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ToastHost } from '@/components/toast';
 import { NotificationGate } from '@/features/notifications/notification-gate';
+import { useNotificationObserver } from '@/features/notifications/use-notification-observer';
 import { usePushRegistration } from '@/features/notifications/use-push-registration';
 import { useRecurringCatchup } from '@/features/record/use-recurring-catchup';
 import { SearchProvider } from '@/features/search/search-provider';
@@ -55,6 +56,8 @@ function AppShell() {
 
   // 推送设备令牌注册（层级二骨架）：PUSH_DELIVERY_ENABLED 关时 no-op；APNs 配好翻开即通。
   usePushRegistration();
+  // 前台、后台点按与冷启动的系统推送统一跳转到通知对应的安全 App 内页面。
+  useNotificationObserver(signedIn);
 
   // 定时收支补记（PRD §18）：登录态下 App 前台触发一次幂等补记（按天节流）。
   useRecurringCatchup();

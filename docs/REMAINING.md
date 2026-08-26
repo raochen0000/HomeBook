@@ -82,7 +82,7 @@
   - 已完成：客户端封装（`src/lib/auth.ts`，**无需改动**）+ 登录页 UI（`PHONE_OTP_ENABLED = true`）；**FC 已上线**（`services/sms-hook-fc/`，函数名 `homebooksms`/cn-hangzhou/Web 函数/无需认证）；GoTrue Send SMS hook 已启用并指向 **FC 内网地址**；真机真实短信 + 登录成功。
   - **关键经验**：GoTrue hook URI 必须用 **FC 内网/VPC 地址**（公网会 `hook_timeout`，auth 容器无公网出口）；模板 100001 含 `${code}`+`${min}`；测试号会短路不调 hook。详见 `services/sms-hook-fc/README.md` 与记忆 `supabase-phone-otp-native-aliyun`。
   - **上线前收尾**：① **轮换 `HOOK_SECRET`**（联调时贴过明文，FC 与 GoTrue 两边同换）；② 真机回归（登录/注册/绑号/注销）；③ 可选：FC 预留实例消冷启动 + 开 SLS 日志。
-- [ ] **#11 系统推送**（阿里云 EMAS / APNs）（现：App 内通知中心）。
+- [ ] **#11 iOS 系统推送上线验收**（Expo Push → APNs）：现有 App 内通知中心与 Expo Push/FC 投递代码待真机、APNs 凭据和线上 FC 定时器端到端验证；Android 推送不在第一版范围。
 - [ ] **#12 月度总结服务端快照 + 保存图片**（现：客户端实时计算）。
 
 ---
