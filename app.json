@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "homebook",
+    "platforms": ["ios"],
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
