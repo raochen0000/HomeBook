@@ -10,7 +10,7 @@ alwaysApply: true
 
 ## 0. 版本契约（最高优先级）
 
-- 本项目锁定 **Expo SDK 56**。`expo`、所有 `expo-*` 和 `@expo/ui` 必须是 `^56.0.0`。
+- 本项目锁定 **Expo SDK 56**。`expo`、所有 `expo-*` 和 `@expo/ui` 必须保持与 SDK 56 兼容，并以当前 `package.json` 和 `npx expo install` 解析的版本为准；不要手动改写为统一的版本号范围。
 - 涉及版本不确定时，以 SDK 56 为准，**不要**套用 53/54/55 的旧 API 或写法。
 - 如果某条本地 skill / 记忆与"SDK 56"冲突，**以本文件为准**。
 
@@ -45,8 +45,8 @@ alwaysApply: true
 - 要在 SwiftUI 树里嵌入 RN 组件时，用 `RNHostView` 包起来：
 
 ```tsx
-import { Host, VStack, RNHostView } from "@expo/ui/swift-ui";
-import { Pressable } from "react-native";
+import { Host, VStack, RNHostView } from '@expo/ui/swift-ui';
+import { Pressable } from 'react-native';
 
 <Host matchContents>
   <VStack>
