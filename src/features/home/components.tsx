@@ -2,22 +2,14 @@
  * 首页 UI 组件（@expo/ui/swift-ui 原生 SwiftUI 渲染）。
  * 视觉对齐参考图 + DESIGN.md：浅灰底 + 白卡、分类圆底图标、两段式金额、收支语义色。
  */
+import { Button, HStack, Image, Section, Spacer, SwipeActions, Text, VStack, ZStack } from '@expo/ui/swift-ui';
 import {
-  Button,
-  HStack,
-  Image,
-  RNHostView,
-  Section,
-  Spacer,
-  SwipeActions,
-  Text,
-  VStack,
-  ZStack,
-} from '@expo/ui/swift-ui';
-import {
+  aspectRatio,
   background,
+  clipShape,
   contentShape,
   cornerRadius,
+  fixedSize,
   font,
   foregroundColor,
   frame,
@@ -26,6 +18,7 @@ import {
   onTapGesture,
   opacity,
   padding,
+  resizable,
   shapes,
   tint,
   truncationMode,
@@ -34,10 +27,10 @@ import {
 import type { ComponentProps } from 'react';
 import { Dimensions } from 'react-native';
 
-import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, Typography, usePalette } from '@/constants/design';
 import { budgetLevel, budgetStage } from '@/lib/budget';
 import { amountParts, formatAmount, signForNet } from '@/lib/format';
+import { avatarInitialFromNickname } from '@/lib/profile';
 
 // ── 两段式金额：整数主字号 + 小数降一档（DESIGN §8）────────────────────────────
 export function AmountText({
@@ -80,7 +73,7 @@ export function CategoryAvatar({ symbol, color, size = 44 }: { symbol: string; c
   );
 }
 
-// ── 成员头像（与「家庭协作」复用同一展示组件）────────────────────────────────────
+// ── 成员头像（色板 / 末字规则与 UserAvatar 一致；行内用纯 SwiftUI，不桥 RN）──
 
 export type AvatarInfo = {
   /** 本地缓存的头像文件路径（file://…）；无则走首字母回退。 */
@@ -89,12 +82,41 @@ export type AvatarInfo = {
   nickname: string;
 };
 
-/** 单个成员头像：与「家庭协作」一致——真实照片或蓝紫渐变昵称头像。 */
+/** 与 UserAvatar SVG 渐变两端的中点；Expo UI `background` 只接受纯色。 */
+const FALLBACK_AVATAR_BG = '#98A9D5';
+
+/**
+ * 流水行内头像：只用 SwiftUI（不桥 RNHostView）。
+ * pageSheet 会改 List 的 proposed height；RNHostView 按 UIView.bounds 回写，会把行拉满或裁成空白。
+ * 修饰符顺序必须是 frame → 填色 → clipShape：clip 写在 background 前面时，底会保持方形。
+ */
 function MemberAvatar({ info, size = 20 }: { info: AvatarInfo; size?: number }) {
+  if (info.uri) {
+    return (
+      <Image
+        uiImage={info.uri}
+        modifiers={[
+          resizable(),
+          aspectRatio({ contentMode: 'fill' }),
+          frame({ width: size, height: size }),
+          clipShape('circle'),
+        ]}
+      />
+    );
+  }
   return (
-    <RNHostView matchContents>
-      <UserAvatar avatarUrl={info.uri} nickname={info.nickname} size={size} />
-    </RNHostView>
+    <ZStack
+      alignment="center"
+      modifiers={[
+        frame({ width: size, height: size }),
+        background(FALLBACK_AVATAR_BG, shapes.circle()),
+        clipShape('circle'),
+      ]}
+    >
+      <Text modifiers={[font({ size: Math.round(size * 0.52), weight: 'bold' }), foregroundColor('#FFFFFF')]}>
+        {avatarInitialFromNickname(info.nickname)}
+      </Text>
+    </ZStack>
   );
 }
 
@@ -160,6 +182,8 @@ function TransactionRow({
       // 整行（含留白）可点 → 详情弹窗；编辑/删除走左滑，不在此处。
       modifiers={[
         listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }),
+        // 垂直 hug：pageSheet 弹出时 List 会把剩余高度 propose 给可见行，禁止行被撑开。
+        fixedSize({ horizontal: false, vertical: true }),
         ...(onPress ? [contentShape(shapes.rectangle()), onTapGesture(() => onPress(row.id))] : []),
       ]}
     >
@@ -267,7 +291,13 @@ export function DayGroup({
     // listRowInsets 放在 Section 上：清零 insetGrouped 默认行内边距，避免叠加 TransactionRow 自带 padding。
     <Section header={header} modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 })]}>
       {rows.map((row) => (
-        <SwipeActions key={row.id} modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 })]}>
+        <SwipeActions
+          key={row.id}
+          modifiers={[
+            listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }),
+            fixedSize({ horizontal: false, vertical: true }),
+          ]}
+        >
           <TransactionRow row={row} onPress={onRowPress} contentInsets={rowInsets} />
           {/* allowsFullSwipe=false：滑到底也不自动触发首个动作（否则误触「编辑」）。
               删除按钮不用 role="destructive"（那会让 SwiftUI 在点击时直接把行收起，取消后不复原）；
