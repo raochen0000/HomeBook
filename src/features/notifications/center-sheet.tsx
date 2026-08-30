@@ -12,6 +12,8 @@ import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, Typography, useSheetPalette } from '@/constants/design';
 import { notificationHrefForItem } from '@/features/notifications/notification-routes';
+import { i18n, t, useLocalePreference } from '@/i18n';
+import { fromI18nLanguage, INTL_LOCALE } from '@/i18n/locale';
 
 type Payload = Record<string, unknown> | null;
 type NotificationTone = 'accent' | 'danger' | 'info' | 'success' | 'warning';
@@ -23,7 +25,9 @@ type NoticeDescription = {
 };
 
 function famName(p: Payload): string {
-  return typeof p?.family_name === 'string' ? `「${p.family_name}」` : '家庭';
+  return typeof p?.family_name === 'string'
+    ? t('notifications.quotedFamily', { name: p.family_name })
+    : t('notifications.familyFallback');
 }
 
 /** 通知 → 图标、语义色、标题与正文。 */
@@ -32,47 +36,75 @@ function describe(n: Notification): NoticeDescription {
   switch (n.type) {
     case 'removed':
       return p?.reason === 'dissolved'
-        ? { icon: 'person.2.slash', title: '家庭已解散', body: `${famName(p)}已被户主解散`, tone: 'danger' }
-        : { icon: 'person.2.slash', title: '你已被移出家庭', body: `你已被移出${famName(p)}`, tone: 'danger' };
+        ? {
+            icon: 'person.2.slash',
+            title: t('notifications.dissolvedTitle'),
+            body: t('notifications.dissolvedBody', { family: famName(p) }),
+            tone: 'danger',
+          }
+        : {
+            icon: 'person.2.slash',
+            title: t('notifications.removedTitle'),
+            body: t('notifications.removedBody', { family: famName(p) }),
+            tone: 'danger',
+          };
     case 'transfer':
       return p?.new_owner_user_id === n.user_id
-        ? { icon: 'arrow.left.arrow.right', title: '户主变更', body: `你已成为${famName(p)}的户主`, tone: 'info' }
+        ? {
+            icon: 'arrow.left.arrow.right',
+            title: t('notifications.transferTitle'),
+            body: t('notifications.transferSelf', { family: famName(p) }),
+            tone: 'info',
+          }
         : {
             icon: 'arrow.left.arrow.right',
-            title: '户主变更',
-            body: `${typeof p?.new_owner_name === 'string' ? `「${p.new_owner_name}」` : '一位家庭成员'}已成为${famName(p)}的户主`,
+            title: t('notifications.transferTitle'),
+            body: t('notifications.transferOther', {
+              name:
+                typeof p?.new_owner_name === 'string'
+                  ? t('notifications.quotedFamily', { name: p.new_owner_name })
+                  : t('notifications.aMember'),
+              family: famName(p),
+            }),
             tone: 'info',
           };
     case 'succession':
       return {
         icon: 'person.crop.circle.badge.exclamationmark',
-        title: '户主继任',
-        body: '有成员发起了户主继任申请',
+        title: t('notifications.successionTitle'),
+        body: t('notifications.successionBody'),
         tone: 'info',
       };
     case 'goal_achieved':
       return {
         icon: 'target',
-        title: '储蓄目标达成',
-        body: `${typeof p?.goal_name === 'string' ? `「${p.goal_name}」` : '一个储蓄目标'}已达成 🎉`,
+        title: t('notifications.goalTitle'),
+        body: t('notifications.goalBody', {
+          name:
+            typeof p?.goal_name === 'string'
+              ? t('notifications.quotedFamily', { name: p.goal_name })
+              : t('notifications.aGoal'),
+        }),
         tone: 'success',
       };
     case 'budget_alert':
       return {
         icon: 'exclamationmark.triangle',
-        title: '预算预警',
-        body: typeof p?.text === 'string' ? p.text : '本月预算需要关注',
+        title: t('notifications.budgetTitle'),
+        body: typeof p?.text === 'string' ? p.text : t('notifications.budgetBody'),
         tone: 'warning',
       };
     case 'monthly_summary':
       return {
         icon: 'doc.text',
-        title: '月度总结',
-        body: `${typeof p?.period === 'string' ? p.period : '上月'}的家庭总结已生成`,
+        title: t('notifications.summaryTitle'),
+        body: t('notifications.summaryBody', {
+          period: typeof p?.period === 'string' ? p.period : t('notifications.lastMonth'),
+        }),
         tone: 'accent',
       };
     default:
-      return { icon: 'bell', title: '通知', body: '', tone: 'accent' };
+      return { icon: 'bell', title: t('notifications.untitled'), body: '', tone: 'accent' };
   }
 }
 
@@ -81,11 +113,15 @@ function timeLabel(iso: string): string {
   const now = new Date();
   if (Number.isNaN(d.getTime())) return '';
   const diffMin = Math.floor((now.getTime() - d.getTime()) / 60000);
-  if (diffMin < 1) return '刚刚';
-  if (diffMin < 60) return `${diffMin} 分钟前`;
+  if (diffMin < 1) return t('dates.justNow');
+  if (diffMin < 60) return t('dates.minutesAgo', { count: diffMin });
+  const loc = INTL_LOCALE[fromI18nLanguage(i18n.language)];
   const sameDay =
     d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  if (sameDay) return `今天 ${d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}`;
+  if (sameDay) {
+    const time = d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    return `${t('dates.today')} ${time}`;
+  }
 
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
@@ -93,9 +129,9 @@ function timeLabel(iso: string): string {
     d.getFullYear() === yesterday.getFullYear() &&
     d.getMonth() === yesterday.getMonth() &&
     d.getDate() === yesterday.getDate();
-  if (isYesterday) return '昨天';
-  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' });
-  return d.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+  if (isYesterday) return t('dates.yesterday');
+  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString(loc, { month: 'long', day: 'numeric' });
+  return d.toLocaleDateString(loc, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 export function NotificationCenterSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -108,6 +144,7 @@ export function NotificationCenterSheet({ visible, onClose }: { visible: boolean
 
 function Body({ onClose }: { onClose: () => void }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const listQ = useAllNotifications();
   const deleteOne = useDeleteNotification();
   const deleteAll = useDeleteNotifications();
@@ -119,23 +156,23 @@ function Body({ onClose }: { onClose: () => void }) {
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
-        <SheetHeader title="通知中心" />
+        <SheetHeader title={t('notifications.center')} />
 
         {items.length === 0 ? (
           <View style={styles.center}>
             <SymbolView name="bell.slash" tintColor={palette.textTertiary} size={48} />
             <Text selectable style={[styles.emptyTitle, { color: palette.textPrimary }]}>
-              暂无通知
+              {t('notifications.empty')}
             </Text>
             <Text selectable style={[styles.emptyBody, { color: palette.textSecondary }]}>
-              新的家庭动态会显示在这里
+              {t('notifications.emptySub')}
             </Text>
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.content}>
             <View style={styles.listToolbar}>
               <Text selectable style={[styles.unreadSummary, { color: palette.textPrimary }]}>
-                {`最新 ${items.length} 条`}
+                {t('notifications.latestCount', { count: items.length })}
               </Text>
               <Pressable
                 accessibilityRole="button"
@@ -145,13 +182,13 @@ function Body({ onClose }: { onClose: () => void }) {
                 style={({ pressed }) => [styles.markAllRow, pressed ? styles.pressed : null]}
               >
                 <Text selectable style={[styles.action, { color: palette.info }]}>
-                  全部清除
+                  {t('notifications.clearAll')}
                 </Text>
               </Pressable>
             </View>
 
             <Text selectable style={[styles.sectionTitle, { color: palette.textSecondary }]}>
-              最新通知
+              {t('notifications.latest')}
             </Text>
             <View style={[styles.listGroup, { backgroundColor: palette.card }]}>
               {items.map((n, index) => (
@@ -179,6 +216,7 @@ function Body({ onClose }: { onClose: () => void }) {
 
 function NotificationRow({ item, isLast, onRead }: { item: Notification; isLast: boolean; onRead: () => void }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const d = describe(item);
   const time = timeLabel(item.created_at);
   const iconColor = d.tone === 'accent' ? palette.accent : palette[d.tone];
@@ -213,7 +251,7 @@ function NotificationRow({ item, isLast, onRead }: { item: Notification; isLast:
   return (
     <View>
       <Pressable
-        accessibilityHint="点按阅读后删除"
+        accessibilityHint={t('notifications.readToDelete')}
         accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
         onPress={onRead}

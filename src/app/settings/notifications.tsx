@@ -21,6 +21,7 @@ import {
   useSaveNotificationPrefs,
   type NotificationCategoryKey,
 } from '@/api';
+import { t } from '@/i18n';
 import { Space, usePalette } from '@/constants/design';
 import { usePushPermission } from '@/features/notifications/use-push-permission';
 import { registerPushDevice } from '@/features/notifications/use-push-registration';
@@ -29,13 +30,13 @@ import { Caption, SettingsList, ToggleRow } from '@/features/settings/native-lis
 type IconName = ComponentProps<typeof Image>['systemName'];
 
 /** 分类展示元数据（图标 + 文案）；键序由 NOTIFICATION_CATEGORY_KEYS 决定。 */
-const CATEGORY_META: Record<NotificationCategoryKey, { icon: IconName; label: string }> = {
-  family_activity: { icon: 'house.fill', label: '家庭动态' },
-  budget_alert: { icon: 'exclamationmark.triangle.fill', label: '预算超支预警' },
-  savings_progress: { icon: 'target', label: '储蓄目标进展' },
-  monthly_summary: { icon: 'doc.text.fill', label: '月度总结提醒' },
-  member_change: { icon: 'person.2.fill', label: '成员与邀请变动' },
-  account_security: { icon: 'lock.shield.fill', label: '账号安全' },
+const CATEGORY_META: Record<NotificationCategoryKey, { icon: IconName; labelKey: string }> = {
+  family_activity: { icon: 'house.fill', labelKey: 'settings.catFamily' },
+  budget_alert: { icon: 'exclamationmark.triangle.fill', labelKey: 'settings.catBudget' },
+  savings_progress: { icon: 'target', labelKey: 'settings.catSavings' },
+  monthly_summary: { icon: 'doc.text.fill', labelKey: 'settings.catSummary' },
+  member_change: { icon: 'person.2.fill', labelKey: 'settings.catMember' },
+  account_security: { icon: 'lock.shield.fill', labelKey: 'settings.catSecurity' },
 };
 
 export default function NotificationSettingsScreen() {
@@ -61,9 +62,8 @@ export default function NotificationSettingsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.base }}>
-      <Stack.Screen options={{ headerShown: true, title: '通知设置' }} />
+      <Stack.Screen options={{ headerShown: true, title: t('settings.notifications') }} />
       <SettingsList>
-        {/* 系统推送权限引导条：据真实授权态显隐「去开启」/「已开启」。 */}
         <Section>
           <HStack
             alignment="center"
@@ -72,28 +72,29 @@ export default function NotificationSettingsScreen() {
           >
             <Image systemName={granted ? 'checkmark.circle.fill' : 'app.badge'} size={19} color={palette.info} />
             <VStack alignment="leading" spacing={Space[1]}>
-              <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>系统推送</Text>
+              <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{t('settings.push')}</Text>
               <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textSecondary)]}>
-                {granted ? '已开启，可在系统设置中管理' : '尚未开启，点此开启系统推送'}
+                {granted ? t('settings.pushOn') : t('settings.pushOff')}
               </Text>
             </VStack>
             <Spacer />
             {granted ? null : (
-              <Text modifiers={[font({ size: 14, weight: 'semibold' }), foregroundColor(palette.info)]}>去开启</Text>
+              <Text modifiers={[font({ size: 14, weight: 'semibold' }), foregroundColor(palette.info)]}>
+                {t('settings.enablePush')}
+              </Text>
             )}
             <Image systemName="chevron.right" size={13} color={palette.textTertiary} />
           </HStack>
         </Section>
 
-        {/* 分类开关（六类，服务端持久化）。 */}
-        <Section title="接收以下通知">
+        <Section title={t('settings.receive')}>
           {NOTIFICATION_CATEGORY_KEYS.map((key) => {
             const meta = CATEGORY_META[key];
             return (
               <ToggleRow
                 key={key}
                 icon={meta.icon}
-                label={meta.label}
+                label={t(meta.labelKey)}
                 value={prefs[key]}
                 onValueChange={(v) => save.mutate({ ...prefs, [key]: v })}
               />
@@ -101,7 +102,7 @@ export default function NotificationSettingsScreen() {
           })}
         </Section>
 
-        <Caption text="关闭后仍可在 App 内的通知中心查看该类消息，仅不再收到系统推送提醒。" />
+        <Caption text={t('settings.pushHint')} />
       </SettingsList>
     </View>
   );

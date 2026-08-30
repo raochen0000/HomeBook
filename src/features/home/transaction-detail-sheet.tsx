@@ -13,6 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCategories, useFamilyMembers, useMyProfile, type Transaction } from '@/api';
 import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
+import { displayCategoryName, t, useLocalePreference } from '@/i18n';
+import { fromI18nLanguage, INTL_LOCALE } from '@/i18n/locale';
+import { i18n } from '@/i18n/instance';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { clockTime, formatAmount, signForType } from '@/lib/format';
 
@@ -21,7 +24,8 @@ const DISMISS_THRESHOLD = 80;
 
 function fullDate(iso: string): string {
   const d = new Date(iso);
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${clockTime(iso)}`;
+  const loc = INTL_LOCALE[fromI18nLanguage(i18n.language)];
+  return `${d.toLocaleDateString(loc, { year: 'numeric', month: 'long', day: 'numeric' })} ${clockTime(iso)}`;
 }
 
 function MemberRow({
@@ -68,7 +72,7 @@ export function TransactionDetailSheet({
 
 function Body({
   visible,
-  transaction: t,
+  transaction: txn,
   onClose,
 }: {
   visible: boolean;
@@ -76,6 +80,7 @@ function Body({
   onClose: () => void;
 }) {
   const palette = usePalette();
+  useLocalePreference();
   const insets = useSafeAreaInsets();
   const catColors = useCategoryColors();
   const categoriesQ = useCategories();
@@ -101,18 +106,20 @@ function Body({
     else Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
   };
 
-  const ttype = (t.type === 'income' ? 'income' : 'expense') as 'income' | 'expense';
-  const cat = (categoriesQ.data ?? []).find((c) => c.id === t.category_id) ?? null;
+  const ttype = (txn.type === 'income' ? 'income' : 'expense') as 'income' | 'expense';
+  const cat = (categoriesQ.data ?? []).find((c) => c.id === txn.category_id) ?? null;
   const members = membersQ.data ?? [];
   const myId = profileQ.data?.id;
   const nameOf = (id: string) =>
-    id === myId ? (profileQ.data?.nickname ?? '我') : (members.find((m) => m.id === id)?.nickname ?? '成员');
+    id === myId
+      ? (profileQ.data?.nickname ?? t('common.me'))
+      : (members.find((m) => m.id === id)?.nickname ?? t('common.member'));
   const avatarOf = (id: string) =>
     members.find((m) => m.id === id)?.avatar_url ?? (id === myId ? (profileQ.data?.avatar_url ?? null) : null);
 
   const iconColor = catColors[categoryColorKey(cat?.name ?? '', ttype, cat?.color_key)];
   const amountColor = ttype === 'income' ? palette.income : palette.expense;
-  const editedByOther = !!t.last_editor_user_id && t.last_editor_user_id !== t.recorder_user_id;
+  const editedByOther = !!txn.last_editor_user_id && txn.last_editor_user_id !== txn.recorder_user_id;
 
   return (
     <View style={styles.backdrop}>
@@ -161,14 +168,14 @@ function Body({
             </View>
             <View style={styles.headText}>
               <Text style={[styles.catName, { color: palette.textPrimary }]} numberOfLines={1}>
-                {cat?.name ?? '未分类'}
+                {cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized')}
               </Text>
               <Text style={[styles.typeTag, { color: palette.textSecondary }]}>
-                {ttype === 'income' ? '收入' : '支出'}
+                {ttype === 'income' ? t('record.income') : t('record.expense')}
               </Text>
             </View>
             <Text style={[styles.amount, { color: amountColor }]} numberOfLines={1}>
-              {formatAmount(t.amount, signForType(ttype))}
+              {formatAmount(txn.amount, signForType(ttype))}
             </Text>
           </View>
 
@@ -176,22 +183,26 @@ function Body({
 
           {/* 字段 */}
           <View style={styles.field}>
-            <Text style={[styles.fieldLabel, { color: palette.textSecondary }]}>时间</Text>
-            <Text style={[styles.fieldValue, { color: palette.textPrimary }]}>{fullDate(t.occurred_at)}</Text>
+            <Text style={[styles.fieldLabel, { color: palette.textSecondary }]}>{t('record.time')}</Text>
+            <Text style={[styles.fieldValue, { color: palette.textPrimary }]}>{fullDate(txn.occurred_at)}</Text>
           </View>
-          {t.note ? (
+          {txn.note ? (
             <View style={styles.field}>
-              <Text style={[styles.fieldLabel, { color: palette.textSecondary }]}>备注</Text>
-              <Text style={[styles.fieldValue, { color: palette.textPrimary }]}>{t.note}</Text>
+              <Text style={[styles.fieldLabel, { color: palette.textSecondary }]}>{t('record.note')}</Text>
+              <Text style={[styles.fieldValue, { color: palette.textPrimary }]}>{txn.note}</Text>
             </View>
           ) : null}
-          <MemberRow label="记录人" nickname={nameOf(t.recorder_user_id)} avatarUrl={avatarOf(t.recorder_user_id)} />
+          <MemberRow
+            label={t('record.recorder')}
+            nickname={nameOf(txn.recorder_user_id)}
+            avatarUrl={avatarOf(txn.recorder_user_id)}
+          />
           {editedByOther ? (
             <MemberRow
-              label="修改者"
-              nickname={nameOf(t.last_editor_user_id as string)}
-              avatarUrl={avatarOf(t.last_editor_user_id as string)}
-              sub={`于 ${fullDate(t.updated_at)}`}
+              label={t('record.modifier')}
+              nickname={nameOf(txn.last_editor_user_id as string)}
+              avatarUrl={avatarOf(txn.last_editor_user_id as string)}
+              sub={t('record.modifiedAt', { time: fullDate(txn.updated_at) })}
             />
           ) : null}
         </View>

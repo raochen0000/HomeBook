@@ -9,16 +9,16 @@ import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Space, usePalette } from '@/constants/design';
+import { t, useLocalePreference } from '@/i18n';
 
 export function ComingSoon({ title, note }: { title: string; note?: string }) {
   const palette = usePalette();
+  useLocalePreference();
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <Stack.Screen options={{ headerShown: true, title }} />
       <SymbolView name="hammer.fill" tintColor={palette.textTertiary} size={40} />
-      <ThemedText style={[styles.text, { color: palette.textSecondary }]}>
-        {note ?? '该功能正在开发中，敬请期待'}
-      </ThemedText>
+      <ThemedText style={[styles.text, { color: palette.textSecondary }]}>{note ?? t('common.comingSoon')}</ThemedText>
     </View>
   );
 }

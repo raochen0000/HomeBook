@@ -4,6 +4,8 @@
  * 收支总额口径包含储蓄类（资金对账），由调用方分别传入。
  */
 import { monthLabel } from './format';
+import { fromI18nLanguage } from '@/i18n/locale';
+import { i18n, t } from '@/i18n/instance';
 
 export type Dimension = 'week' | 'month' | 'year' | 'custom';
 
@@ -34,7 +36,7 @@ export function periodRange(dim: Dimension, anchor: Date): { start: Date; end: D
     return {
       start: new Date(anchor.getFullYear(), 0, 1),
       end: new Date(anchor.getFullYear() + 1, 0, 1),
-      label: `${anchor.getFullYear()}年`,
+      label: t('report.yearLabel', { year: anchor.getFullYear() }),
     };
   }
   if (dim === 'custom') {
@@ -85,7 +87,15 @@ export function trendBuckets(
   let indexer: (d: Date) => number;
 
   if (dim === 'week') {
-    const names = ['一', '二', '三', '四', '五', '六', '日'];
+    const names = [
+      t('dates.weekdayMon'),
+      t('dates.weekdayTue'),
+      t('dates.weekdayWed'),
+      t('dates.weekdayThu'),
+      t('dates.weekdayFri'),
+      t('dates.weekdaySat'),
+      t('dates.weekdaySun'),
+    ];
     buckets = names.map((n) => ({ label: n, value: 0 }));
     indexer = (d) => Math.floor((startOfDay(d).getTime() - range.start.getTime()) / 86400000);
   } else if (dim === 'custom') {
@@ -195,7 +205,10 @@ export type PeriodFlow = { label: string; income: number; expense: number };
 function flowLabel(dim: Dimension, start: Date): string {
   if (dim === 'week' || dim === 'custom') return `${start.getMonth() + 1}/${start.getDate()}`;
   if (dim === 'year') return `${start.getFullYear()}`;
-  return `${start.getMonth() + 1}月`;
+  if (fromI18nLanguage(i18n.language) === 'en') {
+    return start.toLocaleDateString('en-US', { month: 'short' });
+  }
+  return t('dates.monthShort', { month: start.getMonth() + 1 });
 }
 
 /**

@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
 import { unregisterCurrentDevice } from '@/api/device-tokens';
+import { t } from '@/i18n/instance';
 
 import { normalizeDefaultNickname } from './profile';
 import { supabase } from './supabase';
@@ -74,13 +75,13 @@ export async function signInWithEmail(email: string, password: string): Promise<
 
   // Password Verification Hook 的 reject 未承诺固定 HTTP 状态码，故先按其服务端文案识别。
   // 一旦账户锁定，不能再回退到 signUp，否则会吞掉锁定提示。
-  if (signIn.error.message.includes('账号已锁定')) throw new Error(signIn.error.message);
+  if (signIn.error.message.includes('账号已锁定')) throw new Error(t('auth.accountLocked'));
   if (signIn.error.status === 429) {
     // 其它 429 也不尝试注册，避免把限流误当成账号不存在。
-    throw new Error('登录请求过于频繁，请稍后再试');
+    throw new Error(t('auth.tooManyAttempts'));
   }
   if (signIn.error.status && ![400, 401].includes(signIn.error.status)) {
-    throw new Error(signIn.error.message || '登录失败，请稍后重试');
+    throw new Error(signIn.error.message || t('auth.loginFailed'));
   }
 
   const signUp = await supabase.auth.signUp({
@@ -92,13 +93,13 @@ export async function signInWithEmail(email: string, password: string): Promise<
     // 邮箱已注册时不区分账号存在/密码错误，避免通过登录文案枚举邮箱。
     const code = (signUp.error as { code?: string }).code;
     if (code === 'user_already_exists') {
-      throw new Error('邮箱或密码错误');
+      throw new Error(t('auth.emailOrPasswordWrong'));
     }
-    throw new Error(signUp.error.message || '注册失败，请重试');
+    throw new Error(signUp.error.message || t('auth.signUpFailed'));
   }
   // autoconfirm 关闭的环境下 signUp 不直接给 session，这里兜底提示
   if (!signUp.data.session) {
-    throw new Error('注册成功，请前往邮箱确认后再登录');
+    throw new Error(t('auth.confirmEmail'));
   }
 }
 
@@ -109,7 +110,7 @@ export async function signInWithEmail(email: string, password: string): Promise<
  */
 export async function sendPasswordResetOtp(email: string): Promise<void> {
   const normalized = normalizeEmail(email);
-  if (!normalized) throw new Error('请输入有效的邮箱地址');
+  if (!normalized) throw new Error(t('auth.invalidEmail'));
   const { error } = await supabase.auth.resetPasswordForEmail(normalized);
   if (error) throw error;
 }
@@ -120,7 +121,7 @@ export async function sendPasswordResetOtp(email: string): Promise<void> {
  */
 export async function verifyPasswordResetOtp(email: string, token: string): Promise<void> {
   const normalized = normalizeEmail(email);
-  if (!normalized) throw new Error('请输入有效的邮箱地址');
+  if (!normalized) throw new Error(t('auth.invalidEmail'));
   const { error } = await supabase.auth.verifyOtp({ email: normalized, token, type: 'recovery' });
   if (error) throw error;
 }
@@ -141,7 +142,7 @@ export function normalizeCnPhone(raw: string): string | null {
 /** 发送登录验证码（登录即注册；GoTrue 经阿里云短信下发，shouldCreateUser 默认 true）。 */
 export async function sendPhoneOtp(phone: string): Promise<void> {
   const e164 = normalizeCnPhone(phone);
-  if (!e164) throw new Error('请输入有效的中国大陆手机号');
+  if (!e164) throw new Error(t('auth.invalidCnPhone'));
   const { error } = await supabase.auth.signInWithOtp({ phone: e164 });
   if (error) throw error;
 }
@@ -149,7 +150,7 @@ export async function sendPhoneOtp(phone: string): Promise<void> {
 /** 校验登录验证码 → 拿到 session（未注册则自动建号，profiles 由触发器建行）。 */
 export async function verifyPhoneOtp(phone: string, token: string): Promise<void> {
   const e164 = normalizeCnPhone(phone);
-  if (!e164) throw new Error('请输入有效的中国大陆手机号');
+  if (!e164) throw new Error(t('auth.invalidCnPhone'));
   const { error } = await supabase.auth.verifyOtp({ phone: e164, token, type: 'sms' });
   if (error) throw error;
 }
@@ -160,7 +161,7 @@ export async function verifyPhoneOtp(phone: string, token: string): Promise<void
  */
 export async function bindPhone(phone: string): Promise<void> {
   const e164 = normalizeCnPhone(phone);
-  if (!e164) throw new Error('请输入有效的中国大陆手机号');
+  if (!e164) throw new Error(t('auth.invalidCnPhone'));
   const { error } = await supabase.auth.updateUser({ phone: e164 });
   if (error) throw error;
 }
@@ -168,7 +169,7 @@ export async function bindPhone(phone: string): Promise<void> {
 /** 绑定手机号的验证码确认（type=phone_change，区别于登录的 sms）。 */
 export async function verifyPhoneChange(phone: string, token: string): Promise<void> {
   const e164 = normalizeCnPhone(phone);
-  if (!e164) throw new Error('请输入有效的中国大陆手机号');
+  if (!e164) throw new Error(t('auth.invalidCnPhone'));
   const { error } = await supabase.auth.verifyOtp({ phone: e164, token, type: 'phone_change' });
   if (error) throw error;
 }
@@ -189,7 +190,7 @@ export function normalizeEmail(raw: string): string | null {
  */
 export async function bindEmail(email: string): Promise<void> {
   const normalized = normalizeEmail(email);
-  if (!normalized) throw new Error('请输入有效的邮箱地址');
+  if (!normalized) throw new Error(t('auth.invalidEmail'));
   const { error } = await supabase.auth.updateUser({ email: normalized });
   if (error) throw error;
 }
@@ -197,7 +198,7 @@ export async function bindEmail(email: string): Promise<void> {
 /** 邮箱绑定的验证码确认（type=email_change，需邮件模板含 {{ .Token }}）。 */
 export async function verifyEmailChange(email: string, token: string): Promise<void> {
   const normalized = normalizeEmail(email);
-  if (!normalized) throw new Error('请输入有效的邮箱地址');
+  if (!normalized) throw new Error(t('auth.invalidEmail'));
   const { error } = await supabase.auth.verifyOtp({ email: normalized, token, type: 'email_change' });
   if (error) throw error;
 }
@@ -226,7 +227,7 @@ export async function signInWithApple(): Promise<void> {
     throw e;
   }
 
-  if (!credential.identityToken) throw new Error('Apple 未返回身份令牌');
+  if (!credential.identityToken) throw new Error(t('auth.appleNoToken'));
 
   const { data, error } = await supabase.auth.signInWithIdToken({
     provider: 'apple',
@@ -263,7 +264,7 @@ export async function bindApple(): Promise<boolean> {
     if ((e as { code?: string }).code === 'ERR_REQUEST_CANCELED') return false;
     throw e;
   }
-  if (!credential.identityToken) throw new Error('Apple 未返回身份令牌');
+  if (!credential.identityToken) throw new Error(t('auth.appleNoToken'));
   const { error } = await supabase.auth.linkIdentity({ provider: 'apple', token: credential.identityToken });
   if (error) throw error;
   return true;
@@ -277,7 +278,7 @@ export async function unbindApple(): Promise<void> {
   const { data, error } = await supabase.auth.getUserIdentities();
   if (error) throw error;
   const apple = data?.identities?.find((i) => i.provider === 'apple');
-  if (!apple) throw new Error('未找到已绑定的 Apple 账号');
+  if (!apple) throw new Error(t('auth.appleNotBound'));
   const { error: unlinkError } = await supabase.auth.unlinkIdentity(apple);
   if (unlinkError) throw unlinkError;
 }

@@ -41,6 +41,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { singleLineTextInputStyle } from '@/constants/text-input';
+import { t, useLocalePreference } from '@/i18n';
 import {
   isAppleAuthAvailable,
   normalizeCnPhone,
@@ -108,10 +109,10 @@ function otpErrorText(err: unknown): string {
   const msg = (e?.message ?? '').toLowerCase();
 
   if (status === 429 || msg.includes('daily sms verification code limit')) {
-    return '今日短信验证码已达 5 次上限，请明天再试';
+    return t('auth.smsDailyLimit');
   }
   if (e?.code === 'otp_expired' || msg.includes('invalid') || msg.includes('expired')) {
-    return '验证码错误或已过期，请重新获取';
+    return t('auth.codeInvalid');
   }
   const timedOut =
     status === 504 ||
@@ -125,7 +126,7 @@ function otpErrorText(err: unknown): string {
     msg.includes('network request failed') ||
     msg.includes('failed to fetch');
   if (timedOut || networkDown) {
-    return '短信服务暂时不可用，请稍后重试，或改用邮箱 / Apple 登录';
+    return t('auth.smsUnavailable');
   }
   return e?.message ?? String(err);
 }
@@ -152,6 +153,7 @@ function parseRememberedLogin(raw: string | null): RememberedLogin | null {
 
 export function LoginScreen() {
   const palette = usePalette();
+  useLocalePreference();
   const isDark = useColorScheme() === 'dark';
   const { height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -214,7 +216,7 @@ export function LoginScreen() {
   // 协议闸门：未勾选时拦截所有登录入口并提示。返回 false 表示调用方应中止。
   const ensureAgreed = useCallback(() => {
     if (agreed) return true;
-    toast.warning('请先阅读并同意《用户协议》与《隐私政策》');
+    toast.warning(t('auth.agreePrefix'));
     return false;
   }, [agreed]);
 
@@ -270,9 +272,9 @@ export function LoginScreen() {
                 style={styles.logo}
                 contentFit="contain"
               />
-              <Text style={[styles.logoText, { color: palette.textPrimary }]}>家账</Text>
-              <Text style={[styles.tagline, { color: palette.textSecondary }]}>和家人一起记账</Text>
-              <Text style={[styles.tagline, { color: palette.textSecondary }]}>管理每一笔生活开支</Text>
+              <Text style={[styles.logoText, { color: palette.textPrimary }]}>{t('appName')}</Text>
+              <Text style={[styles.tagline, { color: palette.textSecondary }]}>{t('auth.tagline1')}</Text>
+              <Text style={[styles.tagline, { color: palette.textSecondary }]}>{t('auth.tagline2')}</Text>
             </View>
 
             <View
@@ -318,7 +320,7 @@ export function LoginScreen() {
               <View style={styles.others}>
                 <View style={styles.dividerRow}>
                   <View style={[styles.dividerLine, { backgroundColor: palette.separator }]} />
-                  <Text style={[styles.dividerText, { color: palette.textTertiary }]}>其它方式登录</Text>
+                  <Text style={[styles.dividerText, { color: palette.textTertiary }]}>{t('auth.otherWays')}</Text>
                   <View style={[styles.dividerLine, { backgroundColor: palette.separator }]} />
                 </View>
 
@@ -327,7 +329,7 @@ export function LoginScreen() {
                   <SecondaryButton
                     palette={palette}
                     icon="envelope"
-                    label="邮箱登录"
+                    label={t('auth.emailLogin')}
                     disabled={busy}
                     onPress={() => setMode('email')}
                   />
@@ -336,7 +338,7 @@ export function LoginScreen() {
                   <SecondaryButton
                     palette={palette}
                     icon="iphone"
-                    label="手机号登录"
+                    label={t('auth.phoneLogin')}
                     disabled={busy}
                     onPress={() => setMode('phone')}
                   />
@@ -346,7 +348,7 @@ export function LoginScreen() {
                   <SecondaryButton
                     palette={palette}
                     icon="apple.logo"
-                    label="通过 Apple 登录"
+                    label={t('auth.appleLogin')}
                     disabled={busy}
                     onPress={() => {
                       if (!ensureAgreed()) return;
@@ -366,13 +368,13 @@ export function LoginScreen() {
                   />
                 </Pressable>
                 <Text style={[styles.agreeText, { color: palette.textTertiary }]}>
-                  登录即表示你已阅读并同意
+                  {t('auth.agreeLead')}
                   <Text style={{ color: palette.accent }} onPress={() => setLegal('terms')}>
-                    《用户协议》
+                    {t('auth.termsLink')}
                   </Text>
-                  与
+                  {t('auth.and')}
                   <Text style={{ color: palette.accent }} onPress={() => setLegal('privacy')}>
-                    《隐私政策》
+                    {t('auth.privacyLink')}
                   </Text>
                 </Text>
               </View>
@@ -419,6 +421,7 @@ function PhoneForm({
   phone,
   setPhone,
 }: FormProps & { phone: string; setPhone: (value: string) => void }) {
+  useLocalePreference();
   const [code, setCode] = useState('');
   const [cooldown, setCooldown] = useState(0);
 
@@ -436,14 +439,14 @@ function PhoneForm({
   const onSend = async () => {
     if (!ensureAgreed()) return;
     if (!canSend) {
-      if (!e164) toast.error('请输入有效的中国大陆手机号');
+      if (!e164) toast.error(t('auth.invalidCnPhone'));
       return;
     }
     setBusy(true);
     try {
       await sendPhoneOtp(phone);
       setCooldown(60);
-      toast.success('验证码已发送');
+      toast.success(t('auth.codeSent'));
     } catch (err) {
       toast.error(otpErrorText(err));
     } finally {
@@ -474,7 +477,7 @@ function PhoneForm({
         <View style={[styles.ccDivider, { backgroundColor: palette.separator }]} />
         <TextInput
           style={[styles.input, { color: palette.textPrimary }]}
-          placeholder="请输入手机号"
+          placeholder={t('auth.phonePlaceholder')}
           placeholderTextColor={palette.textTertiary}
           value={phone}
           onChangeText={(t) => setPhone(t.replace(/\D/g, '').slice(0, 11))}
@@ -487,7 +490,7 @@ function PhoneForm({
       <View style={[styles.field, { backgroundColor: palette.base }]}>
         <TextInput
           style={[styles.input, { color: palette.textPrimary }]}
-          placeholder="请输入验证码"
+          placeholder={t('auth.codePlaceholder')}
           placeholderTextColor={palette.textTertiary}
           value={code}
           onChangeText={(t) => setCode(t.replace(/\D/g, ''))}
@@ -498,18 +501,18 @@ function PhoneForm({
         <View style={[styles.ccDivider, { backgroundColor: palette.separator }]} />
         <Pressable hitSlop={6} onPress={onSend} disabled={!canSend}>
           <Text style={[styles.sendText, { color: canSend ? palette.textPrimary : palette.textTertiary }]}>
-            {cooldown > 0 ? `${cooldown}s 后重发` : '获取验证码'}
+            {cooldown > 0 ? t('auth.resendIn', { seconds: cooldown }) : t('auth.getCode')}
           </Text>
         </Pressable>
       </View>
 
       <LoginOptionsRow palette={palette} rememberMe={rememberMe} setRememberMe={setRememberMe} />
 
-      <PrimaryButton palette={palette} busy={busy} enabled={canLogin} label="登录" onPress={onLogin} />
+      <PrimaryButton palette={palette} busy={busy} enabled={canLogin} label={t('auth.login')} onPress={onLogin} />
 
       <View style={styles.hintRow}>
         <SymbolView name="checkmark.shield" tintColor={palette.textTertiary} size={13} />
-        <Text style={[styles.hint, { color: palette.textTertiary }]}>未注册的手机号验证通过后将自动创建账号并登录</Text>
+        <Text style={[styles.hint, { color: palette.textTertiary }]}>{t('auth.phoneAutoCreate')}</Text>
       </View>
     </>
   );
@@ -528,6 +531,7 @@ function EmailForm({
   setEmail,
   onForgot,
 }: FormProps & { email: string; setEmail: (value: string) => void; onForgot: () => void }) {
+  useLocalePreference();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -537,7 +541,7 @@ function EmailForm({
   const onLogin = async () => {
     if (!ensureAgreed()) return;
     if (!canLogin) {
-      toast.error(emailValid ? '密码至少 6 位' : '请输入有效邮箱');
+      toast.error(emailValid ? t('auth.passwordMin') : t('auth.invalidEmail'));
       return;
     }
     setBusy(true);
@@ -559,7 +563,7 @@ function EmailForm({
         <View style={styles.fieldGap} />
         <TextInput
           style={[styles.input, { color: palette.textPrimary }]}
-          placeholder="请输入邮箱地址"
+          placeholder={t('auth.emailPlaceholder')}
           placeholderTextColor={palette.textTertiary}
           value={email}
           onChangeText={setEmail}
@@ -582,7 +586,7 @@ function EmailForm({
         <View style={styles.fieldGap} />
         <TextInput
           style={[styles.input, { color: palette.textPrimary }]}
-          placeholder="请输入密码"
+          placeholder={t('auth.passwordPlaceholder')}
           placeholderTextColor={palette.textTertiary}
           value={password}
           onChangeText={setPassword}
@@ -595,18 +599,18 @@ function EmailForm({
           onSubmitEditing={onLogin}
           returnKeyType="go"
         />
-        <Pressable hitSlop={8} onPress={() => setShowPassword((v) => !v)}>
+        <Pressable hitSlop={8} onPress={() => setShowPassword((v) => !v)} accessibilityLabel={t('auth.showPassword')}>
           <SymbolView name={showPassword ? 'eye.slash' : 'eye'} tintColor={palette.textSecondary} size={18} />
         </Pressable>
       </View>
 
       <LoginOptionsRow palette={palette} rememberMe={rememberMe} setRememberMe={setRememberMe} onForgot={onForgot} />
 
-      <PrimaryButton palette={palette} busy={busy} enabled={canLogin} label="登录" onPress={onLogin} />
+      <PrimaryButton palette={palette} busy={busy} enabled={canLogin} label={t('auth.login')} onPress={onLogin} />
 
       <View style={styles.hintRow}>
         <SymbolView name="checkmark.shield" tintColor={palette.textTertiary} size={13} />
-        <Text style={[styles.hint, { color: palette.textTertiary }]}>未注册的邮箱号验证通过后将自动创建账号并登录</Text>
+        <Text style={[styles.hint, { color: palette.textTertiary }]}>{t('auth.emailAutoCreate')}</Text>
       </View>
     </>
   );
@@ -624,6 +628,7 @@ function LoginOptionsRow({
   setRememberMe: (b: boolean) => void;
   onForgot?: () => void;
 }) {
+  useLocalePreference();
   return (
     <View style={styles.optionsRow}>
       <Pressable style={styles.remember} hitSlop={6} onPress={() => setRememberMe(!rememberMe)}>
@@ -632,11 +637,11 @@ function LoginOptionsRow({
           tintColor={rememberMe ? palette.ink : palette.textTertiary}
           size={15}
         />
-        <Text style={[styles.rememberText, { color: palette.textTertiary }]}>记住我</Text>
+        <Text style={[styles.rememberText, { color: palette.textTertiary }]}>{t('auth.rememberMe')}</Text>
       </Pressable>
       {onForgot ? (
         <Pressable hitSlop={6} onPress={onForgot}>
-          <Text style={[styles.forgotText, { color: palette.textTertiary }]}>忘记密码?</Text>
+          <Text style={[styles.forgotText, { color: palette.textTertiary }]}>{t('auth.forgotPassword')}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -656,6 +661,7 @@ function AppleLoginSheet({
   onClose: () => void;
   onContinue: () => Promise<void>;
 }) {
+  useLocalePreference();
   const insets = useSafeAreaInsets();
   const [translateY] = useState(() => new Animated.Value(0));
   const busyRef = useRef(busy);
@@ -735,38 +741,32 @@ function AppleLoginSheet({
             <View style={[styles.sheetGrabber, { backgroundColor: palette.separator }]} />
           </View>
           <Pressable style={styles.sheetCancel} hitSlop={8} onPress={onClose} disabled={busy}>
-            <Text style={[styles.sheetCancelText, { color: palette.textSecondary }]}>取消</Text>
+            <Text style={[styles.sheetCancelText, { color: palette.textSecondary }]}>{t('common.cancel')}</Text>
           </Pressable>
 
           <SymbolView name="apple.logo" tintColor={palette.textPrimary} size={38} />
-          <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>通过 Apple 登录</Text>
+          <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>{t('auth.appleLogin')}</Text>
 
           <View style={styles.sheetBenefits}>
             <AppleBenefit
               palette={palette}
               icon="checkmark.shield"
-              title="快速、安全、保护隐私"
-              text="使用你已有的 Apple 账号登录，无需创建新账号，App 不会获取你的密码。"
+              title={t('auth.appleTitle')}
+              text={t('auth.appleBody')}
             />
-            <AppleBenefit
-              palette={palette}
-              icon="person"
-              title="仅分享必要信息"
-              text="你可选择分享姓名和电子邮件，App 将严格保护你的隐私。"
-            />
-            <AppleBenefit
-              palette={palette}
-              icon="key"
-              title="在设备间轻松登录"
-              text="使用 iCloud 钥匙串，帮你在所有 Apple 设备上自动登录。"
-            />
+            <AppleBenefit palette={palette} icon="person" title={t('auth.shareTitle')} text={t('auth.shareBody')} />
+            <AppleBenefit palette={palette} icon="key" title={t('auth.devicesTitle')} text={t('auth.devicesBody')} />
           </View>
 
           <View style={[styles.sheetRule, { backgroundColor: palette.separator }]} />
-          <PrimaryButton palette={palette} busy={busy} enabled={!busy} label="通过 Apple 继续" onPress={onContinue} />
-          <Text style={[styles.sheetBottomNote, { color: palette.textTertiary }]}>
-            Apple 账号只用于登录家账，不会用于 Apple 服务以外的其他用途。
-          </Text>
+          <PrimaryButton
+            palette={palette}
+            busy={busy}
+            enabled={!busy}
+            label={t('auth.appleContinue')}
+            onPress={onContinue}
+          />
+          <Text style={[styles.sheetBottomNote, { color: palette.textTertiary }]}>{t('auth.appleOnlyForLogin')}</Text>
         </Animated.View>
       </View>
     </Modal>

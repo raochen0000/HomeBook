@@ -47,6 +47,7 @@ import { RecordSheet } from '@/features/record/record-sheet';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
+import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { budgetLevel, daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
 import { currentPeriod, formatAmount } from '@/lib/format';
 
@@ -75,6 +76,7 @@ function formatCny(cents: number): string {
 
 export default function FamilyScreen() {
   const palette = usePalette();
+  useLocalePreference();
   const insets = useSafeAreaInsets();
   const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 69);
   const period = currentPeriod();
@@ -125,19 +127,19 @@ export default function FamilyScreen() {
     const myRecordedDays = new Set<string>();
     let latestMonthTransaction: Transaction | null = null;
 
-    for (const t of txns) {
-      const occurred = new Date(t.occurred_at);
+    for (const txn of txns) {
+      const occurred = new Date(txn.occurred_at);
       recordedDays.add(localDayKey(occurred));
-      if (t.recorder_user_id === myId) myRecordedDays.add(localDayKey(occurred));
+      if (txn.recorder_user_id === myId) myRecordedDays.add(localDayKey(occurred));
       if (currentPeriod(occurred) === period) {
         monthCount += 1;
-        byMemberMonth.set(t.recorder_user_id, (byMemberMonth.get(t.recorder_user_id) ?? 0) + 1);
+        byMemberMonth.set(txn.recorder_user_id, (byMemberMonth.get(txn.recorder_user_id) ?? 0) + 1);
         if (!latestMonthTransaction || occurred > new Date(latestMonthTransaction.occurred_at)) {
-          latestMonthTransaction = t;
+          latestMonthTransaction = txn;
         }
       }
       if (localDayKey(occurred) === todayKey) {
-        byMemberToday.set(t.recorder_user_id, (byMemberToday.get(t.recorder_user_id) ?? 0) + 1);
+        byMemberToday.set(txn.recorder_user_id, (byMemberToday.get(txn.recorder_user_id) ?? 0) + 1);
       }
     }
 
@@ -163,12 +165,16 @@ export default function FamilyScreen() {
   const budgetRemaining = budgetTotal == null ? 0 : budgetTotal - budgetUsed;
   const budgetPct = budgetTotal && budgetTotal > 0 ? Math.round((budgetUsed / budgetTotal) * 100) : 0;
   const budgetSub =
-    budgetTotal == null ? '未设置' : budgetRemaining >= 0 ? `剩 ${formatCny(budgetRemaining)}` : '已超支';
+    budgetTotal == null
+      ? t('settings.notSet')
+      : budgetRemaining >= 0
+        ? t('common.leftover', { amount: formatCny(budgetRemaining) })
+        : t('common.overBudget');
 
   // ── 储蓄目标：数量角标 + 「家庭当下」精选目标（截止日最近的进行中目标）──
   const goals = useMemo(() => savingsQ.data ?? [], [savingsQ.data]);
   const goalCount = goals.length;
-  const savingsSub = goalCount > 0 ? `${goalCount} 个目标` : '共同攒钱';
+  const savingsSub = goalCount > 0 ? t('common.goalCount', { count: goalCount }) : t('family.poolMoney');
   const featuredGoal = useMemo<SavingsGoal | null>(() => {
     // 只在未达成目标里选：优先有截止日且最近的；其余按原顺序（最新创建在前）兜底。已达成的不展示。
     const active = goals.filter((g) => g.saved_amount < g.target_amount);
@@ -179,58 +185,54 @@ export default function FamilyScreen() {
   const activeGoalCount = useMemo(() => goals.filter((g) => g.saved_amount < g.target_amount).length, [goals]);
 
   const unreadCount = unreadQ.data?.length ?? 0;
-  const latestMonthCategory = useMemo(
-    () =>
-      stats.latestMonthTransaction
-        ? ((categoriesQ.data ?? []).find((category) => category.id === stats.latestMonthTransaction?.category_id)
-            ?.name ?? '未分类')
-        : null,
-    [categoriesQ.data, stats.latestMonthTransaction],
-  );
-  const latestMonthRecorder = useMemo(
-    () =>
-      stats.latestMonthTransaction
-        ? (members.find((member) => member.userId === stats.latestMonthTransaction?.recorder_user_id)?.nickname ??
-          '家人')
-        : null,
-    [members, stats.latestMonthTransaction],
-  );
+  const latestTxn = stats.latestMonthTransaction;
+  const latestCat = latestTxn
+    ? (categoriesQ.data ?? []).find((category) => category.id === latestTxn.category_id)
+    : undefined;
+  const latestMonthCategory = latestTxn
+    ? latestCat
+      ? displayCategoryName(latestCat.name, latestCat.is_system)
+      : t('common.uncategorized')
+    : null;
+  const latestMonthRecorder = latestTxn
+    ? (members.find((member) => member.userId === latestTxn.recorder_user_id)?.nickname ?? t('common.familyMember'))
+    : null;
   // 单人家庭：隐藏成员列表与「家庭当下」，聚焦邀请转化（PRD F1 关键态）。
   const singlePerson = (family?.member_count ?? members.length) <= 1;
 
   const onCreate = () => {
     Alert.prompt(
-      '创建家庭',
-      '给你的家庭起个名字',
+      t('family.create'),
+      t('family.createPrompt'),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: '创建',
+          text: t('common.create'),
           onPress: async (name?: string) => {
             try {
-              await createFamilyM.mutateAsync({ name: name?.trim() || '我的家' });
+              await createFamilyM.mutateAsync({ name: name?.trim() || t('home.myHome') });
             } catch (e) {
-              Alert.alert('创建失败', (e as Error).message ?? String(e));
+              Alert.alert(t('family.createFailed'), (e as Error).message ?? String(e), alertOk());
             }
           },
         },
       ],
       'plain-text',
-      '我的家',
+      t('home.myHome'),
     );
   };
 
   const onLeave = () => {
-    Alert.alert('退出家庭', '退出后你将看不到这个家的账本。确定退出吗？', [
-      { text: '取消', style: 'cancel' },
+    Alert.alert(t('family.leave'), t('family.leaveConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: '退出',
+        text: t('family.leave'),
         style: 'destructive',
         onPress: async () => {
           try {
             await leaveM.mutateAsync();
           } catch (e) {
-            Alert.alert('退出失败', (e as Error).message ?? String(e));
+            Alert.alert(t('family.leaveFailed'), (e as Error).message ?? String(e), alertOk());
           }
         },
       },
@@ -243,7 +245,7 @@ export default function FamilyScreen() {
 
   const onInvite = () => {
     if (!isOwner) {
-      toast.warning('仅户主可邀请家人');
+      toast.warning(t('family.ownerOnlyInvite'));
       return;
     }
     setInviteOpen(true);
@@ -279,20 +281,20 @@ export default function FamilyScreen() {
           // ── 无家庭：创建 / 加入 ──
           <View style={styles.center}>
             <SymbolView name="person.2" tintColor={palette.textTertiary} size={48} />
-            <ThemedText style={{ color: palette.textSecondary }}>你还没有加入家庭</ThemedText>
+            <ThemedText style={{ color: palette.textSecondary }}>{t('family.notJoined')}</ThemedText>
             <View style={styles.emptyActions}>
               <Pressable
                 disabled={busy}
                 onPress={onCreate}
                 style={[styles.primary, { backgroundColor: palette.ink, opacity: busy ? 0.5 : 1 }]}
               >
-                <ThemedText style={[styles.primaryText, { color: palette.onInk }]}>创建家庭</ThemedText>
+                <ThemedText style={[styles.primaryText, { color: palette.onInk }]}>{t('family.create')}</ThemedText>
               </Pressable>
               <Pressable
                 onPress={() => setScanOpen(true)}
                 style={[styles.secondary, { borderColor: palette.separator }]}
               >
-                <ThemedText style={{ color: palette.textPrimary, fontSize: 16 }}>扫码加入家庭</ThemedText>
+                <ThemedText style={{ color: palette.textPrimary, fontSize: 16 }}>{t('family.scanJoin')}</ThemedText>
               </Pressable>
             </View>
           </View>
@@ -336,17 +338,19 @@ export default function FamilyScreen() {
                     />
                   ) : (
                     <View style={styles.heroBadgeGlass}>
-                      <ThemedText style={styles.heroBadgeText}>家</ThemedText>
+                      <ThemedText style={styles.heroBadgeText}>{t('family.badge')}</ThemedText>
                     </View>
                   )}
                   <View style={styles.flex}>
                     <ThemedText style={styles.heroName}>{family.name}</ThemedText>
                     <View style={styles.heroMetaRow}>
                       <SymbolView name="person.2.fill" tintColor="rgba(255,255,255,0.85)" size={13} />
-                      <ThemedText style={styles.heroMeta}>{family.member_count} 位成员</ThemedText>
+                      <ThemedText style={styles.heroMeta}>
+                        {t('family.memberCount', { count: family.member_count })}
+                      </ThemedText>
                       {isOwner ? (
                         <View style={styles.heroRoleBadge}>
-                          <ThemedText style={styles.heroRoleBadgeText}>户主</ThemedText>
+                          <ThemedText style={styles.heroRoleBadgeText}>{t('common.owner')}</ThemedText>
                         </View>
                       ) : null}
                     </View>
@@ -356,11 +360,21 @@ export default function FamilyScreen() {
               </View>
 
               <BlurView intensity={24} tint="dark" style={styles.heroStats}>
-                <HeroStat icon="book.closed.fill" value={`${stats.monthCount}`} unit="笔" label="本月已记账" />
+                <HeroStat
+                  icon="book.closed.fill"
+                  value={`${stats.monthCount}`}
+                  unit={t('common.countUnit')}
+                  label={t('family.monthRecorded')}
+                />
                 <View style={styles.heroStatDivider} />
-                <HeroStat icon="flame.fill" value={`${stats.streak}`} unit="天" label="已连续记账" />
+                <HeroStat
+                  icon="flame.fill"
+                  value={`${stats.streak}`}
+                  unit={t('common.dayUnit')}
+                  label={t('family.streak')}
+                />
                 <View style={styles.heroStatDivider} />
-                <HeroStat icon="calendar" value={createdLabel} label="创建家庭" />
+                <HeroStat icon="calendar" value={createdLabel} label={t('family.createdAt')} />
               </BlurView>
             </View>
 
@@ -404,22 +418,39 @@ export default function FamilyScreen() {
 
             {/* 快捷功能 */}
             <View style={styles.section}>
-              <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>快捷功能</ThemedText>
+              <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>
+                {t('family.shortcuts')}
+              </ThemedText>
               <View style={styles.quickRow}>
-                <QuickTile icon="chart.pie.fill" title="预算管理" sub={budgetSub} onPress={() => setBudgetOpen(true)} />
-                <QuickTile icon="target" title="储蓄目标" sub={savingsSub} onPress={openSavingsList} />
-                <QuickTile icon="person.crop.circle.badge.plus" title="邀请家人" sub="加入家庭" onPress={onInvite} />
+                <QuickTile
+                  icon="chart.pie.fill"
+                  title={t('family.budget')}
+                  sub={budgetSub}
+                  onPress={() => setBudgetOpen(true)}
+                />
+                <QuickTile
+                  icon="target"
+                  title={t('family.savingsGoalsShort')}
+                  sub={savingsSub}
+                  onPress={openSavingsList}
+                />
+                <QuickTile
+                  icon="person.crop.circle.badge.plus"
+                  title={t('family.inviteShort')}
+                  sub={t('family.inviteSub')}
+                  onPress={onInvite}
+                />
                 <QuickTile
                   icon="bell.fill"
-                  title="家庭通知"
-                  sub={unreadCount > 0 ? `${unreadCount} 条未读` : '重要提醒'}
+                  title={t('family.notificationsShort')}
+                  sub={unreadCount > 0 ? t('common.unreadCount', { count: unreadCount }) : t('family.important')}
                   badge={unreadCount}
                   onPress={() => setNotifyOpen(true)}
                 />
                 <QuickTile
                   icon="square.grid.2x2.fill"
-                  title="分类管理"
-                  sub="增改分类"
+                  title={t('family.categories')}
+                  sub={t('family.categoriesSub')}
                   onPress={() => setCategoryOpen(true)}
                 />
               </View>
@@ -427,21 +458,23 @@ export default function FamilyScreen() {
 
             {/* 家庭管理 */}
             <View style={styles.section}>
-              <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>家庭管理</ThemedText>
+              <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>
+                {t('family.management')}
+              </ThemedText>
               <View style={[styles.card, { backgroundColor: palette.card }]}>
                 {isOwner ? (
                   <>
                     <ManageRow
                       icon="gearshape"
-                      title="家庭设置"
-                      sub="名称、口号、头像与封面"
+                      title={t('family.settings')}
+                      sub={t('family.settingsSub')}
                       onPress={() => setSettingsOpen(true)}
                     />
                     <View style={[styles.divider, { backgroundColor: palette.separator }]} />
                     <ManageRow
                       icon="trash"
-                      title="解散家庭"
-                      sub="解散后所有数据将永久删除，无法恢复"
+                      title={t('family.dissolve')}
+                      sub={t('family.dissolveSub')}
                       onPress={onDissolve}
                       danger
                     />
@@ -449,8 +482,8 @@ export default function FamilyScreen() {
                 ) : (
                   <ManageRow
                     icon="rectangle.portrait.and.arrow.right"
-                    title="退出家庭"
-                    sub="退出后将无法访问本家庭账本"
+                    title={t('family.leave')}
+                    sub={t('family.leaveSub')}
                     onPress={onLeave}
                     danger
                   />
@@ -466,7 +499,7 @@ export default function FamilyScreen() {
             style={[styles.header, { backgroundColor: palette.base, paddingTop: insets.top + Space[4] }, headerStyle]}
             onLayout={onHeaderLayout}
           >
-            <ThemedText style={[styles.title, { color: palette.textPrimary }]}>家庭</ThemedText>
+            <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('family.title')}</ThemedText>
             <HeaderSearchButton />
           </Animated.View>
         </View>
@@ -490,11 +523,11 @@ export default function FamilyScreen() {
       />
       <DangerConfirmSheet
         visible={dissolveOpen}
-        title="解散家庭"
-        message="解散后全部成员将被移出，所有记账数据将被永久删除，不可恢复。"
-        matchLabel={family ? `输入家庭名「${family.name}」以确认` : '输入家庭名以确认'}
+        title={t('family.dissolve')}
+        message={t('family.dissolveMessage')}
+        matchLabel={family ? t('family.dissolveMatch', { name: family.name }) : t('family.dissolveMatchEmpty')}
         matchValue={family?.name ?? ''}
-        slideLabel="滑动以确认解散"
+        slideLabel={t('family.dissolveSlide')}
         onConfirm={async () => {
           await dissolveM.mutateAsync();
         }}
@@ -591,11 +624,15 @@ function FamilyCollaborationCard({
   onViewLatest: () => void;
 }) {
   const palette = usePalette();
+  useLocalePreference();
   const hasTodayActivity = todayCount > 0 && latestTransaction != null;
   const hasMonthActivity = latestTransaction != null;
   const latestText = latestTransaction
-    ? `${latestRecorderName ?? '家人'}刚记了一笔${latestCategoryName ?? '流水'}`
-    : '暂无最近记录';
+    ? t('family.latestLine', {
+        who: latestRecorderName ?? t('common.familyMember'),
+        what: latestCategoryName ?? t('family.txnFallback'),
+      })
+    : t('family.latestFallback');
 
   return (
     <View style={styles.section}>
@@ -605,11 +642,13 @@ function FamilyCollaborationCard({
           onPress={onManage}
           style={styles.collaborationHeader}
           accessibilityRole="button"
-          accessibilityLabel="打开成员管理"
-          accessibilityHint="查看成员资料和家庭成员管理操作"
+          accessibilityLabel={t('family.openMembers')}
+          accessibilityHint={t('family.openMembersHint')}
         >
           <View style={styles.collaborationTitleRow}>
-            <ThemedText style={[styles.collaborationTitle, { color: palette.textPrimary }]}>家庭协作</ThemedText>
+            <ThemedText style={[styles.collaborationTitle, { color: palette.textPrimary }]}>
+              {t('family.collaboration')}
+            </ThemedText>
             <ThemedText style={[styles.collaborationCount, { color: palette.textTertiary }]}>
               {members.length}/{MAX_FAMILY_MEMBERS}
             </ThemedText>
@@ -617,7 +656,11 @@ function FamilyCollaborationCard({
           <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={16} />
         </Pressable>
 
-        <View style={styles.collaborationAvatars} accessibilityLabel={`家庭成员，共 ${members.length} 人`} accessible>
+        <View
+          style={styles.collaborationAvatars}
+          accessibilityLabel={t('family.membersA11y', { count: members.length })}
+          accessible
+        >
           {members.map((member) => (
             <UserAvatar key={member.id} avatarUrl={member.avatarUrl} nickname={member.nickname} size={44} />
           ))}
@@ -633,7 +676,7 @@ function FamilyCollaborationCard({
                 accessible={false}
               />
               <ThemedText style={[styles.collaborationEmptyTitle, { color: palette.textPrimary }]}>
-                今天还没有家庭流水
+                {t('family.emptyToday')}
               </ThemedText>
             </View>
           </View>
@@ -642,11 +685,23 @@ function FamilyCollaborationCard({
         {hasMonthActivity ? (
           <>
             <View style={[styles.collaborationStats, { backgroundColor: palette.elevated }]}>
-              <CollaborationStat label="本月参与" value={`${monthParticipantCount} 人`} color={palette.success} />
+              <CollaborationStat
+                label={t('family.monthJoin')}
+                value={`${monthParticipantCount} ${t('common.peopleUnit')}`}
+                color={palette.success}
+              />
               <View style={[styles.collaborationStatDivider, { backgroundColor: palette.separator }]} />
-              <CollaborationStat label="连续记账" value={`${myStreak} 天`} color={palette.warning} />
+              <CollaborationStat
+                label={t('family.streakShort')}
+                value={`${myStreak} ${t('common.dayUnit')}`}
+                color={palette.warning}
+              />
               <View style={[styles.collaborationStatDivider, { backgroundColor: palette.separator }]} />
-              <CollaborationStat label="本月笔数" value={`${myMonthCount} 笔`} color={palette.accent} />
+              <CollaborationStat
+                label={t('family.monthCount')}
+                value={`${myMonthCount} ${t('common.countUnit')}`}
+                color={palette.accent}
+              />
             </View>
             <View style={styles.collaborationRecentRow}>
               <View style={[styles.collaborationRecentDot, { backgroundColor: palette.accent }]} />
@@ -668,11 +723,11 @@ function FamilyCollaborationCard({
                 onPress={onViewLatest}
                 style={styles.collaborationViewAction}
                 accessibilityRole="button"
-                accessibilityLabel="查看最近一笔动态"
-                accessibilityHint="打开该笔家庭流水的详情"
+                accessibilityLabel={t('family.viewLatest')}
+                accessibilityHint={t('family.viewLatestHint')}
               >
                 <ThemedText style={[styles.collaborationViewActionText, { color: palette.accent }]}>
-                  查看动态
+                  {t('family.viewActivity')}
                 </ThemedText>
               </Pressable>
             </View>
@@ -681,7 +736,7 @@ function FamilyCollaborationCard({
 
         {!hasMonthActivity ? (
           <ThemedText style={[styles.collaborationEmptyDetail, { color: palette.textSecondary }]}>
-            这个月还没有记录，从今天开始吧
+            {t('family.emptyMonth')}
           </ThemedText>
         ) : null}
 
@@ -691,23 +746,25 @@ function FamilyCollaborationCard({
             onPress={onRecord}
             style={[styles.collaborationAction, { backgroundColor: palette.ink }]}
             accessibilityRole="button"
-            accessibilityLabel="记一笔"
-            accessibilityHint="打开记账面板，为家庭账本添加一笔流水"
+            accessibilityLabel={t('home.recordCta')}
+            accessibilityHint={t('home.recordA11yHint')}
           >
             <SymbolView name="square.and.pencil" tintColor={palette.onInk} size={17} />
-            <ThemedText style={[styles.collaborationActionText, { color: palette.onInk }]}>记一笔</ThemedText>
+            <ThemedText style={[styles.collaborationActionText, { color: palette.onInk }]}>
+              {t('home.recordCta')}
+            </ThemedText>
           </Pressable>
           {canInvite ? (
             <Pressable
               onPress={onInvite}
               style={[styles.collaborationInviteAction, { borderColor: palette.separator }]}
               accessibilityRole="button"
-              accessibilityLabel="邀请家人"
-              accessibilityHint="生成家庭邀请码"
+              accessibilityLabel={t('family.invite')}
+              accessibilityHint={t('family.inviteHint')}
             >
               <SymbolView name="person.crop.circle.badge.plus" tintColor={palette.textPrimary} size={17} />
               <ThemedText style={[styles.collaborationInviteActionText, { color: palette.textPrimary }]}>
-                邀请家人
+                {t('family.invite')}
               </ThemedText>
             </Pressable>
           ) : null}
@@ -756,6 +813,7 @@ function FamilyNowCard({
   onGoalDetail: (id: string) => void;
 }) {
   const level = budgetLevel(budgetPct);
+  useLocalePreference();
   const budgetColor = level === 'danger' ? palette.danger : level === 'warning' ? palette.warning : palette.accent;
   const goalPct =
     goal && goal.target_amount > 0 ? Math.min(100, Math.round((goal.saved_amount / goal.target_amount) * 100)) : 0;
@@ -763,18 +821,22 @@ function FamilyNowCard({
 
   return (
     <View style={styles.section}>
-      <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>家庭当下</ThemedText>
+      <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>{t('family.now')}</ThemedText>
       <View style={[styles.card, { backgroundColor: palette.card }]}>
         {/* 预算行 */}
         <Pressable style={styles.nowBlock} onPress={onBudget}>
           <View style={styles.nowHead}>
             <View style={styles.nowHeadL}>
               <SymbolView name="chart.pie.fill" tintColor={palette.accent} size={14} />
-              <ThemedText style={[styles.nowLabel, { color: palette.textPrimary }]}>本月预算</ThemedText>
+              <ThemedText style={[styles.nowLabel, { color: palette.textPrimary }]}>
+                {t('family.monthBudget')}
+              </ThemedText>
             </View>
             <View style={styles.nowHeadR}>
               {budgetSet ? (
-                <ThemedText style={[styles.nowMeta, { color: palette.textTertiary }]}>距月底 {daysLeft} 天</ThemedText>
+                <ThemedText style={[styles.nowMeta, { color: palette.textTertiary }]}>
+                  {t('family.daysToEnd', { days: daysLeft })}
+                </ThemedText>
               ) : null}
               <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
             </View>
@@ -800,13 +862,13 @@ function FamilyNowCard({
               </View>
               <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>
                 {budgetRemaining >= 0
-                  ? `剩 ${formatAmount(budgetRemaining)} 可用`
-                  : `已超支 ${formatAmount(-budgetRemaining)}`}
+                  ? t('common.leftoverOf', { amount: formatAmount(budgetRemaining) })
+                  : t('common.overBy', { amount: formatAmount(-budgetRemaining) })}
               </ThemedText>
             </>
           ) : (
             <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>
-              {isOwner ? '点此设置本月预算，全家一起看执行' : '尚未设置预算，可请户主设置'}
+              {isOwner ? t('family.setBudget') : t('family.askOwnerBudget')}
             </ThemedText>
           )}
         </Pressable>
@@ -841,8 +903,8 @@ function FamilyNowCard({
               <View style={[styles.nowFill, { backgroundColor: palette.accent, width: `${goalPct}%` }]} />
             </View>
             <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>
-              {goalRemain > 0 ? `距达成还差 ${formatAmount(goalRemain)}` : '已达成目标'}
-              {activeGoalCount > 1 ? ` · 另有 ${activeGoalCount - 1} 个目标` : ''}
+              {goalRemain > 0 ? t('family.goalRemain', { amount: formatAmount(goalRemain) }) : t('family.goalDone')}
+              {activeGoalCount > 1 ? t('family.moreGoals', { count: activeGoalCount - 1 }) : ''}
             </ThemedText>
           </Pressable>
         ) : (
@@ -850,11 +912,13 @@ function FamilyNowCard({
             <View style={styles.nowHead}>
               <View style={styles.nowHeadL}>
                 <SymbolView name="target" tintColor={palette.accent} size={14} />
-                <ThemedText style={[styles.nowLabel, { color: palette.textPrimary }]}>储蓄目标</ThemedText>
+                <ThemedText style={[styles.nowLabel, { color: palette.textPrimary }]}>
+                  {t('family.savingsGoals')}
+                </ThemedText>
               </View>
               <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
             </View>
-            <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>和家人一起定个攒钱目标</ThemedText>
+            <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>{t('family.startGoal')}</ThemedText>
           </Pressable>
         )}
       </View>
@@ -872,21 +936,20 @@ function InviteGuideCard({
   onGenerate: () => void;
   onScan: () => void;
 }) {
+  useLocalePreference();
   return (
     <View style={[styles.card, styles.invite, { backgroundColor: palette.bannerTint }]}>
       <View style={[styles.inviteIcon, { backgroundColor: palette.card }]}>
         <SymbolView name="person.2.fill" tintColor={palette.accent} size={26} />
       </View>
-      <ThemedText style={[styles.inviteTitle, { color: palette.textPrimary }]}>还只有你一个人</ThemedText>
-      <ThemedText style={[styles.inviteBody, { color: palette.textSecondary }]}>
-        邀请家人加入，一起记录每天的收支，账本自动共享给全家。
-      </ThemedText>
+      <ThemedText style={[styles.inviteTitle, { color: palette.textPrimary }]}>{t('family.soloTitle')}</ThemedText>
+      <ThemedText style={[styles.inviteBody, { color: palette.textSecondary }]}>{t('family.soloBody')}</ThemedText>
       <Pressable style={[styles.invitePrimary, { backgroundColor: palette.ink }]} onPress={onGenerate}>
         <SymbolView name="person.crop.circle.badge.plus" tintColor={palette.onInk} size={18} />
-        <ThemedText style={[styles.invitePrimaryText, { color: palette.onInk }]}>生成邀请码</ThemedText>
+        <ThemedText style={[styles.invitePrimaryText, { color: palette.onInk }]}>{t('family.generateCode')}</ThemedText>
       </Pressable>
       <Pressable onPress={onScan}>
-        <ThemedText style={[styles.inviteGhost, { color: palette.accent }]}>或 · 扫码加入他人家庭</ThemedText>
+        <ThemedText style={[styles.inviteGhost, { color: palette.accent }]}>{t('family.orScan')}</ThemedText>
       </Pressable>
     </View>
   );
@@ -911,7 +974,9 @@ function QuickTile({
     <Pressable onPress={onPress} style={[styles.quickTile, { backgroundColor: palette.card }]}>
       {/* 单色近黑图标：与黑按钮同语言，全页彩色只留给金额/进度/选中（DESIGN §2 黑白灰骨架）。 */}
       <SymbolView name={icon} tintColor={palette.textPrimary} size={26} />
-      <ThemedText style={[styles.quickTitle, { color: palette.textPrimary }]}>{title}</ThemedText>
+      <ThemedText style={[styles.quickTitle, { color: palette.textPrimary }]} numberOfLines={2}>
+        {title}
+      </ThemedText>
       <ThemedText style={[styles.quickSub, { color: palette.textTertiary }]} numberOfLines={1}>
         {sub}
       </ThemedText>
@@ -1156,7 +1221,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     overflow: 'visible',
   },
-  quickTitle: { fontSize: 13, lineHeight: 17, fontWeight: '600', marginTop: 2 },
+  quickTitle: { fontSize: 13, lineHeight: 16, fontWeight: '600', marginTop: 2, textAlign: 'center' },
   quickSub: { fontSize: 11, lineHeight: 14 },
   quickBadge: {
     position: 'absolute',

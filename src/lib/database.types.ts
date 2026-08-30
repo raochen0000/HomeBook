@@ -555,6 +555,7 @@ export type Database = {
           user_id: string;
           platform: string;
           provider: string;
+          locale: string;
           created_at: string;
           updated_at: string;
         };
@@ -563,6 +564,7 @@ export type Database = {
           user_id: string;
           platform: string;
           provider?: string;
+          locale?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -571,6 +573,7 @@ export type Database = {
           user_id?: string;
           platform?: string;
           provider?: string;
+          locale?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -824,6 +827,7 @@ export type Database = {
           p_token: string;
           p_platform: string;
           p_provider?: string;
+          p_locale?: string;
         };
         Returns: undefined;
       };

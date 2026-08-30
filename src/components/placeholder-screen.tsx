@@ -4,12 +4,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Space, usePalette } from '@/constants/design';
+import { t } from '@/i18n';
 
 /** 占位页：统一的标题栏 + 居中提示，供尚未实现的 Tab 复用。 */
 export function PlaceholderScreen({
   title,
   symbol,
-  note = '开发中',
+  note = t('common.developing'),
 }: {
   title: string;
   symbol: SymbolViewProps['name'];

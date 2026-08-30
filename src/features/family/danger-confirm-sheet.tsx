@@ -10,6 +10,7 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, Tex
 
 import { SlideToConfirm } from '@/components/ui/slide-to-confirm';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { t, useLocalePreference } from '@/i18n';
 
 export function DangerConfirmSheet({
   visible,
@@ -38,6 +39,7 @@ export function DangerConfirmSheet({
   onClose: () => void;
 }) {
   const palette = usePalette();
+  useLocalePreference();
   const [input, setInput] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,7 +115,7 @@ export function DangerConfirmSheet({
           </View>
 
           <Pressable onPress={handleClose} hitSlop={8} style={styles.cancel} disabled={pending}>
-            <Text style={{ color: palette.info, fontSize: 16 }}>取消</Text>
+            <Text style={{ color: palette.info, fontSize: 16 }}>{t('common.cancel')}</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>

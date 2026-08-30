@@ -22,6 +22,7 @@ import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-heade
 import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 import { MAX_FAMILY_MEMBERS } from '@/constants/family';
+import { alertOk, t, useLocalePreference } from '@/i18n';
 
 import { DangerConfirmSheet } from './danger-confirm-sheet';
 
@@ -52,6 +53,7 @@ export function MemberManageSheet({
 
 function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvite: () => void }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const profileQ = useMyProfile();
   const membershipsQ = useMemberships();
   const removeM = useRemoveMember();
@@ -71,8 +73,8 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: m.nickname,
-        message: `成员 · 加入于 ${joinLabel(m.joinedAt)}`,
-        options: ['转让户主给 TA', '移除成员', '取消'],
+        message: t('member.joined', { date: joinLabel(m.joinedAt) }),
+        options: [t('member.transferTo'), t('member.remove'), t('common.cancel')],
         destructiveButtonIndex: 1,
         cancelButtonIndex: 2,
       },
@@ -85,16 +87,16 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
 
   // 转让成功后追问是否顺便退出（PRD §7.3 AA2）；无论选哪个，转让后本页（户主专属）都应关闭。
   const askLeaveThenClose = () => {
-    Alert.alert('转让成功', '你已成为普通成员。要顺便退出这个家庭吗？你的历史记账会保留在家里。', [
-      { text: '留在家庭', style: 'cancel', onPress: onClose },
+    Alert.alert(t('member.transferOk'), t('member.transferOkBody'), [
+      { text: t('member.stay'), style: 'cancel', onPress: onClose },
       {
-        text: '退出家庭',
+        text: t('family.leave'),
         style: 'destructive',
         onPress: async () => {
           try {
             await leaveM.mutateAsync();
           } catch (e) {
-            Alert.alert('退出失败', (e as Error).message ?? String(e));
+            Alert.alert(t('family.leaveFailed'), (e as Error).message ?? String(e), alertOk());
           }
           onClose();
         },
@@ -106,13 +108,13 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
-        <SheetHeader title="成员管理" />
+        <SheetHeader title={t('family.members')} />
 
         <ScrollView contentContainerStyle={styles.content}>
           {/* 计数 + 邀请 */}
           <View style={styles.countRow}>
             <Text style={[styles.count, { color: palette.textSecondary }]}>
-              {members.length}/{MAX_FAMILY_MEMBERS} 位成员
+              {t('family.memberCountOf', { count: members.length, max: MAX_FAMILY_MEMBERS })}
             </Text>
             <Pressable
               onPress={onRequestInvite}
@@ -120,7 +122,9 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
               style={[styles.inviteBtn, { backgroundColor: palette.ink, opacity: full ? 0.4 : 1 }]}
             >
               <SymbolView name="person.crop.circle.badge.plus" tintColor={palette.onInk} size={16} />
-              <Text style={[styles.inviteText, { color: palette.onInk }]}>{full ? '已满员' : '邀请家人'}</Text>
+              <Text style={[styles.inviteText, { color: palette.onInk }]}>
+                {full ? t('member.full') : t('family.invite')}
+              </Text>
             </Pressable>
           </View>
 
@@ -137,7 +141,7 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
                       <View style={styles.nameRow}>
                         <Text style={[styles.name, { color: palette.textPrimary }]}>
                           {m.nickname}
-                          {m.userId === myId ? '（我）' : ''}
+                          {m.userId === myId ? t('member.meSuffix') : ''}
                         </Text>
                         <View style={[styles.roleBadge, { backgroundColor: palette.bannerTint }]}>
                           <Text
@@ -146,11 +150,13 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
                               { color: m.role === 'owner' ? palette.textPrimary : palette.textSecondary },
                             ]}
                           >
-                            {m.role === 'owner' ? '户主' : '成员'}
+                            {m.role === 'owner' ? t('common.owner') : t('common.member')}
                           </Text>
                         </View>
                       </View>
-                      <Text style={[styles.sub, { color: palette.textSecondary }]}>加入于 {joinLabel(m.joinedAt)}</Text>
+                      <Text style={[styles.sub, { color: palette.textSecondary }]}>
+                        {t('member.joinedAt', { date: joinLabel(m.joinedAt) })}
+                      </Text>
                     </View>
                     {actionable ? <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={14} /> : null}
                   </Pressable>
@@ -159,20 +165,18 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
             })}
           </View>
 
-          <Text style={[styles.hint, { color: palette.textTertiary }]}>
-            点其他成员可转让户主或移除。被移除者的历史记账会保留在家里。
-          </Text>
+          <Text style={[styles.hint, { color: palette.textTertiary }]}>{t('member.manageHint')}</Text>
         </ScrollView>
       </SafeAreaView>
 
       {/* 移除二次确认 */}
       <DangerConfirmSheet
         visible={!!removeTarget}
-        title={removeTarget ? `移除「${removeTarget.nickname}」` : ''}
-        message="移除后 TA 将无法访问本家庭账本；TA 已记录的流水会保留在家里。"
-        matchLabel={removeTarget ? `输入对方昵称「${removeTarget.nickname}」以确认` : ''}
+        title={removeTarget ? t('member.removeTitle', { name: removeTarget.nickname }) : ''}
+        message={t('member.removeBody')}
+        matchLabel={removeTarget ? t('member.removeMatch', { name: removeTarget.nickname }) : ''}
         matchValue={removeTarget?.nickname ?? ''}
-        slideLabel="滑动以确认移除"
+        slideLabel={t('member.removeSlide')}
         onConfirm={async () => {
           if (removeTarget) await removeM.mutateAsync(removeTarget.userId);
         }}
@@ -182,11 +186,11 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
       {/* 转让二次确认 */}
       <DangerConfirmSheet
         visible={!!transferTarget}
-        title={transferTarget ? `转让户主给「${transferTarget.nickname}」` : ''}
-        message="转让后你将变成普通成员，对方获得家庭管理权。此操作不可撤销。"
-        matchLabel={transferTarget ? `输入对方昵称「${transferTarget.nickname}」以确认` : ''}
+        title={transferTarget ? t('member.transferTitle', { name: transferTarget.nickname }) : ''}
+        message={t('member.transferBody')}
+        matchLabel={transferTarget ? t('member.transferMatch', { name: transferTarget.nickname }) : ''}
         matchValue={transferTarget?.nickname ?? ''}
-        slideLabel="滑动以确认转让"
+        slideLabel={t('member.transferSlide')}
         onConfirm={async () => {
           if (transferTarget) await transferM.mutateAsync(transferTarget.userId);
         }}

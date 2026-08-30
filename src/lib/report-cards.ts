@@ -8,6 +8,8 @@
  * 这样将来加卡不必迁移旧数据，老用户自动在末尾看到新卡。
  */
 
+import { t } from '@/i18n/instance';
+
 export type ReportCardId =
   | 'overview'
   | 'budget'
@@ -28,31 +30,30 @@ export type ReportCardId =
 
 export type ReportCardMeta = {
   id: ReportCardId;
-  title: string;
   /** SF Symbol 名（管理页图标）。 */
   icon: string;
   /** 锁定卡：强制常驻置顶、不可隐藏、不可拖动（仅「收支概览」）。 */
   locked?: boolean;
 };
 
-/** 默认顺序 = 报表页现渲染序。 */
+/** 默认顺序 = 报表页现渲染序。标题走 `reportCardTitle`，不在此写死中文。 */
 export const REPORT_CARDS: ReportCardMeta[] = [
-  { id: 'overview', title: '收支概览', icon: 'square.split.2x2.fill', locked: true },
-  { id: 'budget', title: '本月预算', icon: 'target' },
-  { id: 'insights', title: '财务洞察', icon: 'sparkles' },
-  { id: 'income_target', title: '收入目标', icon: 'flag.checkered' },
-  { id: 'income_expense', title: '收支对比', icon: 'chart.bar.xaxis' },
-  { id: 'expense_trend', title: '支出趋势', icon: 'chart.line.uptrend.xyaxis' },
-  { id: 'income_trend', title: '收入趋势', icon: 'chart.bar.fill' },
-  { id: 'expense_category', title: '支出分类占比', icon: 'chart.pie.fill' },
-  { id: 'category_mom', title: '分类环比', icon: 'arrow.up.arrow.down' },
-  { id: 'member', title: '成员贡献', icon: 'person.2.fill' },
-  { id: 'top_expenses', title: '大额支出 Top 5', icon: 'flame.fill' },
-  { id: 'income_structure', title: '收入结构', icon: 'arrow.down.circle.fill' },
-  { id: 'balance_waterfall', title: '结余拆解', icon: 'waterfall' },
-  { id: 'savings_rate', title: '储蓄率趋势', icon: 'percent' },
-  { id: 'savings_goals', title: '存钱目标', icon: 'scope' },
-  { id: 'more_stats', title: '更多统计', icon: 'chart.xyaxis.line' },
+  { id: 'overview', icon: 'square.split.2x2.fill', locked: true },
+  { id: 'budget', icon: 'target' },
+  { id: 'insights', icon: 'sparkles' },
+  { id: 'income_target', icon: 'flag.checkered' },
+  { id: 'income_expense', icon: 'chart.bar.xaxis' },
+  { id: 'expense_trend', icon: 'chart.line.uptrend.xyaxis' },
+  { id: 'income_trend', icon: 'chart.bar.fill' },
+  { id: 'expense_category', icon: 'chart.pie.fill' },
+  { id: 'category_mom', icon: 'arrow.up.arrow.down' },
+  { id: 'member', icon: 'person.2.fill' },
+  { id: 'top_expenses', icon: 'flame.fill' },
+  { id: 'income_structure', icon: 'arrow.down.circle.fill' },
+  { id: 'balance_waterfall', icon: 'waterfall' },
+  { id: 'savings_rate', icon: 'percent' },
+  { id: 'savings_goals', icon: 'scope' },
+  { id: 'more_stats', icon: 'chart.xyaxis.line' },
 ];
 
 /** 全局至少展示的卡片数（含锁定卡）。 */
@@ -63,6 +64,29 @@ export const TOTAL_CARDS = REPORT_CARDS.length;
 
 const CARD_BY_ID = new Map(REPORT_CARDS.map((c) => [c.id, c]));
 const LOCKED_IDS = new Set(REPORT_CARDS.filter((c) => c.locked).map((c) => c.id));
+
+const CARD_TITLE_KEY: Record<ReportCardId, string> = {
+  overview: 'report.overview',
+  budget: 'report.monthBudget',
+  insights: 'report.insights',
+  income_target: 'report.incomeTarget',
+  income_expense: 'report.incomeExpense',
+  expense_trend: 'report.expenseTrend',
+  income_trend: 'report.incomeTrend',
+  expense_category: 'report.expenseCategory',
+  category_mom: 'report.categoryMom',
+  member: 'report.member',
+  top_expenses: 'report.topExpenses',
+  income_structure: 'report.incomeStructure',
+  balance_waterfall: 'report.balanceWaterfall',
+  savings_rate: 'report.savingsRate',
+  savings_goals: 'report.savingsGoals',
+  more_stats: 'report.moreStats',
+};
+
+export function reportCardTitle(id: ReportCardId): string {
+  return t(CARD_TITLE_KEY[id]);
+}
 
 export function reportCardMeta(id: ReportCardId): ReportCardMeta {
   return CARD_BY_ID.get(id)!;

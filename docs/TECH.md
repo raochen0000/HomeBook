@@ -35,7 +35,8 @@
 | 动画 / 手势     | **react-native-reanimated** + **react-native-gesture-handler** | 滑动确认控件、庆祝动效                                                                                                                                                                                            |
 | 图表            | **react-native-svg 自绘**（见 §3）                             | 报表环形 / 条形 / 折线 / 双柱 / 瀑布 / 热力图，全部手绘覆盖                                                                                                                                                       |
 | 安全存储        | **expo-secure-store**                                          | Token / 登录态                                                                                                                                                                                                    |
-| 推送            | **Expo Push → APNs**                                           | 第一版仅保障 iOS；阿里云 FC 定时轮询投递，Android 厂商渠道不在本期范围（见 §7.5）                                                                                                                                |
+| 推送            | **Expo Push → APNs**                                           | 第一版仅保障 iOS；阿里云 FC 定时轮询投递，标题/正文按 `device_tokens.locale` 选中英模板（见 §7.5）                                                                                                                                |
+| 界面语言        | **expo-localization + i18next + react-i18next**                | 简体中文 / English；本机偏好对齐深色模式；缺 key 回落中文。`expo-localization` plugin 需新二进制                                                                                                                                |
 | OTA 热更新      | **EAS Update（expo-updates）**                                 | JS 层 bug 免审核直推                                                                                                                                                                                              |
 | 后端基座        | **阿里云境内托管的 Supabase**（RDS 内置 / 自建）               | Postgres + Auth + Realtime + Storage + Edge Functions + pg_cron（见 §7）                                                                                                                                          |
 | 后端区域服务    | **阿里云短信 / FC / OSS / CDN / SLS**                          | 短信验证码、推送投递、对象存储、加速、日志（见 §7.2）                                                                                                                                                             |
@@ -227,7 +228,7 @@ git --version
 
 - **方案**：客户端获取 Expo Push Token；阿里云 FC 定时轮询待投递通知并调用 Expo Push，由 Expo 转交 **APNs**。
 - **范围**：第一版只保障 iOS。Android 厂商渠道、通知渠道配置及适配均不在本期范围。
-- **可靠性**：授权后立即登记 token，前台恢复与 token 轮换会同步；FC 仅在 Expo 接受后写 `pushed_at`，临时失败按 1 分钟至 1 小时退避重试。推送点按（含冷启动）仅跳转 App 内白名单路由。
+- **可靠性**：授权后立即登记 token（含当前界面 `locale`），前台恢复、token 轮换与切语言会同步；FC 按令牌 `locale` 选中/英模板，仅在 Expo 接受后写 `pushed_at`，临时失败按 1 分钟至 1 小时退避重试。推送点按（含冷启动）仅跳转 App 内白名单路由。
 - **上线验收**：发布前验证 Apple Push Key、Bundle ID、Expo 项目、FC 环境变量和真机端到端到达；未完成验收前，不将远程推送视为已上线能力。
 
 ### 7.6 合规（需专业确认，非法律意见）

@@ -1,0 +1,8 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "家账",
+    "NSCameraUsageDescription": "允许「家账」使用相机以扫描邀请二维码加入家庭",
+    "NSPhotoLibraryUsageDescription": "允许「家账」访问相册，以选择头像 / 家庭封面或保存邀请二维码",
+    "NSPhotoLibraryAddUsageDescription": "允许「家账」将邀请二维码保存到相册"
+  }
+}

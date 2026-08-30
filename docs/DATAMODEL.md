@@ -301,7 +301,7 @@ erDiagram
 
 ### 5.7 DEVICE_TOKEN（推送设备令牌 · PRD §18.3.3 层级二）
 
-> 每台设备一行的推送令牌，供服务端投递侧按 `notification_preferences` 决定后向该用户的设备发系统推送。**一台设备一行**（`token` 作主键）：同设备换登录用户时该行改挂新 `user_id`（设备只推给当前登录者）。客户端登录后注册、登出/注销时注销，均走 **SECURITY DEFINER RPC**（`register_device_token` / `unregister_device_token`，绕开「换用户认领他人行」的 RLS 死角）；投递侧以 `service_role` 读。**层级二 · 令牌获取（`getExpoPushTokenAsync` / APNs）依赖付费 Apple Developer + Push 能力**，故本表 + RPC 的落库链路先建、由客户端 `PUSH_DELIVERY_ENABLED` 开关灰度（默认关，配好 APNs 后开）。
+> 每台设备一行的推送令牌，供服务端投递侧按 `notification_preferences` 决定后向该用户的设备发系统推送。**一台设备一行**（`token` 作主键）：同设备换登录用户时该行改挂新 `user_id`（设备只推给当前登录者）。客户端登录后注册、登出/注销时注销，均走 **SECURITY DEFINER RPC**（`register_device_token(p_token, p_platform, p_provider, p_locale)` / `unregister_device_token`，`p_locale` 有 default，旧三参数调用仍合法）；投递侧以 `service_role` 读。**层级二 · 令牌获取（`getExpoPushTokenAsync` / APNs）依赖付费 Apple Developer + Push 能力**，故本表 + RPC 的落库链路先建、由客户端 `PUSH_DELIVERY_ENABLED` 开关灰度（默认关，配好 APNs 后开）。
 
 | 字段         | 类型      | 约束                              | 说明                                              |
 | ------------ | --------- | --------------------------------- | ------------------------------------------------- |
@@ -309,6 +309,7 @@ erDiagram
 | `user_id`    | UUID      | FK→USER, not null, on delete cascade | 当前登录者（注销随账号级联删除）               |
 | `platform`   | text      | `ios` / `android`                 | 设备平台                                          |
 | `provider`   | text      | `expo` / `apns`，default `expo`   | 令牌类型（Expo 推送服务 / 直连 APNs）             |
+| `locale`     | text      | not null, default `zh`, in(`zh`,`en`) | 该设备界面语言；`push-fc` 按此选中/英模板 |
 | `created_at` / `updated_at` | timestamp |                     |                                                   |
 
 **RLS**：仅 `select` 本人策略（`user_id = auth.uid()`，便于客户端自查）；写（注册/注销）只走上述两个 RPC，投递读走 `service_role`。

@@ -23,14 +23,23 @@ import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useAvatarTints, usePalette, useSheetPalette } from '@/constants/design';
 import { MAX_FAMILY_MEMBERS } from '@/constants/family';
+import { t, useLocalePreference } from '@/i18n';
 
 /** 邀请码异常态 → 人话提示（status=ok 不在此列）。 */
-const STATUS_MESSAGE: Record<Exclude<FamilyPreview['status'], 'ok'>, string> = {
-  invalid: '邀请码无效或已失效，请向家人确认后重试',
-  expired: '邀请码已过期，请让家人刷新后再发你',
-  full: `这个家庭成员已满（${MAX_FAMILY_MEMBERS} 人），暂时无法加入`,
-  already_member: '你已经在这个家了',
-};
+function statusMessage(status: Exclude<FamilyPreview['status'], 'ok'>): string {
+  switch (status) {
+    case 'invalid':
+      return t('invite.invalid');
+    case 'expired':
+      return t('invite.expired');
+    case 'full':
+      return t('invite.full', { max: MAX_FAMILY_MEMBERS });
+    case 'already_member':
+      return t('invite.already');
+    default:
+      return t('invite.cannotJoin');
+  }
+}
 
 export function ScanSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
@@ -42,6 +51,7 @@ export function ScanSheet({ visible, onClose }: { visible: boolean; onClose: () 
 
 function ScanBody({ onClose }: { onClose: () => void }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const [permission, requestPermission] = useCameraPermissions();
   const previewM = usePreviewFamily();
   const joinM = useJoinFamily();
@@ -67,7 +77,11 @@ function ScanBody({ onClose }: { onClose: () => void }) {
         setPreviewCode(c);
         setPreview(result);
       } else {
-        setError(STATUS_MESSAGE[result.status as Exclude<FamilyPreview['status'], 'ok'>] ?? '无法加入该家庭');
+        setError(
+          result.status === 'ok'
+            ? t('invite.cannotJoin')
+            : statusMessage(result.status as Exclude<FamilyPreview['status'], 'ok'>),
+        );
         handledRef.current = false; // 允许重扫 / 重提交
       }
     } catch (e) {
@@ -95,9 +109,9 @@ function ScanBody({ onClose }: { onClose: () => void }) {
   const confirmJoin = (impact: JoinImpact | undefined) => {
     if (impact === 'blocked_owner') return; // 按钮本应禁用，双保险
     if (impact === 'delete_origin') {
-      Alert.alert('加入后将删除原家庭', '你当前的单人家庭及全部记账数据会被永久删除，且不可恢复。确定加入新家庭吗？', [
-        { text: '取消', style: 'cancel' },
-        { text: '确定加入', style: 'destructive', onPress: () => void doJoin() },
+      Alert.alert(t('invite.soloWipeTitle'), t('invite.soloWipeBody'), [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('invite.confirmJoin'), style: 'destructive', onPress: () => void doJoin() },
       ]);
       return;
     }
@@ -116,7 +130,7 @@ function ScanBody({ onClose }: { onClose: () => void }) {
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（DESIGN §9.9）：预览子状态显示返回；关闭靠下滑手势 */}
-        <SheetHeader title="加入家庭" onBack={preview ? backToInput : undefined} />
+        <SheetHeader title={t('family.join')} onBack={preview ? backToInput : undefined} />
         {/* 内容非滚动，用占位撑开标题区高度 */}
         <View style={styles.headerSpacer} />
 
@@ -129,14 +143,14 @@ function ScanBody({ onClose }: { onClose: () => void }) {
           />
         ) : manual ? (
           <View style={styles.manualWrap}>
-            <Text style={[styles.label, { color: palette.textSecondary }]}>输入家人给你的邀请码</Text>
+            <Text style={[styles.label, { color: palette.textSecondary }]}>{t('invite.enterCode')}</Text>
             <TextInput
               style={[styles.input, { backgroundColor: palette.card, color: palette.textPrimary }]}
-              placeholder="如 K8QMRT"
+              placeholder={t('invite.codePlaceholder')}
               placeholderTextColor={palette.textTertiary}
               value={code}
-              onChangeText={(t) => {
-                setCode(t);
+              onChangeText={(txn) => {
+                setCode(txn);
                 setError(null);
               }}
               autoCapitalize="characters"
@@ -158,11 +172,11 @@ function ScanBody({ onClose }: { onClose: () => void }) {
               {previewM.isPending ? (
                 <ActivityIndicator color={palette.onInk} />
               ) : (
-                <Text style={[styles.primaryText, { color: palette.onInk }]}>下一步</Text>
+                <Text style={[styles.primaryText, { color: palette.onInk }]}>{t('invite.next')}</Text>
               )}
             </Pressable>
             <Pressable onPress={() => setManual(false)} hitSlop={8} style={styles.switchBtn} disabled={busy}>
-              <Text style={{ color: palette.info, fontSize: 15 }}>改用扫码</Text>
+              <Text style={{ color: palette.info, fontSize: 15 }}>{t('invite.useScan')}</Text>
             </Pressable>
           </View>
         ) : (
@@ -183,15 +197,15 @@ function ScanBody({ onClose }: { onClose: () => void }) {
               </View>
             ) : (
               <View style={styles.permWrap}>
-                <Text style={[styles.label, { color: palette.textSecondary }]}>扫码需要相机权限</Text>
+                <Text style={[styles.label, { color: palette.textSecondary }]}>{t('invite.cameraPermission')}</Text>
                 <Pressable onPress={requestPermission} style={[styles.primary, { backgroundColor: palette.ink }]}>
-                  <Text style={[styles.primaryText, { color: palette.onInk }]}>开启相机</Text>
+                  <Text style={[styles.primaryText, { color: palette.onInk }]}>{t('invite.enableCamera')}</Text>
                 </Pressable>
               </View>
             )}
             {error ? <Text style={[styles.error, { color: palette.danger }]}>{error}</Text> : null}
             <Pressable onPress={() => setManual(true)} hitSlop={8} style={styles.switchBtn}>
-              <Text style={{ color: palette.info, fontSize: 15 }}>手动输入邀请码</Text>
+              <Text style={{ color: palette.info, fontSize: 15 }}>{t('invite.enterManually')}</Text>
             </Pressable>
           </View>
         )}
@@ -204,11 +218,11 @@ function ScanBody({ onClose }: { onClose: () => void }) {
 function impactBanner(impact: JoinImpact | undefined): { text: string; danger?: boolean } | null {
   switch (impact) {
     case 'delete_origin':
-      return { text: '⚠ 加入后，你当前的单人家庭及全部记账数据将被永久删除，不可恢复。' };
+      return { text: t('invite.wipeWarn') };
     case 'auto_leave':
-      return { text: '⚠ 加入后，你将自动退出当前家庭；你的历史记账会保留在原家庭。' };
+      return { text: t('invite.leaveWarn') };
     case 'blocked_owner':
-      return { text: '⛔ 你是当前家庭的户主，需先转让户主或解散家庭后才能加入。', danger: true };
+      return { text: t('invite.ownerBlock'), danger: true };
     default:
       return null;
   }
@@ -226,6 +240,7 @@ function PreviewCard({
   onJoin: () => void;
 }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const avatarTints = useAvatarTints();
   const family = preview.family!;
   const banner = impactBanner(preview.impact);
@@ -260,7 +275,9 @@ function PreviewCard({
           tint={avatarTints[0]}
           size={28}
         />
-        <Text style={[styles.ownerText, { color: palette.textSecondary }]}>户主 · {family.owner.nickname}</Text>
+        <Text style={[styles.ownerText, { color: palette.textSecondary }]}>
+          {t('invite.ownerMe', { name: family.owner.nickname })}
+        </Text>
       </View>
 
       {/* 成员头像堆叠 + 人数 */}
@@ -273,7 +290,7 @@ function PreviewCard({
           ))}
         </View>
         <Text style={[styles.memberCount, { color: palette.textSecondary }]}>
-          共 {family.member_count}/{family.max_members} 人
+          {t('invite.peopleCount', { count: family.member_count, max: family.max_members })}
         </Text>
       </View>
 
@@ -301,7 +318,7 @@ function PreviewCard({
           <ActivityIndicator color={palette.onInk} />
         ) : (
           <Text style={[styles.primaryText, { color: palette.onInk }]}>
-            {blocked ? '无法加入' : `加入「${family.name}」`}
+            {blocked ? t('invite.cannotJoinBtn') : t('invite.joinNamed', { name: family.name })}
           </Text>
         )}
       </Pressable>

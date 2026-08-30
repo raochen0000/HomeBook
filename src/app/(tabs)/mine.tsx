@@ -17,7 +17,8 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useMyProfile } from '@/api';
-import { toast } from '@/components/toast';
+import { alertOk, t, useLocalePreference } from '@/i18n';
+import { registerPushDevice } from '@/features/notifications/use-push-registration';
 import { UserAvatar } from '@/components/user-avatar';
 import { Space, usePalette } from '@/constants/design';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
@@ -30,9 +31,9 @@ const APP_VERSION = 'v1.0.0';
 
 /** +86 手机号脱敏为「138 **** 5678」；无号时占位。 */
 function maskPhone(e164?: string | null): string {
-  if (!e164) return '未绑定';
+  if (!e164) return t('common.notBound');
   const local = e164.replace(/^\+?86/, '');
-  if (local.length !== 11) return '已绑定';
+  if (local.length !== 11) return t('common.bound');
   return `${local.slice(0, 3)} **** ${local.slice(7)}`;
 }
 
@@ -47,21 +48,22 @@ export default function MineScreen() {
   const { session } = useSession();
   const { data: profile } = useMyProfile();
   const { preference: themePreference, setPreference: setThemePreference } = useThemePreference();
+  const { locale, setLocale } = useLocalePreference();
 
   const avatarFiles = useAvatarFiles(profile ? [{ id: profile.id, avatar_url: profile.avatar_url }] : []);
   const avatarUri = profile ? (avatarFiles.get(profile.id) ?? null) : null;
 
   const onSignOut = () => {
-    Alert.alert('退出登录', '确定要退出当前账号吗？', [
-      { text: '取消', style: 'cancel' },
+    Alert.alert(t('settings.signOutTitle'), t('settings.signOutConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: '退出',
+        text: t('settings.signOut'),
         style: 'destructive',
         onPress: async () => {
           try {
             await signOut();
           } catch (e) {
-            Alert.alert('退出失败', (e as Error).message ?? String(e));
+            Alert.alert(t('settings.signOutFailed'), (e as Error).message ?? String(e), alertOk());
           }
         },
       },
@@ -85,16 +87,16 @@ export default function MineScreen() {
             <RNHostView matchContents>
               <UserAvatar
                 avatarUrl={avatarUri ?? profile?.avatar_url}
-                nickname={profile?.nickname ?? '用户'}
+                nickname={profile?.nickname ?? t('common.user')}
                 size={60}
               />
             </RNHostView>
             <VStack alignment="leading" spacing={Space[1]}>
               <Text modifiers={[font({ size: 22, weight: 'semibold' }), foregroundColor(palette.textPrimary)]}>
-                {profile?.nickname ?? '小满'}
+                {profile?.nickname ?? t('common.user')}
               </Text>
               <Text modifiers={[font({ size: 14 }), foregroundColor(palette.textSecondary)]}>
-                手机号：{maskPhone(session?.user.phone)}
+                {t('settings.phoneLine', { phone: maskPhone(session?.user.phone) })}
               </Text>
             </VStack>
             <Spacer />
@@ -104,48 +106,65 @@ export default function MineScreen() {
 
         {/* 卡一 记账与数据 */}
         <Section>
-          <Row icon="slider.horizontal.3" label="记账设置" onPress={() => router.push('/settings/record' as Href)} />
-          <Row icon="square.and.arrow.down" label="导出数据" onPress={() => router.push('/export' as Href)} />
+          <Row
+            icon="slider.horizontal.3"
+            label={t('settings.recordSettings')}
+            onPress={() => router.push('/settings/record' as Href)}
+          />
+          <Row
+            icon="square.and.arrow.down"
+            label={t('settings.export')}
+            onPress={() => router.push('/export' as Href)}
+          />
         </Section>
 
         {/* 卡二 通用 */}
         <Section>
-          <Row icon="bell.fill" label="通知设置" onPress={() => router.push('/settings/notifications' as Href)} />
+          <Row
+            icon="bell.fill"
+            label={t('settings.notifications')}
+            onPress={() => router.push('/settings/notifications' as Href)}
+          />
           <MenuRow
             icon="moon.fill"
-            label="深色模式"
+            label={t('settings.appearance')}
             selection={themePreference}
             tintColor={palette.textSecondary}
             onSelectionChange={(value) => setThemePreference(value as ThemePreference)}
             options={[
-              { value: 'system', label: '跟随系统' },
-              { value: 'light', label: '浅色' },
-              { value: 'dark', label: '深色' },
+              { value: 'system', label: t('settings.appearanceSystem') },
+              { value: 'light', label: t('settings.appearanceLight') },
+              { value: 'dark', label: t('settings.appearanceDark') },
             ]}
           />
-          {/* 语言（本轮占位）：selection 固定「简体中文」，选 English 仅提示暂不支持。 */}
           <MenuRow
             icon="globe"
-            label="语言"
-            selection="zh"
+            label={t('settings.language')}
+            selection={locale}
             tintColor={palette.textSecondary}
             onSelectionChange={(v) => {
-              if (v !== 'zh') toast.info('暂仅支持简体中文');
+              if (v !== 'zh' && v !== 'en') return;
+              setLocale(v);
+              void registerPushDevice().catch(() => {});
             }}
             options={[
-              { value: 'zh', label: '简体中文' },
-              { value: 'en', label: 'English' },
+              { value: 'zh', label: t('settings.languageZh') },
+              { value: 'en', label: t('settings.languageEn') },
             ]}
           />
         </Section>
 
         {/* 卡三 帮助与关于 */}
         <Section>
-          <Row icon="questionmark.circle.fill" label="帮助中心" onPress={() => router.push('/help' as Href)} />
-          <Row icon="text.bubble.fill" label="意见反馈" onPress={() => router.push('/feedback' as Href)} />
+          <Row icon="questionmark.circle.fill" label={t('help.title')} onPress={() => router.push('/help' as Href)} />
+          <Row
+            icon="text.bubble.fill"
+            label={t('settings.feedback')}
+            onPress={() => router.push('/feedback' as Href)}
+          />
           <Row
             icon="info.circle.fill"
-            label="关于家账"
+            label={t('settings.about')}
             value={APP_VERSION}
             onPress={() => router.push('/about' as Href)}
           />
@@ -157,7 +176,7 @@ export default function MineScreen() {
             <HStack alignment="center" modifiers={[contentShape(shapes.rectangle()), onTapGesture(onSignOut)]}>
               <Spacer />
               <Text modifiers={[font({ size: 17, weight: 'semibold' }), foregroundColor(palette.danger)]}>
-                退出登录
+                {t('settings.signOut')}
               </Text>
               <Spacer />
             </HStack>

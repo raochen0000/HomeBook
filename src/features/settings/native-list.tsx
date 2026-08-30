@@ -21,6 +21,7 @@ import {
 import type { ComponentProps, ReactNode } from 'react';
 
 import { Space, usePalette } from '@/constants/design';
+import { useLocalePreference } from '@/i18n';
 
 type IconName = ComponentProps<typeof Image>['systemName'];
 type Modifiers = ComponentProps<typeof List>['modifiers'];
@@ -28,8 +29,9 @@ const SETTINGS_ROW_ICON_SIZE = 19;
 
 /** 原生 insetGrouped List 外壳；extraModifiers 供首页式滚动折叠头（scrollGeometry）用。 */
 export function SettingsList({ children, extraModifiers }: { children: ReactNode; extraModifiers?: Modifiers }) {
+  const { locale } = useLocalePreference();
   return (
-    <Host style={{ flex: 1 }}>
+    <Host key={locale} style={{ flex: 1 }}>
       <List modifiers={[listStyle('insetGrouped'), ...(extraModifiers ?? [])]}>{children}</List>
     </Host>
   );

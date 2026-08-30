@@ -5,6 +5,7 @@
  */
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { t } from '@/i18n';
 import { Radius, Space, usePalette } from '@/constants/design';
 
 export function FirstRecordCelebration({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -14,10 +15,10 @@ export function FirstRecordCelebration({ visible, onClose }: { visible: boolean;
       <View style={styles.scrim}>
         <View style={[styles.card, { backgroundColor: palette.elevated, borderColor: palette.separator }]}>
           <Text style={styles.emoji}>🎉</Text>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>记下了第一笔</Text>
-          <Text style={[styles.sub, { color: palette.textSecondary }]}>往后每一笔，都是一家人生活的印记。</Text>
+          <Text style={[styles.title, { color: palette.textPrimary }]}>{t('home.firstTitle')}</Text>
+          <Text style={[styles.sub, { color: palette.textSecondary }]}>{t('home.firstBody')}</Text>
           <Pressable onPress={onClose} style={[styles.btn, { backgroundColor: palette.ink }]}>
-            <Text style={[styles.btnText, { color: palette.onInk }]}>好的</Text>
+            <Text style={[styles.btnText, { color: palette.onInk }]}>{t('common.ok')}</Text>
           </Pressable>
         </View>
       </View>

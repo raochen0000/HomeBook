@@ -7,6 +7,8 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { fromI18nLanguage } from '@/i18n/locale';
+import { i18n } from '@/i18n/instance';
 import { supabase } from '@/lib/supabase';
 
 export type DevicePlatform = 'ios' | 'android';
@@ -25,6 +27,7 @@ export async function registerDeviceToken(
     p_token: token,
     p_platform: platform,
     p_provider: provider,
+    p_locale: fromI18nLanguage(i18n.language),
   });
   if (error) throw error;
 }

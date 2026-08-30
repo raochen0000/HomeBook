@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { singleLineTextInputStyle } from '@/constants/text-input';
+import { t, useLocalePreference } from '@/i18n';
 import { updatePassword, useSession } from '@/lib/auth';
 
 /** 密码最短长度（与 Supabase Auth 最小长度一致）。 */
@@ -39,22 +40,23 @@ function passwordErrorText(err: unknown): string {
   const e = err as { status?: number; message?: string; name?: string; code?: string };
   const msg = (e?.message ?? '').toLowerCase();
   if (e?.code === 'same_password' || msg.includes('should be different')) {
-    return '新密码不能与当前密码相同';
+    return t('auth.passwordSame');
   }
   if (e?.code === 'weak_password' || msg.includes('weak') || msg.includes('password should')) {
-    return '密码强度不够，请换一个更复杂的密码';
+    return t('auth.passwordTooWeak');
   }
   const down =
     e?.status === 0 ||
     e?.name === 'AuthRetryableFetchError' ||
     msg.includes('network request failed') ||
     msg.includes('failed to fetch');
-  if (down) return '网络异常，请稍后重试';
+  if (down) return t('auth.networkRetry');
   return e?.message ?? String(err);
 }
 
 export default function PasswordScreen() {
   const palette = usePalette();
+  useLocalePreference();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { session } = useSession();
@@ -73,14 +75,14 @@ export default function PasswordScreen() {
 
   const onSave = async () => {
     if (!canSave) {
-      if (!lengthOk) toast.error(`密码至少 ${MIN_LEN} 位`);
-      else if (!matchOk) toast.error('两次输入的密码不一致');
+      if (!lengthOk) toast.error(t('auth.passwordMin'));
+      else if (!matchOk) toast.error(t('auth.passwordMismatch'));
       return;
     }
     setBusy(true);
     try {
       await updatePassword(pwd);
-      toast.success('密码已更新');
+      toast.success(t('auth.passwordUpdated'));
       setTimeout(() => router.back(), 700);
     } catch (err) {
       toast.error(passwordErrorText(err));
@@ -91,7 +93,7 @@ export default function PasswordScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <Stack.Screen options={{ headerShown: true, title: '修改密码' }} />
+      <Stack.Screen options={{ headerShown: true, title: t('account.password') }} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
           style={styles.flex}
@@ -99,7 +101,7 @@ export default function PasswordScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
         >
-          <Text style={[styles.sectionTitle, { color: palette.textPrimary }]}>设置新密码</Text>
+          <Text style={[styles.sectionTitle, { color: palette.textPrimary }]}>{t('account.setNewPassword')}</Text>
 
           {/* 新密码 */}
           <View style={[styles.field, { backgroundColor: palette.card }]}>
@@ -107,7 +109,7 @@ export default function PasswordScreen() {
             <View style={styles.fieldGap} />
             <TextInput
               style={[styles.input, { color: palette.textPrimary }]}
-              placeholder={`请输入新密码（至少 ${MIN_LEN} 位）`}
+              placeholder={t('account.newPasswordPlaceholder', { min: MIN_LEN })}
               placeholderTextColor={palette.textTertiary}
               value={pwd}
               onChangeText={setPwd}
@@ -121,7 +123,7 @@ export default function PasswordScreen() {
             <Pressable
               hitSlop={8}
               onPress={() => setShowPwd((v) => !v)}
-              accessibilityLabel={showPwd ? '隐藏密码' : '显示密码'}
+              accessibilityLabel={showPwd ? t('auth.hidePassword') : t('auth.showPasswordOnly')}
             >
               <SymbolView name={showPwd ? 'eye.slash' : 'eye'} tintColor={palette.textSecondary} size={18} />
             </Pressable>
@@ -133,7 +135,7 @@ export default function PasswordScreen() {
             <View style={styles.fieldGap} />
             <TextInput
               style={[styles.input, { color: palette.textPrimary }]}
-              placeholder="请再次输入新密码"
+              placeholder={t('account.confirmPasswordPlaceholder')}
               placeholderTextColor={palette.textTertiary}
               value={confirm}
               onChangeText={setConfirm}
@@ -152,7 +154,7 @@ export default function PasswordScreen() {
           {mismatch ? (
             <View style={styles.errorRow}>
               <SymbolView name="exclamationmark.circle" tintColor={palette.danger} size={13} />
-              <Text style={[styles.errorText, { color: palette.danger }]}>两次输入的密码不一致</Text>
+              <Text style={[styles.errorText, { color: palette.danger }]}>{t('auth.passwordMismatch')}</Text>
             </View>
           ) : null}
 
@@ -165,7 +167,7 @@ export default function PasswordScreen() {
             {busy ? (
               <ActivityIndicator color={palette.onInk} />
             ) : (
-              <Text style={[styles.primaryText, { color: palette.onInk }]}>保存密码</Text>
+              <Text style={[styles.primaryText, { color: palette.onInk }]}>{t('account.savePassword')}</Text>
             )}
           </Pressable>
 
@@ -173,9 +175,7 @@ export default function PasswordScreen() {
           <View style={styles.hintRow}>
             <SymbolView name="checkmark.shield" tintColor={palette.textTertiary} size={13} />
             <Text style={[styles.hint, { color: palette.textTertiary }]}>
-              {hasEmail
-                ? '设置后可用「邮箱 + 密码」登录家账。'
-                : '当前未绑定邮箱；设置密码后需先绑定邮箱，才能用「邮箱 + 密码」登录。'}
+              {hasEmail ? t('account.passwordHintWithEmail') : t('account.passwordHintNoEmail')}
             </Text>
           </View>
         </ScrollView>

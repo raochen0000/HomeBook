@@ -42,6 +42,7 @@ import { PageSheet } from '@/components/page-sheet';
 import { toast } from '@/components/toast';
 import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
+import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 
 type TxnType = 'expense' | 'income';
@@ -95,6 +96,7 @@ export function RecordSheet({ visible, onClose, onDismiss, familyId, recorderId,
 
 function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<RecordSheetProps, 'visible'>) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const catColors = useCategoryColors();
 
   const categoriesQ = useCategories();
@@ -125,7 +127,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   // 同家庭成员；仅户主可查看并切换「记账人」，普通成员默认记到自己名下。
   const members = membersQ.data ?? [];
   const showRecorder = members.some((m) => m.userId === recorderId && m.role === 'owner');
-  const recorderName = members.find((m) => m.userId === recorderUserId)?.nickname ?? '我';
+  const recorderName = members.find((m) => m.userId === recorderUserId)?.nickname ?? t('common.me');
 
   // 可手动选择的分类：当前类型 + 排除储蓄类系统分类（储蓄走专门入口，PRD 口径）+ 排除本家庭隐藏的系统分类。
   // 仅显示当前 Tab 类型——支出 Tab 不混入收入分类，反之亦然。
@@ -204,14 +206,14 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
         setRaw('');
         setNote('');
         setCategoryId(null);
-        toast.success('已保存，继续记下一笔');
+        toast.success(t('record.savedContinue'));
       } else {
         // 庆祝交由父层在面板关闭后展示（onDismiss），这里只上报「是否家庭第一笔」并关闭面板。
         onSaved?.({ firstRecord: isFirstRecord });
         onClose();
       }
     } catch (e) {
-      Alert.alert('保存失败', (e as Error).message ?? String(e));
+      Alert.alert(t('record.saveFailed'), (e as Error).message ?? String(e), alertOk());
     }
   };
 
@@ -239,7 +241,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
             maxWidth: 56,
           }}
         >
-          {c.name}
+          {displayCategoryName(c.name, c.is_system)}
         </Text>
       </Pressable>
     );
@@ -252,7 +254,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
     <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
       {/* 分类标题 */}
       <View style={styles.catHeader}>
-        <Text style={[styles.catHeaderLabel, { color: palette.textSecondary }]}>分类</Text>
+        <Text style={[styles.catHeaderLabel, { color: palette.textSecondary }]}>{t('record.category')}</Text>
       </View>
 
       {/* 分类：完整网格；只在此区域滚动，备注／时间／记账人保持可见。 */}
@@ -275,7 +277,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
         <SymbolView name="pencil" tintColor={palette.textTertiary} size={16} />
         <TextInput
           style={[styles.noteInput, { color: palette.textPrimary }]}
-          placeholder="加个备注…"
+          placeholder={t('record.notePlaceholder')}
           placeholderTextColor={palette.textTertiary}
           value={note}
           onChangeText={setNote}
@@ -289,7 +291,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
       {/* 时间：原生 DatePicker（compact，点击弹原生日期/时间选择） */}
       <View style={styles.rowInner}>
         <SymbolView name="clock" tintColor={palette.textTertiary} size={16} />
-        <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>时间</Text>
+        <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.time')}</Text>
         <View style={styles.rowSpacer} />
         <Host matchContents style={styles.dateHost}>
           <DatePicker
@@ -307,7 +309,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
           {divider}
           <Pressable style={styles.rowInner} onPress={() => setMemberOpen(true)}>
             <SymbolView name="person.crop.circle" tintColor={palette.textTertiary} size={16} />
-            <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>记账人</Text>
+            <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.recorder')}</Text>
             <View style={styles.rowSpacer} />
             <Text style={[styles.infoValue, { color: palette.textSecondary }]}>{recorderName}</Text>
             <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
@@ -328,7 +330,9 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
         {/* 标题行：标题居中（删除入口走列表左滑，DESIGN §9.9：非保存动作不放标题两侧） */}
         <View style={styles.topBar}>
           <View style={styles.topActionSpacer} />
-          <Text style={[styles.topTitle, { color: palette.textPrimary }]}>{editing ? '编辑流水' : '记一笔'}</Text>
+          <Text style={[styles.topTitle, { color: palette.textPrimary }]}>
+            {editing ? t('record.editTitle') : t('record.title')}
+          </Text>
           <View style={styles.topActionSpacer} />
         </View>
 
@@ -337,10 +341,10 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
           <Picker
             modifiers={[pickerStyle('segmented')]}
             selection={type}
-            onSelectionChange={(t) => setType(t as TxnType)}
+            onSelectionChange={(value) => setType(value as TxnType)}
           >
-            <UIText modifiers={[tag('expense')]}>支出</UIText>
-            <UIText modifiers={[tag('income')]}>收入</UIText>
+            <UIText modifiers={[tag('expense')]}>{t('record.expense')}</UIText>
+            <UIText modifiers={[tag('income')]}>{t('record.income')}</UIText>
           </Picker>
         </Host>
 
@@ -385,7 +389,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
           {saving ? (
             <ActivityIndicator color={palette.onInk} />
           ) : (
-            <Text style={[styles.saveText, { color: palette.onInk }]}>保存</Text>
+            <Text style={[styles.saveText, { color: palette.onInk }]}>{t('common.save')}</Text>
           )}
         </Pressable>
       </View>
@@ -422,6 +426,7 @@ function MemberPickerSheet({
   onClose: () => void;
 }) {
   const palette = usePalette();
+  useLocalePreference();
   const [translateY] = useState(() => new Animated.Value(0));
   const dragStartY = useRef(0);
   const currentDragY = useRef(0);
@@ -475,7 +480,7 @@ function MemberPickerSheet({
             <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
           </View>
           <View style={styles.memberHeader}>
-            <Text style={[styles.memberTitle, { color: palette.textPrimary }]}>记账人</Text>
+            <Text style={[styles.memberTitle, { color: palette.textPrimary }]}>{t('record.recorder')}</Text>
           </View>
           {members.map((m) => {
             const active = m.userId === selectedUserId;

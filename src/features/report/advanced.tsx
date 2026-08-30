@@ -13,6 +13,8 @@ import Svg, { Circle, Defs, G, Line, Path, Pattern, Polyline, Rect, Text as SvgT
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { Donut } from '@/features/report/donut';
+import { i18n, t } from '@/i18n';
+import { fromI18nLanguage } from '@/i18n/locale';
 import { formatAmount, maskAmount, signForNet } from '@/lib/format';
 import type { CumulativeSeries, PeriodFlow } from '@/lib/report';
 
@@ -51,7 +53,9 @@ function chartTicks(max: number, count = 3): number[] {
 
 function axisAmountLabel(value: number): string {
   const yuan = Math.round(value / 100);
-  if (yuan >= 10000) return `${Math.round(yuan / 1000) / 10}万`;
+  if (yuan >= 10000 && fromI18nLanguage(i18n.language) === 'zh') {
+    return t('report.wan', { n: Math.round(yuan / 1000) / 10 });
+  }
   if (yuan >= 1000) return `${Math.round(yuan / 100) / 10}k`;
   return String(yuan);
 }
@@ -103,7 +107,7 @@ export function BalanceGaugeCard({ rate, palette }: { rate: number | null; palet
 
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
-      <ThemedText style={[styles.title, { color: palette.textPrimary }]}>结余率</ThemedText>
+      <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('report.savingsRateShort')}</ThemedText>
       <View style={styles.gaugeWrap}>
         <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
           <Path
@@ -125,7 +129,7 @@ export function BalanceGaugeCard({ rate, palette }: { rate: number | null; palet
         </Svg>
         <View style={styles.gaugeCenter} pointerEvents="none">
           {rate == null ? (
-            <ThemedText style={[styles.gaugeHint, { color: palette.textTertiary }]}>暂无收入</ThemedText>
+            <ThemedText style={[styles.gaugeHint, { color: palette.textTertiary }]}>{t('report.noIncome')}</ThemedText>
           ) : (
             <>
               <ThemedText
@@ -134,9 +138,11 @@ export function BalanceGaugeCard({ rate, palette }: { rate: number | null; palet
                 adjustsFontSizeToFit
                 minimumFontScale={0.72}
               >
-                {over ? `超支 ${pct}` : pct}
+                {over ? t('report.overShort', { pct }) : pct}
               </ThemedText>
-              <ThemedText style={[styles.gaugeSub, { color: palette.textSecondary }]}>结余 ÷ 收入</ThemedText>
+              <ThemedText style={[styles.gaugeSub, { color: palette.textSecondary }]}>
+                {t('report.savingsRateFormula')}
+              </ThemedText>
             </>
           )}
         </View>
@@ -180,24 +186,26 @@ export function CumulativeCard({
     series.prevToDate > 0 ? Math.round(((series.currToDate - series.prevToDate) / series.prevToDate) * 100) : null;
   const deltaText =
     delta == null
-      ? '上期同期无消费'
+      ? t('report.vsPrevNone')
       : delta === 0
-        ? '与上期同期持平'
-        : `较上期同期 ${delta > 0 ? '↑' : '↓'} ${Math.abs(delta)}%`;
+        ? t('report.vsPrevFlat')
+        : delta > 0
+          ? t('report.vsPrevUp', { pct: Math.abs(delta) })
+          : t('report.vsPrevDown', { pct: Math.abs(delta) });
   const deltaColor = delta == null ? palette.textTertiary : delta > 0 ? palette.danger : palette.expense;
 
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
       <View style={styles.legendRow}>
-        <ThemedText style={[styles.title, { color: palette.textPrimary }]}>累计同期对比</ThemedText>
+        <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('report.cumulativeCompare')}</ThemedText>
         <View style={styles.flex} />
-        <LegendDot color={palette.expense} label="本期" palette={palette} />
-        <LegendDot color={palette.textTertiary} label="上期" palette={palette} dashed />
+        <LegendDot color={palette.expense} label={t('report.thisPeriod')} palette={palette} />
+        <LegendDot color={palette.textTertiary} label={t('report.prevPeriod')} palette={palette} dashed />
       </View>
       {!hasData ? (
         <View style={styles.empty}>
           <SymbolView name="chart.line.uptrend.xyaxis" tintColor={palette.textTertiary} size={36} />
-          <ThemedText style={{ color: palette.textSecondary }}>这个周期还没有消费</ThemedText>
+          <ThemedText style={{ color: palette.textSecondary }}>{t('report.emptyPeriodConsum')}</ThemedText>
         </View>
       ) : (
         <>
@@ -240,7 +248,7 @@ export function CumulativeCard({
             ))}
           </View>
           <ThemedText style={[styles.cumCaption, { color: palette.textSecondary }]}>
-            本期至今 {maskAmount(formatAmount(series.currToDate, ''), !!hidden)} ·{' '}
+            {t('report.periodToDate', { amount: maskAmount(formatAmount(series.currToDate, ''), !!hidden) })}
             <Text style={{ color: deltaColor }}>{deltaText}</Text>
           </ThemedText>
         </>
@@ -314,17 +322,17 @@ export function IncomeExpenseCard({
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
       <View style={styles.legendRow}>
-        <ThemedText style={[styles.title, { color: palette.textPrimary }]}>收支趋势</ThemedText>
+        <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('report.incomeExpenseTrend')}</ThemedText>
         <View style={styles.flex} />
-        <LegendDot color={palette.income} label="收入" palette={palette} />
-        <LegendDot color={palette.expense} label="支出" palette={palette} />
-        <LegendDot color={palette.warning} label="结余" palette={palette} />
+        <LegendDot color={palette.income} label={t('record.income')} palette={palette} />
+        <LegendDot color={palette.expense} label={t('record.expense')} palette={palette} />
+        <LegendDot color={palette.warning} label={t('report.balance')} palette={palette} />
       </View>
       {!hasData ? (
         <View style={styles.empty}>
           <SymbolView name="chart.bar.xaxis" tintColor={palette.textTertiary} size={36} />
           <ThemedText style={{ color: palette.textSecondary, textAlign: 'center' }}>
-            当前只有 {nonZeroCount} 个周期有收支记录；再积累到 2 个以上周期后展示趋势。
+            {t('report.trendNeedFlow', { count: nonZeroCount })}
           </ThemedText>
         </View>
       ) : (
@@ -422,7 +430,12 @@ export function IncomeExpenseCard({
                     height={chartBottom + 12}
                     fill="transparent"
                     onPress={() => setSelectedIndex(i)}
-                    accessibilityLabel={`${s.label}，收入 ${formatAmount(s.income, '+')}，支出 ${formatAmount(s.expense, '-')}，结余 ${formatAmount(s.income - s.expense, signForNet(s.income - s.expense))}`}
+                    accessibilityLabel={t('report.flowA11y', {
+                      label: s.label,
+                      income: formatAmount(s.income, '+'),
+                      expense: formatAmount(s.expense, '-'),
+                      balance: formatAmount(s.income - s.expense, signForNet(s.income - s.expense)),
+                    })}
                   />
                 </G>
               );
@@ -454,26 +467,26 @@ export function IncomeExpenseCard({
           </View>
           <ThemedText style={[styles.cumCaption, { color: palette.textSecondary }]}>
             {selectedIndex == null && currentPeriod
-              ? '斜纹为当前期，数据为累计值；点按柱形查看精确值。'
-              : `${focused.label}：收入 `}
+              ? t('report.chartHint')
+              : t('report.colonIncome', { label: focused.label })}
             {selectedIndex == null && currentPeriod ? null : (
               <Text style={{ color: palette.income, fontWeight: '600' }}>
                 {maskAmount(formatAmount(focused.income, '+'), !!hidden)}
               </Text>
             )}
-            {selectedIndex == null && currentPeriod ? null : ' · 支出 '}
+            {selectedIndex == null && currentPeriod ? null : t('report.midExpense')}
             {selectedIndex == null && currentPeriod ? null : (
               <Text style={{ color: palette.expense, fontWeight: '600' }}>
                 {maskAmount(formatAmount(focused.expense, '-'), !!hidden)}
               </Text>
             )}
-            {selectedIndex == null && currentPeriod ? null : ' · 结余 '}
+            {selectedIndex == null && currentPeriod ? null : t('report.midBalance')}
             {selectedIndex == null && currentPeriod ? null : (
               <Text style={{ color: focusedBalance < 0 ? palette.danger : palette.textPrimary, fontWeight: '600' }}>
                 {maskAmount(formatAmount(focusedBalance, signForNet(focusedBalance)), !!hidden)}
               </Text>
             )}
-            {selectedIndex == null && !currentPeriod ? '本期结余 ' : null}
+            {selectedIndex == null && !currentPeriod ? t('report.thisBalancePrefix') : null}
             {selectedIndex == null && !currentPeriod ? (
               <Text style={{ color: balance < 0 ? palette.danger : palette.textPrimary, fontWeight: '600' }}>
                 {maskAmount(formatAmount(balance, signForNet(balance)), !!hidden)}
@@ -491,7 +504,7 @@ export function CategoryMomCard({ items, palette, hidden }: { items: MomItem[]; 
   if (items.length === 0) return null;
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
-      <ThemedText style={[styles.title, { color: palette.textPrimary }]}>分类环比</ThemedText>
+      <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('report.categoryMom')}</ThemedText>
       <View style={styles.list}>
         {items.map((it, i) => {
           const isNew = it.prev === 0 && it.cur > 0;
@@ -500,11 +513,11 @@ export function CategoryMomCard({ items, palette, hidden }: { items: MomItem[]; 
           const up = it.cur >= it.prev;
           const chipColor = isNew ? palette.danger : gone ? palette.expense : up ? palette.danger : palette.expense;
           const chipText = isNew
-            ? '新增'
+            ? t('report.newItem')
             : gone
               ? '↓ 100%'
               : pct === 0
-                ? '持平'
+                ? t('report.flat')
                 : `${up ? '↑' : '↓'} ${Math.abs(pct)}%`;
           return (
             <View key={it.id}>
@@ -536,7 +549,9 @@ export function TopExpensesCard({ items, palette, hidden }: { items: TopItem[]; 
   const max = Math.max(1, ...items.map((i) => i.amount));
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
-      <ThemedText style={[styles.title, { color: palette.textPrimary }]}>大额支出 Top {items.length}</ThemedText>
+      <ThemedText style={[styles.title, { color: palette.textPrimary }]}>
+        {t('report.topExpensesN', { count: items.length })}
+      </ThemedText>
       <View style={styles.list}>
         {items.map((it, i) => (
           <View key={it.id} style={styles.topItem}>
@@ -581,10 +596,12 @@ export function IncomeStructureCard({
   const total = slices.reduce((s, x) => s + x.amount, 0);
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
-      <ThemedText style={[styles.title, { color: palette.textPrimary }]}>收入结构</ThemedText>
+      <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('report.incomeStructure')}</ThemedText>
       <View style={styles.donutWrap}>
         <Donut slices={slices.map((s) => ({ value: s.amount, color: s.color }))} trackColor={palette.base}>
-          <ThemedText style={[styles.donutCaption, { color: palette.textSecondary }]}>总收入</ThemedText>
+          <ThemedText style={[styles.donutCaption, { color: palette.textSecondary }]}>
+            {t('report.totalIncome')}
+          </ThemedText>
           <ThemedText style={[styles.donutTotal, { color: palette.textPrimary }]}>
             {maskAmount(formatAmount(total, ''), !!hidden)}
           </ThemedText>

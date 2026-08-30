@@ -13,6 +13,10 @@
       "bundleIdentifier": "com.raochen.homebook-app",
       "appleTeamId": "K47Q5Y7ANG",
       "usesAppleSignIn": true,
+      "infoPlist": {
+        "CFBundleAllowMixedLocalizations": true,
+        "CFBundleLocalizations": ["zh-Hans", "en"]
+      },
       "config": {
         "usesNonExemptEncryption": false
       }
@@ -41,8 +45,21 @@
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
+    "locales": {
+      "zh-Hans": "./locales/zh-Hans.json",
+      "en": "./locales/en.json"
+    },
     "plugins": [
       "expo-router",
+      [
+        "expo-localization",
+        {
+          "supportedLocales": {
+            "ios": ["zh-Hans", "en"]
+          },
+          "supportsRTL": false
+        }
+      ],
       "expo-apple-authentication",
       "expo-notifications",
       [

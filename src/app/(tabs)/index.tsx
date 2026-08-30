@@ -67,6 +67,7 @@ import { FirstRecordCelebration } from '@/features/record/first-record-celebrati
 import { RecordSheet } from '@/features/record/record-sheet';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-header';
+import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { useSession } from '@/lib/auth';
 import { daysToMonthEnd } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
@@ -122,7 +123,7 @@ function RecordFloatingActionButton({
     return (
       <Host matchContents style={styles.fabHost}>
         <Button
-          label="记一笔"
+          label={t('home.recordCta')}
           systemImage="plus"
           onPress={onPress}
           modifiers={[
@@ -133,8 +134,8 @@ function RecordFloatingActionButton({
             frame({ width: 56, height: 56 }),
             contentShape(shapes.circle()),
             ...surfaceModifiers,
-            accessibilityLabel('记一笔'),
-            accessibilityHint('打开记账面板，为家庭账本添加一笔流水'),
+            accessibilityLabel(t('home.recordCta')),
+            accessibilityHint(t('home.recordA11yHint')),
           ]}
         />
       </Host>
@@ -144,8 +145,8 @@ function RecordFloatingActionButton({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="记一笔"
-      accessibilityHint="打开记账面板，为家庭账本添加一笔流水"
+      accessibilityLabel={t('home.recordCta')}
+      accessibilityHint={t('home.recordA11yHint')}
       onPress={onPress}
       style={({ pressed }) => [
         styles.fabFallback,
@@ -165,6 +166,7 @@ const LAST_MONTH_REMINDER_DISMISSED_KEY = 'home.lastMonthReminderDismissedPeriod
 
 export default function HomeScreen() {
   const palette = usePalette();
+  const { locale } = useLocalePreference();
   const catColors = useCategoryColors();
   const insets = useSafeAreaInsets();
   const { scrollGeometry, headerHeight, headerStyle, onHeaderLayout } = useManualCollapsibleHeader(
@@ -280,60 +282,61 @@ export default function HomeScreen() {
 
     // 用户 → 头像信息（真实照片本地路径，缺图回退为共用的昵称渐变头像）。
     const avatarOf = (userId: string): AvatarInfo => {
-      const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? '成员';
+      const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? t('common.member');
       return { uri: avatarFiles.get(userId) ?? null, nickname: nick };
     };
 
     const map = new Map<string, Group>();
-    for (const t of txns) {
-      const cat = catById.get(t.category_id);
-      const ttype = (t.type === 'income' ? 'income' : 'expense') as 'income' | 'expense';
-      const key = dayKey(t.occurred_at);
+    void locale;
+    for (const txn of txns) {
+      const cat = catById.get(txn.category_id);
+      const ttype = (txn.type === 'income' ? 'income' : 'expense') as 'income' | 'expense';
+      const key = dayKey(txn.occurred_at);
       const group =
         map.get(key) ??
         (() => {
-          const g: Group = { key, label: humanDay(t.occurred_at), totalCents: 0, rows: [] };
+          const g: Group = { key, label: humanDay(txn.occurred_at), totalCents: 0, rows: [] };
           map.set(key, g);
           return g;
         })();
-      group.totalCents += t.type === 'income' ? t.amount : -t.amount;
+      group.totalCents += txn.type === 'income' ? txn.amount : -txn.amount;
 
       // 被「他人」修改过：显示修改者头像，时间切到最新修改时间；否则用记账时间。
-      const editedByOther = !!t.last_editor_user_id && t.last_editor_user_id !== t.recorder_user_id;
+      const editedByOther = !!txn.last_editor_user_id && txn.last_editor_user_id !== txn.recorder_user_id;
       group.rows.push({
-        id: t.id,
-        title: cat?.name ?? '未分类',
+        id: txn.id,
+        title: cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized'),
         symbol: categorySymbol(cat?.icon ?? null, ttype),
         iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype, cat?.color_key)],
-        amountCents: t.amount,
+        amountCents: txn.amount,
         sign: signForType(ttype),
         amountColor: ttype === 'income' ? palette.income : palette.expense,
-        note: t.note,
-        timeLabel: clockTime(editedByOther ? t.updated_at : t.occurred_at),
-        recorder: avatarOf(t.recorder_user_id),
-        editor: editedByOther ? avatarOf(t.last_editor_user_id as string) : null,
+        note: txn.note,
+        timeLabel: clockTime(editedByOther ? txn.updated_at : txn.occurred_at),
+        recorder: avatarOf(txn.recorder_user_id),
+        editor: editedByOther ? avatarOf(txn.last_editor_user_id as string) : null,
       });
     }
 
     return {
       groups: Array.from(map.values()),
     };
-  }, [transactions, categoriesQ.data, membersQ.data, profileQ.data, avatarFiles, catColors, palette]);
+  }, [transactions, categoriesQ.data, membersQ.data, profileQ.data, avatarFiles, catColors, palette, locale]);
 
   // 记一笔：若当前用户还没有家庭，先自动建「单人家庭」（M1：登录 + 单人家庭自动创建）。
   const openCreate = async () => {
     // 记账人必须是有效用户 id；profile 拉取失败时不进面板，避免把空 id 发给后端。
     if (!profileQ.data?.id) {
-      Alert.alert('暂时无法记账', '账号信息还没加载好，请稍后重试或重新进入「我的」。');
+      Alert.alert(t('home.cannotRecordTitle'), t('home.cannotRecordBody'), alertOk());
       return;
     }
     let fid = familyQ.data?.id ?? profileQ.data?.current_family_id ?? null;
     if (!fid) {
       try {
-        const fam = (await createFamilyM.mutateAsync({ name: '我的家' })) as { id: string };
+        const fam = (await createFamilyM.mutateAsync({ name: t('home.myHome') })) as { id: string };
         fid = fam.id;
       } catch (e) {
-        Alert.alert('创建家庭失败', (e as Error).message ?? String(e));
+        Alert.alert(t('home.createFamilyFailed'), (e as Error).message ?? String(e), alertOk());
         return;
       }
     }
@@ -353,9 +356,9 @@ export default function HomeScreen() {
 
   // 左滑「删除」→ 二次确认（危险按钮红色），确认后软删除。
   const confirmDelete = (id: string) => {
-    Alert.alert('删除这笔记录？', '删除后将从账单中移除，无法在 App 内恢复。', [
-      { text: '取消', style: 'cancel' },
-      { text: '删除', style: 'destructive', onPress: () => softDeleteM.mutate(id) },
+    Alert.alert(t('home.deleteTxnTitle'), t('home.deleteTxnBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.delete'), style: 'destructive', onPress: () => softDeleteM.mutate(id) },
     ]);
   };
 
@@ -372,13 +375,13 @@ export default function HomeScreen() {
       <View style={styles.flex}>
         {!session ? (
           <View style={styles.center}>
-            <ThemedText style={{ color: palette.textSecondary }}>请先登录</ThemedText>
+            <ThemedText style={{ color: palette.textSecondary }}>{t('common.pleaseLogin')}</ThemedText>
             <Link href={'/mine' as Href}>
-              <ThemedText style={{ color: palette.info }}>去「我的」登录</ThemedText>
+              <ThemedText style={{ color: palette.info }}>{t('common.goLogin')}</ThemedText>
             </Link>
           </View>
         ) : (
-          <Host style={styles.flex}>
+          <Host key={locale} style={styles.flex}>
             {/* insetGrouped List：按日分组 = 白卡 Section，行内左滑「编辑/删除」（原生 swipeActions 仅在 List 内生效）。 */}
             <List
               modifiers={[
@@ -415,15 +418,15 @@ export default function HomeScreen() {
                 ) : (
                   <PulseCardSkeleton
                     contentInsets={HOME_CONTENT_INSETS.hero}
-                    message={dashboardQ.isError ? '暂时无法加载' : '加载中…'}
+                    message={dashboardQ.isError ? t('common.loadFailed') : t('common.loading')}
                   />
                 )}
               </Section>
               {showLastMonthReminder ? (
                 <Section modifiers={[listRowBackground(palette.bannerTint), listRowSeparator('hidden')]}>
                   <InsightBanner
-                    title="上月总结来啦 🎉"
-                    subtitle="看看上个月家里的开销与变化"
+                    title={t('home.lastMonthBanner')}
+                    subtitle={t('home.lastMonthBannerSub')}
                     onPress={() => openSummary(prevPeriodStr)}
                     onDismiss={dismissLastMonthReminder}
                     contentInsets={HOME_CONTENT_INSETS.hero}
@@ -432,8 +435,11 @@ export default function HomeScreen() {
               ) : showCountBanner ? (
                 <Section modifiers={[listRowBackground(palette.bannerTint), listRowSeparator('hidden')]}>
                   <InsightBanner
-                    title={`${month} 月家里一起记下了 ${dashboardQ.data?.transaction_count ?? 0} 笔`}
-                    subtitle="每一笔都是一家人生活的痕迹"
+                    title={t('home.recordedTogether', {
+                      month,
+                      count: dashboardQ.data?.transaction_count ?? 0,
+                    })}
+                    subtitle={t('auth.tagline')}
                     onDismiss={dismissCountBanner}
                     contentInsets={{ horizontal: 0, vertical: 0 }}
                   />
@@ -446,7 +452,7 @@ export default function HomeScreen() {
                       listRowInsets({ top: Space[2], bottom: Space[2], leading: Space[4], trailing: Space[4] }),
                     ]}
                   >
-                    <EndOfListHint text="正在加载流水…" />
+                    <EndOfListHint text={t('home.loadingTxns')} />
                   </VStack>
                 </Section>
               ) : groups.length === 0 ? (
@@ -460,7 +466,7 @@ export default function HomeScreen() {
                   >
                     <Image systemName="tray" size={48} color={palette.textTertiary} />
                     <Text modifiers={[font({ size: 15 }), foregroundStyle(palette.textSecondary)]}>
-                      还没有记账，点 + 记一笔
+                      {t('home.emptyList')}
                     </Text>
                   </VStack>
                 </Section>
@@ -496,10 +502,10 @@ export default function HomeScreen() {
                   <EndOfListHint
                     text={
                       transactionsQ.isFetchingNextPage
-                        ? '正在加载更多…'
+                        ? t('common.loadingMore')
                         : transactionsQ.hasNextPage
-                          ? '继续加载…'
-                          : '暂无更多数据'
+                          ? t('common.loadMore')
+                          : t('common.noMore')
                     }
                   />
                 </VStack>
@@ -515,11 +521,11 @@ export default function HomeScreen() {
             onLayout={onHeaderLayout}
           >
             <View style={styles.headerText}>
-              <ThemedText style={[styles.title, { color: palette.textPrimary }]}>首页</ThemedText>
-              <ThemedText style={[styles.subtitle, { color: palette.textSecondary }]}>
+              <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('tabs.home')}</ThemedText>
+              <ThemedText style={[styles.subtitle, { color: palette.textSecondary }]} numberOfLines={2}>
                 {profileQ.data?.nickname
-                  ? `${greetingForHour()}，${profileQ.data.nickname}，掌握每一笔，生活更从容`
-                  : `${greetingForHour()}，掌握每一笔，生活更从容`}
+                  ? t('home.greetingWithName', { greeting: greetingForHour(), name: profileQ.data.nickname })
+                  : t('home.greetingSolo', { greeting: greetingForHour() })}
               </ThemedText>
             </View>
             <HeaderSearchButton style={styles.searchBtn} />
@@ -543,7 +549,7 @@ export default function HomeScreen() {
         onSaved={({ firstRecord }) => {
           // 第一笔：标记待庆祝（面板关闭后再弹）；否则走常规「已记一笔」toast。
           if (firstRecord) pendingCelebrateRef.current = true;
-          else toast.success('已记一笔');
+          else toast.success(t('home.savedToast'));
         }}
         onDismiss={() => {
           if (pendingCelebrateRef.current) {

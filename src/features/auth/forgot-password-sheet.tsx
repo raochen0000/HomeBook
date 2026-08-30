@@ -26,6 +26,7 @@ import { PageSheet } from '@/components/page-sheet';
 import { toast } from '@/components/toast';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 import { singleLineTextInputStyle } from '@/constants/text-input';
+import { t, useLocalePreference } from '@/i18n';
 import { normalizeEmail, sendPasswordResetOtp, updatePassword, verifyPasswordResetOtp } from '@/lib/auth';
 
 /** OTP 位数（与 Studio Email provider 的 Email OTP Length 一致）。 */
@@ -42,13 +43,13 @@ function resetErrorText(err: unknown): string {
   const e = err as { status?: number; message?: string; name?: string; code?: string };
   const msg = (e?.message ?? '').toLowerCase();
   if (e?.status === 429 || msg.includes('daily email verification code limit')) {
-    return '今日邮箱验证码已达 5 次上限，请明天再试';
+    return t('auth.emailDailyLimit');
   }
   if (e?.code === 'otp_expired' || msg.includes('invalid') || msg.includes('expired') || msg.includes('token')) {
-    return '验证码错误或已过期，请重新获取';
+    return t('auth.codeInvalid');
   }
   if (e?.code === 'weak_password' || msg.includes('password')) {
-    return '新密码不符合要求，请设置至少 6 位';
+    return t('auth.weakPassword');
   }
   const down =
     e?.status === 504 ||
@@ -60,7 +61,7 @@ function resetErrorText(err: unknown): string {
     msg.includes('deadline') ||
     msg.includes('network request failed') ||
     msg.includes('failed to fetch');
-  if (down) return '邮件服务暂时不可用，请稍后重试';
+  if (down) return t('auth.mailUnavailable');
   return e?.message ?? String(err);
 }
 
@@ -74,6 +75,7 @@ export function ForgotPasswordSheet({
   onClose: () => void;
 }) {
   const palette = useSheetPalette();
+  useLocalePreference();
 
   const [email, setEmail] = useState(initialEmail ?? '');
   const [code, setCode] = useState('');
@@ -97,14 +99,14 @@ export function ForgotPasswordSheet({
 
   const onSend = async () => {
     if (!canSend) {
-      if (!normalized) toast.error('请输入有效的邮箱地址');
+      if (!normalized) toast.error(t('auth.invalidEmail'));
       return;
     }
     setBusy(true);
     try {
       await sendPasswordResetOtp(email);
       setCooldown(60);
-      toast.success('验证码已发送，请查收邮件');
+      toast.success(t('auth.recoverSent'));
     } catch (err) {
       toast.error(resetErrorText(err));
     } finally {
@@ -114,9 +116,9 @@ export function ForgotPasswordSheet({
 
   const onSubmit = async () => {
     if (!canSubmit) {
-      if (!normalized) toast.error('请输入有效的邮箱地址');
-      else if (code.length !== OTP_LEN) toast.error('请输入 6 位验证码');
-      else if (password.length < 6) toast.error('新密码至少 6 位');
+      if (!normalized) toast.error(t('auth.invalidEmail'));
+      else if (code.length !== OTP_LEN) toast.error(t('auth.recoverCodeLen'));
+      else if (password.length < 6) toast.error(t('auth.newPasswordMin'));
       return;
     }
     setBusy(true);
@@ -151,10 +153,10 @@ export function ForgotPasswordSheet({
           <View style={styles.header}>
             <Pressable hitSlop={8} onPress={onClose} disabled={busy} style={styles.headerBtn}>
               <Text style={[styles.cancelText, { color: busy ? palette.textTertiary : palette.textSecondary }]}>
-                取消
+                {t('common.cancel')}
               </Text>
             </Pressable>
-            <Text style={[styles.headerTitle, { color: palette.textPrimary }]}>找回密码</Text>
+            <Text style={[styles.headerTitle, { color: palette.textPrimary }]}>{t('auth.recoverTitle')}</Text>
             <View style={styles.headerBtn} />
           </View>
 
@@ -165,9 +167,7 @@ export function ForgotPasswordSheet({
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="interactive"
             >
-              <Text style={[styles.subtitle, { color: palette.textSecondary }]}>
-                输入注册邮箱，我们会向它发送验证码，验证后即可设置新密码。
-              </Text>
+              <Text style={[styles.subtitle, { color: palette.textSecondary }]}>{t('auth.recoverHint')}</Text>
 
               {/* 邮箱 */}
               <View style={[styles.field, { backgroundColor: palette.card }]}>
@@ -175,7 +175,7 @@ export function ForgotPasswordSheet({
                 <View style={styles.fieldGap} />
                 <TextInput
                   style={[styles.input, { color: palette.textPrimary }]}
-                  placeholder="请输入邮箱地址"
+                  placeholder={t('auth.emailPlaceholder')}
                   placeholderTextColor={palette.textTertiary}
                   value={email}
                   onChangeText={setEmail}
@@ -188,7 +188,7 @@ export function ForgotPasswordSheet({
                   editable={!busy}
                 />
                 {email.length > 0 ? (
-                  <Pressable hitSlop={8} onPress={() => setEmail('')} accessibilityLabel="清除邮箱">
+                  <Pressable hitSlop={8} onPress={() => setEmail('')} accessibilityLabel={t('account.clearEmail')}>
                     <SymbolView name="xmark.circle.fill" tintColor={palette.textTertiary} size={16} />
                   </Pressable>
                 ) : null}
@@ -198,7 +198,7 @@ export function ForgotPasswordSheet({
               <View style={[styles.field, { backgroundColor: palette.card }]}>
                 <TextInput
                   style={[styles.input, { color: palette.textPrimary }]}
-                  placeholder="请输入验证码"
+                  placeholder={t('auth.codePlaceholder')}
                   placeholderTextColor={palette.textTertiary}
                   value={code}
                   onChangeText={(t) => setCode(t.replace(/\D/g, ''))}
@@ -208,9 +208,9 @@ export function ForgotPasswordSheet({
                   editable={!busy}
                 />
                 <View style={[styles.ccDivider, { backgroundColor: palette.separator }]} />
-                <Pressable hitSlop={6} onPress={onSend} disabled={!canSend} accessibilityLabel="获取验证码">
+                <Pressable hitSlop={6} onPress={onSend} disabled={!canSend} accessibilityLabel={t('auth.getCode')}>
                   <Text style={[styles.sendText, { color: canSend ? palette.textPrimary : palette.textTertiary }]}>
-                    {cooldown > 0 ? `${cooldown}s 后重发` : '获取验证码'}
+                    {cooldown > 0 ? t('auth.resendIn', { seconds: cooldown }) : t('auth.getCode')}
                   </Text>
                 </Pressable>
               </View>
@@ -221,7 +221,7 @@ export function ForgotPasswordSheet({
                 <View style={styles.fieldGap} />
                 <TextInput
                   style={[styles.input, { color: palette.textPrimary }]}
-                  placeholder="设置新密码（至少 6 位）"
+                  placeholder={t('auth.newPasswordPlaceholder')}
                   placeholderTextColor={palette.textTertiary}
                   value={password}
                   onChangeText={setPassword}
@@ -234,7 +234,11 @@ export function ForgotPasswordSheet({
                   onSubmitEditing={onSubmit}
                   returnKeyType="go"
                 />
-                <Pressable hitSlop={8} onPress={() => setShowPassword((v) => !v)} accessibilityLabel="显示或隐藏密码">
+                <Pressable
+                  hitSlop={8}
+                  onPress={() => setShowPassword((v) => !v)}
+                  accessibilityLabel={t('auth.showPassword')}
+                >
                   <SymbolView name={showPassword ? 'eye.slash' : 'eye'} tintColor={palette.textSecondary} size={18} />
                 </Pressable>
               </View>
@@ -248,14 +252,14 @@ export function ForgotPasswordSheet({
                 {busy ? (
                   <ActivityIndicator color={palette.onInk} />
                 ) : (
-                  <Text style={[styles.primaryText, { color: palette.onInk }]}>重置密码</Text>
+                  <Text style={[styles.primaryText, { color: palette.onInk }]}>{t('auth.resetPassword')}</Text>
                 )}
               </Pressable>
 
               {/* 安全说明 */}
               <View style={styles.hintRow}>
                 <SymbolView name="checkmark.shield" tintColor={palette.textTertiary} size={13} />
-                <Text style={[styles.hint, { color: palette.textTertiary }]}>重置成功后将用新密码直接登录。</Text>
+                <Text style={[styles.hint, { color: palette.textTertiary }]}>{t('auth.resetSuccessHint')}</Text>
               </View>
             </ScrollView>
           </KeyboardAvoidingView>

@@ -34,6 +34,7 @@ import {
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
+import { alertOk, t, useLocalePreference } from '@/i18n';
 
 const NAME_MIN = 2;
 const NAME_MAX = 12;
@@ -41,7 +42,7 @@ const SLOGAN_MIN = 2;
 const SLOGAN_MAX = 24;
 
 function compactTimezone(timezone: string | null | undefined): string {
-  return timezone === 'Asia/Shanghai' || !timezone ? '中国标准时间 · UTC+8' : timezone;
+  return timezone === 'Asia/Shanghai' || !timezone ? t('family.tzShanghai') : timezone;
 }
 
 export function FamilySettingsSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -54,6 +55,7 @@ export function FamilySettingsSheet({ visible, onClose }: { visible: boolean; on
 
 function Body({ onClose }: { onClose: () => void }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
   const family = familyQ.data;
@@ -72,6 +74,7 @@ function Body({ onClose }: { onClose: () => void }) {
 
 function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: boolean; onClose: () => void }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const saveSettingsM = useUpdateFamilySettings();
   const uploadAvatarM = useUploadFamilyAvatar();
   const uploadCoverM = useUploadFamilyCover();
@@ -101,7 +104,7 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
       const url = await uploadAvatarM.mutateAsync(family.id);
       if (url) setAvatarUrl(url);
     } catch (error) {
-      Alert.alert('头像上传失败', (error as Error).message ?? String(error));
+      Alert.alert(t('family.avatarFail'), (error as Error).message ?? String(error), alertOk());
     }
   };
 
@@ -111,7 +114,7 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
       const image = await pickFamilyCoverImage();
       if (image) setCoverDraft(image);
     } catch {
-      Alert.alert('该图片资源不可用');
+      Alert.alert(t('family.imageUnavailable'), undefined, alertOk());
     }
   };
 
@@ -122,7 +125,7 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
       if (url) setCoverUrl(url);
       setCoverDraft(null);
     } catch (error) {
-      Alert.alert('封面上传失败', (error as Error).message ?? String(error));
+      Alert.alert(t('family.coverFail'), (error as Error).message ?? String(error), alertOk());
     }
   };
 
@@ -135,7 +138,7 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
       });
       onClose();
     } catch (error) {
-      Alert.alert('保存失败', (error as Error).message ?? String(error));
+      Alert.alert(t('account.saveFailed'), (error as Error).message ?? String(error), alertOk());
     }
   };
 
@@ -147,7 +150,7 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
           keyboardShouldPersistTaps="handled"
           contentInsetAdjustmentBehavior="automatic"
         >
-          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>家庭资料</Text>
+          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('family.profile')}</Text>
 
           <View style={styles.identityPreview}>
             {coverUrl ? (
@@ -164,15 +167,15 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
                 disabled={uploading}
                 style={({ pressed }) => [styles.coverAction, pressed ? styles.pressed : null]}
                 accessibilityRole="button"
-                accessibilityLabel="更换家庭封面"
-                accessibilityHint="从相册选择家庭封面图片"
+                accessibilityLabel={t('family.coverA11y')}
+                accessibilityHint={t('family.coverHint')}
               >
                 {uploadCoverM.isPending ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
                   <>
                     <SymbolView name="camera.fill" tintColor="#FFFFFF" size={14} />
-                    <Text style={styles.coverActionText}>更换封面</Text>
+                    <Text style={styles.coverActionText}>{t('family.changeCover')}</Text>
                   </>
                 )}
               </Pressable>
@@ -183,14 +186,14 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
               disabled={!isOwner || uploading}
               style={({ pressed }) => [styles.avatarButton, pressed ? styles.pressed : null]}
               accessibilityRole="button"
-              accessibilityLabel="更换家庭头像"
-              accessibilityHint="从相册选择方形家庭头像"
+              accessibilityLabel={t('family.avatarA11y')}
+              accessibilityHint={t('family.avatarHint')}
             >
               {avatarUrl ? (
                 <Image source={avatarUrl} style={styles.avatar} contentFit="cover" transition={150} />
               ) : (
                 <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: palette.accent }]}>
-                  <Text style={[styles.avatarFallbackText, { color: palette.onAccent }]}>家</Text>
+                  <Text style={[styles.avatarFallbackText, { color: palette.onAccent }]}>{t('family.badge')}</Text>
                 </View>
               )}
               {uploadAvatarM.isPending ? (
@@ -207,7 +210,7 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
 
           <View style={[styles.formCard, { backgroundColor: palette.card }]}>
             <EditableRow
-              label="家庭名称"
+              label={t('family.name')}
               value={name}
               onChangeText={setName}
               onBlur={() => setNameTouched(true)}
@@ -215,14 +218,14 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
               maxLength={NAME_MAX}
               count={nextName.length}
               max={NAME_MAX}
-              accessibilityLabel="家庭名称"
-              placeholder="给这个家起个名字"
+              accessibilityLabel={t('family.name')}
+              placeholder={t('family.namePlaceholder')}
               palette={palette}
               invalid={nameTouched && !nameValid}
             />
             <View style={[styles.formDivider, { backgroundColor: palette.separator }]} />
             <EditableRow
-              label="家庭口号"
+              label={t('family.motto')}
               value={slogan}
               onChangeText={setSlogan}
               onBlur={() => setSloganTouched(true)}
@@ -230,8 +233,8 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
               maxLength={SLOGAN_MAX}
               count={nextSlogan.length}
               max={SLOGAN_MAX}
-              accessibilityLabel="家庭口号"
-              placeholder="写一句属于你们的话"
+              accessibilityLabel={t('family.motto')}
+              placeholder={t('family.mottoPlaceholder')}
               palette={palette}
               invalid={sloganTouched && !sloganValid}
             />
@@ -239,40 +242,36 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
 
           {nameTouched && !nameValid ? (
             <Text style={[styles.validation, { color: palette.danger }]}>
-              家庭名称需为 {NAME_MIN}–{NAME_MAX} 个字符
+              {t('family.nameRange', { min: NAME_MIN, max: NAME_MAX })}
             </Text>
           ) : null}
           {sloganTouched && !sloganValid ? (
             <Text style={[styles.validation, { color: palette.danger }]}>
-              家庭口号需为 {SLOGAN_MIN}–{SLOGAN_MAX} 个字符
+              {t('family.mottoRange', { min: SLOGAN_MIN, max: SLOGAN_MAX })}
             </Text>
           ) : null}
 
-          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>账本规则</Text>
+          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('family.ledgerRules')}</Text>
           <View style={[styles.ruleCard, { backgroundColor: palette.card }]}>
             <SymbolView name="calendar" tintColor={palette.textPrimary} size={22} />
-            <Text style={[styles.ruleLabel, { color: palette.textPrimary }]}>家庭账期时区</Text>
+            <Text style={[styles.ruleLabel, { color: palette.textPrimary }]}>{t('family.timezone')}</Text>
             <Text style={[styles.ruleValue, { color: palette.textSecondary }]} numberOfLines={1}>
               {compactTimezone(family?.timezone)}
             </Text>
           </View>
-          <View
-            style={styles.ruleHint}
-            accessible
-            accessibilityLabel="月度预算、报表与目标均按此时区归属，创建后不可修改"
-          >
+          <View style={styles.ruleHint} accessible accessibilityLabel={t('family.tzHint')}>
             <SymbolView name="info.circle" tintColor={palette.textTertiary} size={15} />
             <Text style={[styles.ruleHintText, { color: palette.textTertiary }]} numberOfLines={1}>
-              月度预算、报表与目标均按此时区归属 · 创建后不可修改
+              {t('family.tzHint')}
             </Text>
           </View>
 
           {!isOwner ? (
-            <Text style={[styles.readOnlyHint, { color: palette.textTertiary }]}>仅户主可修改家庭资料</Text>
+            <Text style={[styles.readOnlyHint, { color: palette.textTertiary }]}>{t('family.ownerOnlyEdit')}</Text>
           ) : null}
         </ScrollView>
         <SheetHeader
-          title="家庭设置"
+          title={t('family.settings')}
           onClose={onClose}
           onConfirm={isOwner ? save : undefined}
           confirmDisabled={!canSave}
@@ -316,6 +315,7 @@ function CoverCropSheet({
   onConfirm: (crop: FamilyCoverCrop) => void;
 }) {
   const { width: viewportWidth } = useWindowDimensions();
+  useLocalePreference();
   const cropWidth = Math.min(Math.max(viewportWidth - Space[12], 240), 520);
   const cropHeight = cropWidth / 3;
   const initialCrop = image ? defaultFamilyCoverCrop(image) : null;
@@ -339,8 +339,7 @@ function CoverCropSheet({
     originX: (image.width - initialCrop.width / zoom) * position.x,
     originY: (image.height - initialCrop.height / zoom) * position.y,
   };
-  const direction =
-    maxOffsetX > 1 ? '拖动调整取景，双指缩放' : maxOffsetY > 1 ? '拖动调整取景，双指缩放' : '双指缩放后可拖动调整取景';
+  const direction = maxOffsetX > 1 || maxOffsetY > 1 ? t('family.cropHint') : t('family.cropHintPinch');
   const resetCrop = () => {
     setZoom(1);
     setPosition({ x: 0.5, y: 0.5 });
@@ -353,12 +352,17 @@ function CoverCropSheet({
         <View style={styles.cropRoot}>
           <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.flex}>
             <View style={styles.cropHeader}>
-              <CropHeaderButton icon="xmark" label="取消裁切" onPress={onClose} />
-              <Text style={styles.cropTitle}>裁切封面</Text>
-              <CropHeaderButton icon="checkmark" label="完成裁切" disabled={saving} onPress={() => onConfirm(crop)} />
+              <CropHeaderButton icon="xmark" label={t('family.cropCancel')} onPress={onClose} />
+              <Text style={styles.cropTitle}>{t('family.cropTitle')}</Text>
+              <CropHeaderButton
+                icon="checkmark"
+                label={t('family.cropDone')}
+                disabled={saving}
+                onPress={() => onConfirm(crop)}
+              />
             </View>
             <View style={styles.cropContent}>
-              <Text style={styles.cropEyebrow}>家庭封面 · 固定 3:1 比例</Text>
+              <Text style={styles.cropEyebrow}>{t('family.cropEyebrow')}</Text>
               <View
                 onStartShouldSetResponder={() => true}
                 onResponderGrant={(event) => {
@@ -408,7 +412,7 @@ function CoverCropSheet({
                 }}
                 style={[styles.cropViewport, { width: cropWidth, height: cropHeight }]}
                 accessibilityRole="adjustable"
-                accessibilityLabel="家庭封面取景区域"
+                accessibilityLabel={t('family.cropArea')}
                 accessibilityHint={direction}
               >
                 <Image
@@ -429,11 +433,11 @@ function CoverCropSheet({
               <Pressable
                 onPress={resetCrop}
                 accessibilityRole="button"
-                accessibilityLabel="还原封面取景"
+                accessibilityLabel={t('family.cropReset')}
                 style={({ pressed }) => [styles.cropReset, pressed ? styles.cropButtonPressed : null]}
               >
                 <SymbolView name="arrow.counterclockwise" tintColor="#FFFFFF" size={15} />
-                <Text style={styles.cropResetText}>还原</Text>
+                <Text style={styles.cropResetText}>{t('common.reset')}</Text>
               </Pressable>
             </View>
           </SafeAreaView>

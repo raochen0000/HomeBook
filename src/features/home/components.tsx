@@ -28,6 +28,7 @@ import type { ComponentProps } from 'react';
 import { Dimensions } from 'react-native';
 
 import { Radius, Space, Typography, usePalette } from '@/constants/design';
+import { t } from '@/i18n';
 import { budgetLevel, budgetStage } from '@/lib/budget';
 import { amountParts, formatAmount, signForNet } from '@/lib/format';
 import { avatarInitialFromNickname } from '@/lib/profile';
@@ -305,13 +306,13 @@ export function DayGroup({
           <SwipeActions.Actions edge="trailing" allowsFullSwipe={false}>
             <Button
               systemImage="square.and.pencil"
-              label="编辑"
+              label={t('common.edit')}
               onPress={() => onEdit?.(row.id)}
               modifiers={[tint(palette.info)]}
             />
             <Button
               systemImage="trash"
-              label="删除"
+              label={t('common.delete')}
               onPress={() => onDelete?.(row.id)}
               modifiers={[tint(palette.danger)]}
             />
@@ -329,9 +330,6 @@ function amountLineHeight(integerSize: number): number {
   if (integerSize >= 22) return Typography.title1.lineHeight;
   return Typography.amountRow.lineHeight;
 }
-
-/** 进度条副文案占位（固定最长宽度，避免显/隐切换时换行或行高变化）。 */
-const PROGRESS_CAPTION_RESERVE = '已用 ¥9,999,999.99 / ¥9,999,999.99 · 距月底 31 天';
 
 /**
  * 金额：隐藏时用透明真实 AmountText 撑开行盒，遮罩层叠在上方；外层 HStack+Spacer 保证左对齐。
@@ -395,14 +393,19 @@ function ProgressCaption({
 }) {
   const palette = usePalette();
   const lineHeight = Typography.footnote.lineHeight;
-  const visible = `已用 ${formatAmount(usedCents, '')} / ${formatAmount(totalCents, '')} · 距月底 ${daysLeft} 天`;
-  const masked = `已用 ¥•••• / ¥•••• · 距月底 ${daysLeft} 天`;
+  const visible = t('home.usedCaption', {
+    used: formatAmount(usedCents, ''),
+    total: formatAmount(totalCents, ''),
+    days: daysLeft,
+  });
+  const masked = t('home.usedCaptionMasked', { days: daysLeft });
+  const caption = hidden ? masked : visible;
   const textMods = [font({ size: 12 }), foregroundColor(palette.textSecondary), lineLimit(1), truncationMode('tail')];
   return (
     <HStack modifiers={[frame({ height: lineHeight, maxWidth: 9999 })]}>
       <ZStack alignment="topLeading">
-        <Text modifiers={[...textMods, opacity(0)]}>{PROGRESS_CAPTION_RESERVE}</Text>
-        <Text modifiers={textMods}>{hidden ? masked : visible}</Text>
+        <Text modifiers={[...textMods, opacity(0)]}>{caption}</Text>
+        <Text modifiers={textMods}>{caption}</Text>
       </ZStack>
       <Spacer />
     </HStack>
@@ -462,12 +465,13 @@ function ProgressBar({
  */
 export function PulseCardSkeleton({
   contentInsets = { horizontal: Space[4], vertical: Space[4] },
-  message = '加载中…',
+  message,
 }: {
   contentInsets?: ContentInsets;
   message?: string;
 }) {
   const palette = usePalette();
+  const status = message ?? t('common.loading');
 
   return (
     <VStack
@@ -478,8 +482,8 @@ export function PulseCardSkeleton({
         padding({ horizontal: contentInsets.horizontal, vertical: contentInsets.vertical }),
       ]}
     >
-      <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>本月概览</Text>
-      <Text modifiers={[font({ size: 22, weight: 'bold' }), foregroundColor(palette.textTertiary)]}>{message}</Text>
+      <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>{t('home.overview')}</Text>
+      <Text modifiers={[font({ size: 22, weight: 'bold' }), foregroundColor(palette.textTertiary)]}>{status}</Text>
     </VStack>
   );
 }
@@ -539,7 +543,7 @@ export function PulseCard({
         spacing={Space[1]}
         modifiers={[padding({ vertical: Space[1] }), contentShape(shapes.rectangle()), onTapGesture(() => onPress())]}
       >
-        <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>总结</Text>
+        <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>{t('home.summary')}</Text>
         <Image systemName="chevron.right" size={11} color={palette.textTertiary} />
       </HStack>
     </HStack>
@@ -554,7 +558,7 @@ export function PulseCard({
   if (!hasBudget) {
     return (
       <VStack alignment="leading" spacing={Space[2]} modifiers={cardModifiers}>
-        {header('本月结余')}
+        {header(t('home.monthBalance'))}
         <MaskOrAmount
           cents={balanceCents}
           sign={signForNet(balanceCents)}
@@ -566,7 +570,7 @@ export function PulseCard({
         />
         <HStack spacing={Space[8]} modifiers={[padding({ top: Space[2] })]}>
           <VStack alignment="leading" spacing={2}>
-            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>支出</Text>
+            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{t('record.expense')}</Text>
             <MaskOrAmount
               cents={expenseCents}
               color={palette.expense}
@@ -577,7 +581,7 @@ export function PulseCard({
             />
           </VStack>
           <VStack alignment="leading" spacing={2}>
-            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>收入</Text>
+            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{t('record.income')}</Text>
             <MaskOrAmount
               cents={incomeCents}
               color={palette.income}
@@ -599,7 +603,7 @@ export function PulseCard({
         >
           <Image systemName={isOwner ? 'plus.circle' : 'lock'} size={13} color={palette.textTertiary} />
           <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>
-            {isOwner ? '设置本月预算，掌握可支配额度' : '待户主设置预算'}
+            {isOwner ? t('home.setBudgetCta') : t('home.waitOwnerBudget')}
           </Text>
           <Spacer />
           {isOwner ? <Image systemName="chevron.right" size={11} color={palette.textTertiary} /> : null}
@@ -617,7 +621,7 @@ export function PulseCard({
 
   return (
     <VStack alignment="leading" spacing={Space[2]} modifiers={cardModifiers}>
-      {header(over ? '本月已超支' : '本月可支配')}
+      {header(over ? t('home.monthOver') : t('home.monthAvailable'))}
       <MaskOrAmount
         cents={over ? -remaining : remaining}
         sign=""
@@ -650,7 +654,7 @@ export function PulseCard({
           frame({ height: Typography.amountRow.lineHeight, alignment: 'center' }),
         ]}
       >
-        <Text modifiers={[font({ size: 14 }), foregroundColor(palette.textSecondary)]}>本月结余</Text>
+        <Text modifiers={[font({ size: 14 }), foregroundColor(palette.textSecondary)]}>{t('home.monthBalance')}</Text>
         <Spacer />
         <MaskOrAmount
           cents={balanceCents}
@@ -667,12 +671,12 @@ export function PulseCard({
 }
 
 // ── 列表到底提示：居中浅灰文案，置于流水列表末尾，表示「没有更多了」。──
-export function EndOfListHint({ text = '暂无更多数据' }: { text?: string }) {
+export function EndOfListHint({ text }: { text?: string }) {
   const palette = usePalette();
   return (
     <HStack modifiers={[padding({ vertical: Space[2] })]}>
       <Spacer />
-      <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>{text}</Text>
+      <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>{text ?? t('common.noMore')}</Text>
       <Spacer />
     </HStack>
   );
@@ -709,9 +713,27 @@ export function InsightBanner({
     >
       <HStack spacing={Space[3]} alignment="center" modifiers={contentMods}>
         <Image systemName="calendar" size={28} color={palette.textSecondary} />
-        <VStack alignment="leading" spacing={2}>
-          <Text modifiers={[font({ size: 15, weight: 'medium' }), foregroundColor(palette.textPrimary)]}>{title}</Text>
-          <Text modifiers={[font({ size: 11 }), foregroundColor(palette.textSecondary)]}>{subtitle}</Text>
+        <VStack alignment="leading" spacing={2} modifiers={[frame({ maxWidth: 9999 })]}>
+          <Text
+            modifiers={[
+              font({ size: 15, weight: 'medium' }),
+              foregroundColor(palette.textPrimary),
+              lineLimit(2),
+              truncationMode('tail'),
+            ]}
+          >
+            {title}
+          </Text>
+          <Text
+            modifiers={[
+              font({ size: 11 }),
+              foregroundColor(palette.textSecondary),
+              lineLimit(2),
+              truncationMode('tail'),
+            ]}
+          >
+            {subtitle}
+          </Text>
         </VStack>
         <Spacer />
         {onPress ? <Image systemName="chevron.right" size={13} color={palette.textTertiary} /> : null}

@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { t, useLocalePreference } from '@/i18n';
 import { bindApple, unbindApple, useSession } from '@/lib/auth';
 
 /**
@@ -26,25 +27,26 @@ function appleErrorText(err: unknown): string {
   const e = err as { status?: number; message?: string; name?: string; code?: string };
   const msg = (e?.message ?? '').toLowerCase();
   if (e?.code === 'single_identity_not_deletable' || msg.includes('single identity')) {
-    return 'Apple 是当前唯一登录方式，不可解绑；请先绑定手机号或邮箱';
+    return t('account.appleOnlyIdentity');
   }
   if (e?.code === 'identity_already_exists' || msg.includes('already') || msg.includes('linked')) {
-    return '该 Apple 账号已绑定到其他账号';
+    return t('account.appleTaken');
   }
   if (e?.code === 'manual_linking_disabled' || msg.includes('manual linking')) {
-    return '账号关联暂不可用，请稍后再试';
+    return t('account.linkingUnavailable');
   }
   const down =
     e?.status === 0 ||
     e?.name === 'AuthRetryableFetchError' ||
     msg.includes('network request failed') ||
     msg.includes('failed to fetch');
-  if (down) return '网络异常，请稍后重试';
+  if (down) return t('auth.networkRetry');
   return e?.message ?? String(err);
 }
 
 export default function AppleScreen() {
   const palette = usePalette();
+  useLocalePreference();
   const insets = useSafeAreaInsets();
   const { session } = useSession();
 
@@ -60,7 +62,7 @@ export default function AppleScreen() {
     setBusy(true);
     try {
       const ok = await bindApple();
-      if (ok) toast.success('Apple 绑定成功');
+      if (ok) toast.success(t('account.bindAppleOk'));
     } catch (err) {
       toast.error(appleErrorText(err));
     } finally {
@@ -69,16 +71,16 @@ export default function AppleScreen() {
   };
 
   const onUnbind = () => {
-    Alert.alert('解绑 Apple', '解绑后将无法再用 Apple 登录家账。确定要解绑吗？', [
-      { text: '取消', style: 'cancel' },
+    Alert.alert(t('account.unbindApple'), t('account.unbindAppleConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: '解绑',
+        text: t('common.unbind'),
         style: 'destructive',
         onPress: async () => {
           setBusy(true);
           try {
             await unbindApple();
-            toast.success('已解绑 Apple');
+            toast.success(t('account.unbindAppleOk'));
           } catch (err) {
             toast.error(appleErrorText(err));
           } finally {
@@ -91,7 +93,7 @@ export default function AppleScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <Stack.Screen options={{ headerShown: true, title: 'Apple' }} />
+      <Stack.Screen options={{ headerShown: true, title: t('account.apple') }} />
       <ScrollView
         style={styles.flex}
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Space[6] }]}
@@ -99,7 +101,7 @@ export default function AppleScreen() {
         {/* 品牌头 + 状态 */}
         <View style={styles.brand}>
           <SymbolView name="apple.logo" tintColor={palette.textPrimary} size={44} />
-          <Text style={[styles.title, { color: palette.textPrimary }]}>通过 Apple 登录</Text>
+          <Text style={[styles.title, { color: palette.textPrimary }]}>{t('auth.appleLogin')}</Text>
           <View style={[styles.statusPill, { backgroundColor: palette.cardPill }]}>
             <SymbolView
               name={hasApple ? 'checkmark.circle.fill' : 'circle'}
@@ -107,7 +109,11 @@ export default function AppleScreen() {
               size={14}
             />
             <Text style={[styles.statusText, { color: hasApple ? palette.textPrimary : palette.textSecondary }]}>
-              {hasApple ? (appleEmail ? `已连接 · ${appleEmail}` : '已连接') : '未连接'}
+              {hasApple
+                ? appleEmail
+                  ? t('account.connectedWith', { email: appleEmail })
+                  : t('common.connected')
+                : t('common.notConnected')}
             </Text>
           </View>
         </View>
@@ -117,29 +123,19 @@ export default function AppleScreen() {
           <AppleBenefit
             palette={palette}
             icon="checkmark.shield"
-            title="快速、安全、保护隐私"
-            text="使用你已有的 Apple 账号登录，无需创建新账号，App 不会获取你的密码。"
+            title={t('auth.appleTitle')}
+            text={t('auth.appleBody')}
           />
           <View style={[styles.divider, { backgroundColor: palette.separator }]} />
-          <AppleBenefit
-            palette={palette}
-            icon="person"
-            title="仅分享必要信息"
-            text="你可选择分享姓名和电子邮件，App 将严格保护你的隐私。"
-          />
+          <AppleBenefit palette={palette} icon="person" title={t('auth.shareTitle')} text={t('auth.shareBody')} />
           <View style={[styles.divider, { backgroundColor: palette.separator }]} />
-          <AppleBenefit
-            palette={palette}
-            icon="key"
-            title="在设备间轻松登录"
-            text="使用 iCloud 钥匙串，帮你在所有 Apple 设备上自动登录。"
-          />
+          <AppleBenefit palette={palette} icon="key" title={t('auth.devicesTitle')} text={t('auth.devicesBody')} />
         </View>
 
         {/* 主操作 */}
         {!supported ? (
           <Text style={[styles.hint, { color: palette.textTertiary, textAlign: 'center' }]}>
-            Apple 登录仅在 iOS 设备上可用。
+            {t('account.appleIosOnly')}
           </Text>
         ) : hasApple ? (
           <>
@@ -151,12 +147,10 @@ export default function AppleScreen() {
               {busy ? (
                 <ActivityIndicator color={palette.danger} />
               ) : (
-                <Text style={[styles.unbindText, { color: palette.danger }]}>解绑 Apple</Text>
+                <Text style={[styles.unbindText, { color: palette.danger }]}>{t('account.unbindApple')}</Text>
               )}
             </Pressable>
-            <Text style={[styles.hint, { color: palette.textTertiary }]}>
-              解绑前请确保已绑定手机号或邮箱，账号需至少保留一种登录方式。
-            </Text>
+            <Text style={[styles.hint, { color: palette.textTertiary }]}>{t('account.unbindAppleHint')}</Text>
           </>
         ) : (
           <>
@@ -171,13 +165,11 @@ export default function AppleScreen() {
               ) : (
                 <>
                   <SymbolView name="apple.logo" tintColor={palette.base} size={18} />
-                  <Text style={[styles.appleBtnText, { color: palette.base }]}>通过 Apple 绑定</Text>
+                  <Text style={[styles.appleBtnText, { color: palette.base }]}>{t('account.bindApple')}</Text>
                 </>
               )}
             </Pressable>
-            <Text style={[styles.hint, { color: palette.textTertiary }]}>
-              绑定后可用 Apple 一键登录家账；App 不会获取你的密码。
-            </Text>
+            <Text style={[styles.hint, { color: palette.textTertiary }]}>{t('account.bindAppleHint')}</Text>
           </>
         )}
       </ScrollView>

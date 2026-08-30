@@ -15,6 +15,7 @@ import { createInvitation, type Invitation, useMyFamily, useMyProfile } from '@/
 import { PageSheet } from '@/components/page-sheet';
 import { SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
+import { alertOk, t, useLocalePreference } from '@/i18n';
 
 /** react-native-qrcode-svg 的 ref 暴露 toDataURL（回调返回 base64 PNG，无 data: 前缀）。 */
 type QRRef = { toDataURL: (cb: (data: string) => void) => void };
@@ -45,6 +46,7 @@ function fmtRemain(ms: number): string {
 
 function InviteBody() {
   const palette = useSheetPalette();
+  useLocalePreference();
   const familyQ = useMyFamily();
   const profileQ = useMyProfile();
   const [inv, setInv] = useState<Invitation | null>(null);
@@ -69,8 +71,8 @@ function InviteBody() {
 
   // 每秒推进，用于有效期倒计时。
   useEffect(() => {
-    const t = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, []);
 
   const refresh = () => {
@@ -102,16 +104,16 @@ function InviteBody() {
       try {
         const perm = await MediaLibrary.requestPermissionsAsync();
         if (!perm.granted) {
-          Alert.alert('需要相册权限', '请在系统设置中允许「家账」保存照片后重试。');
+          Alert.alert(t('invite.albumPermission'), t('invite.albumPermissionBody'), alertOk());
           return;
         }
         const base64 = data.replace(/\s/g, '');
         const uri = `${FileSystem.cacheDirectory}invite-${inv.code}.png`;
         await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
         await MediaLibrary.saveToLibraryAsync(uri);
-        Alert.alert('已保存', '邀请二维码已保存到相册。');
+        Alert.alert(t('invite.saved'), t('invite.qrSaved'), alertOk());
       } catch (e) {
-        Alert.alert('保存失败', (e as Error).message ?? String(e));
+        Alert.alert(t('account.saveFailed'), (e as Error).message ?? String(e), alertOk());
       } finally {
         setSaving(false);
       }
@@ -122,7 +124,7 @@ function InviteBody() {
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（纯预览型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
-        <SheetHeader title="邀请家人" />
+        <SheetHeader title={t('family.invite')} />
 
         <View style={styles.center}>
           {loading ? (
@@ -132,12 +134,14 @@ function InviteBody() {
           ) : inv ? (
             <>
               {/* 家庭信息 */}
-              <Text style={[styles.familyName, { color: palette.textPrimary }]}>{familyQ.data?.name ?? '我的家'}</Text>
+              <Text style={[styles.familyName, { color: palette.textPrimary }]}>
+                {familyQ.data?.name ?? t('home.myHome')}
+              </Text>
               <Text style={[styles.owner, { color: palette.textSecondary }]}>
-                户主 · {profileQ.data?.nickname ?? '我'}
+                {t('invite.ownerMe', { name: profileQ.data?.nickname ?? t('common.me') })}
               </Text>
 
-              <Text style={[styles.hint, { color: palette.textSecondary }]}>让家人扫码，或输入下方邀请码加入</Text>
+              <Text style={[styles.hint, { color: palette.textSecondary }]}>{t('invite.scanHint')}</Text>
 
               <View style={[styles.qrCard, { backgroundColor: '#FFFFFF' }]}>
                 <QRCode
@@ -156,7 +160,7 @@ function InviteBody() {
 
               {/* 有效期倒计时 */}
               <Text style={[styles.expiry, { color: expired ? palette.danger : palette.textTertiary }]}>
-                {expired ? '邀请码已过期，请刷新' : `${fmtRemain(remainMs)} 后失效`}
+                {expired ? t('invite.expiredRefresh') : t('invite.expiresIn', { time: fmtRemain(remainMs) })}
               </Text>
 
               {/* 一键复制 */}
@@ -165,7 +169,9 @@ function InviteBody() {
                 disabled={expired}
                 style={[styles.copyBtn, { backgroundColor: palette.ink, opacity: expired ? 0.35 : 1 }]}
               >
-                <Text style={[styles.copyText, { color: palette.onInk }]}>{copied ? '已复制 ✓' : '复制邀请码'}</Text>
+                <Text style={[styles.copyText, { color: palette.onInk }]}>
+                  {copied ? t('invite.copied') : t('invite.copyCode')}
+                </Text>
               </Pressable>
 
               {/* 存图 + 刷新 */}
@@ -178,11 +184,11 @@ function InviteBody() {
                   {saving ? (
                     <ActivityIndicator />
                   ) : (
-                    <Text style={{ color: palette.textPrimary, fontSize: 15 }}>保存二维码</Text>
+                    <Text style={{ color: palette.textPrimary, fontSize: 15 }}>{t('invite.saveQr')}</Text>
                   )}
                 </Pressable>
                 <Pressable onPress={refresh} style={[styles.ghostBtn, { borderColor: palette.separator }]}>
-                  <Text style={{ color: palette.textPrimary, fontSize: 15 }}>刷新邀请码</Text>
+                  <Text style={{ color: palette.textPrimary, fontSize: 15 }}>{t('invite.refresh')}</Text>
                 </Pressable>
               </View>
             </>

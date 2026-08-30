@@ -1,3 +1,5 @@
+import { t } from '@/i18n/instance';
+
 export const NICKNAME_MIN_LENGTH = 1;
 export const NICKNAME_MAX_LENGTH = 10;
 
@@ -13,7 +15,7 @@ export function avatarInitialFromNickname(value: string): string {
 export function validateNickname(value: string): string | null {
   const length = nicknameLength(value);
   if (length < NICKNAME_MIN_LENGTH || length > NICKNAME_MAX_LENGTH) {
-    return `昵称需为 ${NICKNAME_MIN_LENGTH}-${NICKNAME_MAX_LENGTH} 个字符`;
+    return t('account.nicknameRange', { min: NICKNAME_MIN_LENGTH, max: NICKNAME_MAX_LENGTH });
   }
   return null;
 }

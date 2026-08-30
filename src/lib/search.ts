@@ -45,12 +45,14 @@ export const EMPTY_FILTERS: SearchFilters = {
 };
 
 export type SearchContext = {
-  /** category_id → 分类名（关键词命中分类名用） */
-  categoryNameById: Map<string, string>;
+  /** category_id → 可供关键词命中的名称（存库名 + 翻译名） */
+  categoryNamesById: Map<string, string[]>;
   /** user_id → 昵称（关键词命中成员名用） */
   recorderNameById: Map<string, string>;
   /** 当前登录用户 id（关键词命中「我」用） */
   myId: string | undefined;
+  /** 当前语言下「我」的标签 */
+  meLabel: string;
 };
 
 export type SearchTotals = {
@@ -145,9 +147,9 @@ export function hasAnyQuery(filters: SearchFilters): boolean {
 
 function matchesKeyword(t: Transaction, kw: string, ctx: SearchContext): boolean {
   if (kw === '') return true;
-  const catName = ctx.categoryNameById.get(t.category_id) ?? '';
-  const recName = t.recorder_user_id === ctx.myId ? '我' : (ctx.recorderNameById.get(t.recorder_user_id) ?? '');
-  const hay = `${t.note ?? ''} ${catName} ${recName}`.toLowerCase();
+  const catNames = ctx.categoryNamesById.get(t.category_id) ?? [];
+  const recName = t.recorder_user_id === ctx.myId ? ctx.meLabel : (ctx.recorderNameById.get(t.recorder_user_id) ?? '');
+  const hay = `${t.note ?? ''} ${catNames.join(' ')} ${recName}`.toLowerCase();
   return hay.includes(kw);
 }
 

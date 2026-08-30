@@ -6,25 +6,27 @@ import { ExternalLink } from './external-link';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 
+import { t, useLocalePreference } from '@/i18n';
 import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
 
 export default function AppTabs() {
+  useLocalePreference();
   return (
     <Tabs>
       <TabSlot style={{ height: '100%' }} />
       <TabList asChild>
         <CustomTabList>
           <TabTrigger name="home" href="/" asChild>
-            <TabButton>首页</TabButton>
+            <TabButton>{t('tabs.home')}</TabButton>
           </TabTrigger>
           <TabTrigger name="report" href="/report" asChild>
-            <TabButton>报表</TabButton>
+            <TabButton>{t('tabs.report')}</TabButton>
           </TabTrigger>
           <TabTrigger name="family" href="/family" asChild>
-            <TabButton>家庭</TabButton>
+            <TabButton>{t('tabs.family')}</TabButton>
           </TabTrigger>
           <TabTrigger name="mine" href="/mine" asChild>
-            <TabButton>我的</TabButton>
+            <TabButton>{t('tabs.mine')}</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>
@@ -52,7 +54,7 @@ export function CustomTabList(props: TabListProps) {
     <View {...props} style={styles.tabListContainer}>
       <ThemedView type="backgroundElement" style={styles.innerContainer}>
         <ThemedText type="smallBold" style={styles.brandText}>
-          家账
+          {t('appName')}
         </ThemedText>
 
         {props.children}

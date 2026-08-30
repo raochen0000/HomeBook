@@ -2,6 +2,16 @@
  * 金额格式化（DESIGN §8）。金额以「分」存储；展示拆为整数 / 小数两段，
  * 整数主字号、小数降一档；千分位分隔；符号 +（收入）/ −（支出）。
  */
+import { fromI18nLanguage, INTL_LOCALE } from '@/i18n/locale';
+import { i18n, t } from '@/i18n/instance';
+
+function activeLocale() {
+  return fromI18nLanguage(i18n.language);
+}
+
+function intlLocale() {
+  return INTL_LOCALE[activeLocale()];
+}
 
 export type AmountParts = {
   /** 符号：'+' | '-' | ''（中性/结余） */
@@ -77,18 +87,22 @@ export function formatPercent(pct: number): string {
 /** 按小时取问候语（顶栏副标题前半句）。 */
 export function greetingForHour(date = new Date()): string {
   const h = date.getHours();
-  if (h < 6) return '夜深了';
-  if (h < 12) return '早上好';
-  if (h < 14) return '中午好';
-  if (h < 18) return '下午好';
-  return '晚上好';
+  if (h < 6) return t('dates.greetingLateNight');
+  if (h < 12) return t('dates.greetingMorning');
+  if (h < 14) return t('dates.greetingNoon');
+  if (h < 18) return t('dates.greetingAfternoon');
+  return t('dates.greetingEvening');
 }
 
 /** 人性化月份标题：今年省略年份（如「6月」），往年带年（如「2025年6月」）。 */
 export function monthLabel(date: Date): string {
   const now = new Date();
-  const m = `${date.getMonth() + 1}月`;
-  return date.getFullYear() === now.getFullYear() ? m : `${date.getFullYear()}年${m}`;
+  const sameYear = date.getFullYear() === now.getFullYear();
+  if (activeLocale() === 'en') {
+    return date.toLocaleDateString('en-US', sameYear ? { month: 'short' } : { month: 'short', year: 'numeric' });
+  }
+  const m = t('dates.monthShort', { month: date.getMonth() + 1 });
+  return sameYear ? m : t('dates.monthLong', { year: date.getFullYear(), month: date.getMonth() + 1 });
 }
 
 /** 取某时间戳的「年-月-日」key，用于按日分组。 */
@@ -105,9 +119,9 @@ export function humanDay(iso: string): string {
   yesterday.setDate(today.getDate() - 1);
   const sameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  if (sameDay(d, today)) return '今天';
-  if (sameDay(d, yesterday)) return '昨天';
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (sameDay(d, today)) return t('dates.today');
+  if (sameDay(d, yesterday)) return t('dates.yesterday');
+  return d.toLocaleDateString(intlLocale(), { month: 'numeric', day: 'numeric' });
 }
 
 /** 24 小时制时刻（HH:mm），用于流水行的记录/修改时间。 */

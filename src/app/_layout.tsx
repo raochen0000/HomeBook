@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
-import { useEffect } from 'react';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider, usePathname, useRouter, type Href } from 'expo-router';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useColorScheme } from 'react-native';
 import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -12,6 +12,7 @@ import { usePushRegistration } from '@/features/notifications/use-push-registrat
 import { useRecurringCatchup } from '@/features/record/use-recurring-catchup';
 import { SearchProvider } from '@/features/search/search-provider';
 import { ThemePreferenceProvider } from '@/features/settings/theme-preference';
+import { localePathRef, LocalePreferenceProvider, pendingLocaleRestoreRef, useLocalePreference } from '@/i18n';
 import { useSession } from '@/lib/auth';
 import { devAutoSignIn } from '@/lib/dev-auth';
 import { queryClient } from '@/lib/query-client';
@@ -40,16 +41,43 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <ThemePreferenceProvider>
-          <AppShell />
+          <LocalePreferenceProvider>
+            <AppShell />
+          </LocalePreferenceProvider>
         </ThemePreferenceProvider>
       </SafeAreaProvider>
     </QueryClientProvider>
   );
 }
 
+/**
+ * NativeTabs + SwiftUI Host 不会随 JS 文案更新已挂着的原生树；
+ * 切语言时重挂导航壳。启动时读存档导致的 locale 变化不还原路由。
+ */
+function RestoreLocaleRoute() {
+  const { locale } = useLocalePreference();
+  const router = useRouter();
+  const prev = useRef(locale);
+  useLayoutEffect(() => {
+    if (prev.current === locale) return;
+    prev.current = locale;
+    const path = pendingLocaleRestoreRef.current;
+    pendingLocaleRestoreRef.current = null;
+    if (!path) return;
+    // 等新 Stack 挂上再还原，避免 replace 打在正在卸载的导航上。
+    requestAnimationFrame(() => router.replace(path as Href));
+  }, [locale, router]);
+  return null;
+}
+
 /** Provider 内层：依赖 QueryClient / session 的根级副作用与导航壳。 */
 function AppShell() {
   const colorScheme = useColorScheme();
+  const { locale } = useLocalePreference();
+  const pathname = usePathname();
+  useEffect(() => {
+    localePathRef.current = pathname;
+  }, [pathname]);
   const { session, loading } = useSession();
   const signedIn = !loading && !!session;
   const signedOut = !loading && !session;
@@ -70,8 +98,9 @@ function AppShell() {
         {/*
          * 根导航栈：已登录页用 Stack.Protected 守住。注销后账号与安全等原生页会从栈里摘掉，
          * 落到 login（覆盖层无法盖住 Native Stack，这是停留在账号页的根因）。
+         * key=locale：拆掉 NativeTabs / Host 的旧原生树，否则切语言后各 Tab 会中英混排。
          */}
-        <Stack screenOptions={{ headerShown: false, headerBackButtonDisplayMode: 'minimal' }}>
+        <Stack key={locale} screenOptions={{ headerShown: false, headerBackButtonDisplayMode: 'minimal' }}>
           <Stack.Protected guard={signedIn}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="search" />
@@ -94,6 +123,7 @@ function AppShell() {
             <Stack.Screen name="login" />
           </Stack.Protected>
         </Stack>
+        <RestoreLocaleRoute />
       </SearchProvider>
       {/* 已登录：关键通知兜底（被移除/解散/转让，流程 13）。 */}
       {session ? <NotificationGate /> : null}

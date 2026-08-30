@@ -10,6 +10,7 @@ import { Stack } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Share, View } from 'react-native';
 
+import { alertOk, t } from '@/i18n';
 import { Space, usePalette } from '@/constants/design';
 import { LegalSheet, type LegalKind } from '@/features/settings/legal-sheet';
 import { Row, SettingsList } from '@/features/settings/native-list';
@@ -21,14 +22,14 @@ export default function AboutScreen() {
   const [legal, setLegal] = useState<LegalKind | null>(null);
 
   const onShare = () => {
-    Share.share({ message: '家账 · 一家人一起记账，账目清清楚楚。' }).catch(() => {});
+    Share.share({ message: t('about.shareMessage') }).catch(() => {});
   };
-  const onRate = () => Alert.alert('给我们评分', '应用上架后即可在 App Store 评分，敬请期待。');
-  const onCheckUpdate = () => Alert.alert('检查更新', '当前已是最新版本。');
+  const onRate = () => Alert.alert(t('about.rate'), t('about.rateSoon'), alertOk());
+  const onCheckUpdate = () => Alert.alert(t('about.checkUpdate'), t('about.latest'), alertOk());
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.base }}>
-      <Stack.Screen options={{ headerShown: true, title: '关于家账' }} />
+      <Stack.Screen options={{ headerShown: true, title: t('about.title') }} />
       <SettingsList>
         {/* 品牌头 */}
         <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
@@ -42,7 +43,9 @@ export default function AboutScreen() {
                   contentFit="contain"
                 />
               </RNHostView>
-              <Text modifiers={[font({ size: 24, weight: 'bold' }), foregroundColor(palette.textPrimary)]}>家账</Text>
+              <Text modifiers={[font({ size: 24, weight: 'bold' }), foregroundColor(palette.textPrimary)]}>
+                {t('appName')}
+              </Text>
               <Text modifiers={[font({ size: 14 }), foregroundColor(palette.textSecondary)]}>{APP_VERSION}</Text>
             </VStack>
             <Spacer />
@@ -50,25 +53,28 @@ export default function AboutScreen() {
         </Section>
 
         <Section>
-          <Row icon="arrow.triangle.2.circlepath" label="检查更新" value={APP_VERSION} onPress={onCheckUpdate} />
+          <Row
+            icon="arrow.triangle.2.circlepath"
+            label={t('about.checkUpdate')}
+            value={APP_VERSION}
+            onPress={onCheckUpdate}
+          />
         </Section>
 
         <Section>
-          <Row icon="doc.text.fill" label="用户协议" onPress={() => setLegal('terms')} />
-          <Row icon="hand.raised.fill" label="隐私政策" onPress={() => setLegal('privacy')} />
+          <Row icon="doc.text.fill" label={t('about.terms')} onPress={() => setLegal('terms')} />
+          <Row icon="hand.raised.fill" label={t('about.privacy')} onPress={() => setLegal('privacy')} />
         </Section>
 
         <Section>
-          <Row icon="star.fill" label="给我们评分" onPress={onRate} />
-          <Row icon="square.and.arrow.up" label="分享给朋友" onPress={onShare} />
+          <Row icon="star.fill" label={t('about.rate')} onPress={onRate} />
+          <Row icon="square.and.arrow.up" label={t('about.share')} onPress={onShare} />
         </Section>
 
         <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
           <HStack alignment="center">
             <Spacer />
-            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>
-              © 2026 家账 · 用心记录每一笔
-            </Text>
+            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>{t('about.copyright')}</Text>
             <Spacer />
           </HStack>
         </Section>

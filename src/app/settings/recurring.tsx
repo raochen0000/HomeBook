@@ -22,6 +22,7 @@ import {
   useUpdateRecurringRule,
   type RecurringRule,
 } from '@/api';
+import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { Space, useCategoryColors, usePalette } from '@/constants/design';
 import { RecurringSheet } from '@/features/record/recurring-sheet';
 import { Caption, SettingsList } from '@/features/settings/native-list';
@@ -32,6 +33,7 @@ type IconName = ComponentProps<typeof Image>['systemName'];
 
 export default function RecurringScreen() {
   const palette = usePalette();
+  useLocalePreference();
   const catColors = useCategoryColors();
   const rulesQ = useRecurringRules();
   const catsQ = useCategories();
@@ -56,12 +58,13 @@ export default function RecurringScreen() {
 
   const onDelete = (indices: number[]) => {
     const targets = indices.map((i) => rules[i]).filter(Boolean);
-    for (const r of targets) deleteM.mutate(r.id, { onError: (e) => Alert.alert('删除失败', (e as Error).message) });
+    for (const r of targets)
+      deleteM.mutate(r.id, { onError: (e) => Alert.alert(t('home.deleteFailed'), (e as Error).message, alertOk()) });
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.base }}>
-      <Stack.Screen options={{ headerShown: true, title: '定时收支' }} />
+      <Stack.Screen options={{ headerShown: true, title: t('settings.recurring') }} />
       <SettingsList>
         <Section>
           <HStack
@@ -70,18 +73,22 @@ export default function RecurringScreen() {
             modifiers={[contentShape(shapes.rectangle()), onTapGesture(openAdd)]}
           >
             <Image systemName="plus.circle.fill" size={20} color={palette.accent} />
-            <Text modifiers={[font({ size: 16 }), foregroundColor(palette.accent)]}>新增定时收支</Text>
+            <Text modifiers={[font({ size: 16 }), foregroundColor(palette.accent)]}>{t('record.addRecurring')}</Text>
             <Spacer />
           </HStack>
         </Section>
 
         {rules.length > 0 ? (
-          <Section title="每月自动记账">
+          <Section title={t('record.monthlyAuto')}>
             <List.ForEach onDelete={onDelete}>
               {rules.map((rule) => {
                 const rtype = rule.type as 'expense' | 'income';
                 const cat = catById.get(rule.category_id);
-                const catName = cat?.name ?? (rtype === 'income' ? '其他收入' : '未分类');
+                const catName = cat
+                  ? displayCategoryName(cat.name, cat.is_system)
+                  : rtype === 'income'
+                    ? t('categories.otherIncome')
+                    : t('common.uncategorized');
                 const icon = categorySymbol(cat?.icon ?? null, rtype) as IconName;
                 const color = catColors[categoryColorKey(catName, rtype, cat?.color_key)];
                 const title = rule.note?.trim() ? rule.note : catName;
@@ -101,7 +108,7 @@ export default function RecurringScreen() {
                       <VStack alignment="leading" spacing={Space[1]}>
                         <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{title}</Text>
                         <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>
-                          {`每月 ${rule.day_of_month} 号 · `}
+                          {`${t('common.everyMonthDay', { day: rule.day_of_month })} · `}
                           <Text modifiers={[font({ size: 13 }), foregroundColor(amountColor)]}>{amount}</Text>
                         </Text>
                       </VStack>
@@ -119,13 +126,7 @@ export default function RecurringScreen() {
           </Section>
         ) : null}
 
-        <Caption
-          text={
-            rules.length > 0
-              ? '关闭开关暂停该规则，不再自动记账；左滑可删除。生成的历史流水不受影响。'
-              : '还没有定时收支。新增后，每月到「记账日」会自动记一笔，如工资、Apple Music 订阅。'
-          }
-        />
+        <Caption text={rules.length > 0 ? t('settings.recurringHint') : t('settings.recurringEmpty')} />
       </SettingsList>
 
       <RecurringSheet

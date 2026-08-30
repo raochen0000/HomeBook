@@ -21,6 +21,7 @@ import {
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
+import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { budgetLevel, daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
 import { categoryColorKey } from '@/lib/category-style';
 import { currentPeriod, formatAmount, monthLabel } from '@/lib/format';
@@ -54,6 +55,7 @@ function levelColor(level: 'normal' | 'warning' | 'danger', palette: ReturnType<
 
 function Body() {
   const palette = useSheetPalette();
+  useLocalePreference();
   const period = currentPeriod();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
@@ -75,18 +77,18 @@ function Body() {
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（自动保存/预览型：纯标题，DESIGN §9.9）；onClose 由下滑手势承担 */}
-        <SheetHeader title={`预算 · ${monthLabel(new Date())}`} />
+        <SheetHeader title={t('budget.titled', { month: monthLabel(new Date()) })} />
 
         {budgetQ.isLoading ? null : !budget ? (
           <View style={styles.center}>
             <SymbolView name="chart.pie" tintColor={palette.textTertiary} size={48} />
-            <Text style={{ color: palette.textSecondary }}>本月还没有预算</Text>
+            <Text style={{ color: palette.textSecondary }}>{t('budget.empty')}</Text>
             {isOwner ? (
               <Pressable onPress={() => setEditing(true)} style={[styles.primary, { backgroundColor: palette.ink }]}>
-                <Text style={[styles.primaryText, { color: palette.onInk }]}>设置预算</Text>
+                <Text style={[styles.primaryText, { color: palette.onInk }]}>{t('budget.title')}</Text>
               </Pressable>
             ) : (
-              <Text style={{ color: palette.textTertiary, fontSize: 13 }}>请户主设置本月预算</Text>
+              <Text style={{ color: palette.textTertiary, fontSize: 13 }}>{t('budget.askOwner')}</Text>
             )}
           </View>
         ) : (
@@ -123,6 +125,7 @@ function BudgetView({
   onEdit: () => void;
 }) {
   const catColors = useCategoryColors();
+  useLocalePreference();
   const catsQ = useCategories('expense');
   const catById = useMemo(() => new Map((catsQ.data ?? []).map((c) => [c.id, c])), [catsQ.data]);
 
@@ -135,7 +138,7 @@ function BudgetView({
     <ScrollView contentContainerStyle={styles.content}>
       {/* 总预算卡 */}
       <View style={[styles.totalCard, { backgroundColor: palette.card }]}>
-        <Text style={{ color: palette.textSecondary }}>已用 / 总预算</Text>
+        <Text style={{ color: palette.textSecondary }}>{t('budget.usedOfTotal')}</Text>
         <Text style={[styles.totalAmount, { color: palette.textPrimary }]}>
           {formatAmount(usedTotal, '')}
           <Text style={{ color: palette.textTertiary, fontSize: 18 }}> / {formatAmount(total, '')}</Text>
@@ -147,10 +150,12 @@ function BudgetView({
         </View>
         <View style={styles.totalMeta}>
           <Text style={{ color: levelColor(level, palette), fontWeight: '600' }}>
-            {level === 'danger' ? `已超支 ${formatAmount(-remaining, '')}` : `剩 ${formatAmount(remaining, '')}`}
+            {level === 'danger'
+              ? t('common.overBy', { amount: formatAmount(-remaining, '') })
+              : t('common.leftover', { amount: formatAmount(remaining, '') })}
           </Text>
           <Text style={{ color: palette.textSecondary, fontSize: 13 }}>
-            {pct}% · 距月底 {daysLeft} 天
+            {t('budget.pctDays', { pct, days: daysLeft })}
           </Text>
         </View>
       </View>
@@ -158,14 +163,14 @@ function BudgetView({
       {/* 分类预算执行 */}
       {categories.length > 0 ? (
         <View style={styles.group}>
-          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>分类预算</Text>
+          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('budget.byCategory')}</Text>
           <View style={[styles.card, { backgroundColor: palette.card }]}>
             {categories.map((bc, i) => {
               const cat = catById.get(bc.category_id);
               const u = usedByCat.get(bc.category_id) ?? 0;
               const cpct = bc.amount > 0 ? Math.round((u / bc.amount) * 100) : 0;
               const clevel = budgetLevel(cpct);
-              const name = cat?.name ?? '已停用分类';
+              const displayName = cat ? displayCategoryName(cat.name, cat.is_system) : t('category.retired');
               return (
                 <View key={bc.category_id}>
                   {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
@@ -173,7 +178,7 @@ function BudgetView({
                     <View
                       style={[
                         styles.catDot,
-                        { backgroundColor: catColors[categoryColorKey(name, 'expense', cat?.color_key)] },
+                        { backgroundColor: catColors[categoryColorKey(cat?.name ?? '', 'expense', cat?.color_key)] },
                       ]}
                     >
                       <SymbolView
@@ -184,7 +189,9 @@ function BudgetView({
                     </View>
                     <View style={styles.flex}>
                       <View style={styles.catRowTop}>
-                        <Text style={{ color: palette.textPrimary, fontSize: 15, fontWeight: '500' }}>{name}</Text>
+                        <Text style={{ color: palette.textPrimary, fontSize: 15, fontWeight: '500' }}>
+                          {displayName}
+                        </Text>
                         <Text
                           style={{ color: clevel === 'danger' ? palette.danger : palette.textSecondary, fontSize: 13 }}
                         >
@@ -210,11 +217,11 @@ function BudgetView({
 
       {isOwner ? (
         <Pressable onPress={onEdit} style={[styles.secondary, { borderColor: palette.separator }]}>
-          <Text style={{ color: palette.textPrimary, fontSize: 16 }}>调整预算</Text>
+          <Text style={{ color: palette.textPrimary, fontSize: 16 }}>{t('budget.adjust')}</Text>
         </Pressable>
       ) : (
         <Text style={{ color: palette.textTertiary, fontSize: 13, textAlign: 'center', paddingTop: Space[2] }}>
-          预算由户主设置，你可以查看执行情况
+          {t('budget.ownerSets')}
         </Text>
       )}
     </ScrollView>
@@ -224,6 +231,7 @@ function BudgetView({
 // ── 设置 / 调整预算（户主）──────────────────────────────────────────────────
 function Editor({ period, onBack }: { period: string; onBack: () => void }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const catColors = useCategoryColors();
   const familyQ = useMyFamily();
   const budgetQ = useBudget(period);
@@ -257,7 +265,7 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
     if (!canSave) return;
     const fid = familyQ.data?.id;
     if (!fid) {
-      Alert.alert('暂时无法保存', '请先创建或加入一个家庭。');
+      Alert.alert(t('budget.cannotSave'), t('category.noFamily'), alertOk());
       return;
     }
     const doSave = async () => {
@@ -271,13 +279,13 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
         });
         onBack();
       } catch (e) {
-        Alert.alert('保存失败', (e as Error).message ?? String(e));
+        Alert.alert(t('account.saveFailed'), (e as Error).message ?? String(e), alertOk());
       }
     };
     if (overAllocated) {
-      Alert.alert('分类合计超过总预算', '分类预算合计已超过总预算，仍要保存吗？', [
-        { text: '再改改', style: 'cancel' },
-        { text: '仍保存', onPress: doSave },
+      Alert.alert(t('budget.overTotal'), t('budget.overTotalBody'), [
+        { text: t('budget.revise'), style: 'cancel' },
+        { text: t('budget.saveAnyway'), onPress: doSave },
       ]);
     } else {
       await doSave();
@@ -288,10 +296,10 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
-        <SheetHeader title="设置预算" onBack={onBack} onConfirm={handleSave} confirmDisabled={!canSave} />
+        <SheetHeader title={t('budget.title')} onBack={onBack} onConfirm={handleSave} confirmDisabled={!canSave} />
 
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>本月总预算</Text>
+          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('budget.monthTotal')}</Text>
           <TextInput
             style={[styles.bigAmount, { backgroundColor: palette.card, color: palette.textPrimary }]}
             placeholder="0.00"
@@ -303,13 +311,15 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
           />
 
           <View style={[styles.switchRow, { backgroundColor: palette.card }]}>
-            <Text style={{ color: palette.textPrimary, fontSize: 15 }}>用至 80% 时预警</Text>
+            <Text style={{ color: palette.textPrimary, fontSize: 15 }}>{t('budget.alert80')}</Text>
             <Switch value={alertEnabled} onValueChange={setAlertEnabled} />
           </View>
 
           <View style={styles.groupTitleRow}>
-            <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>分类预算（可选）</Text>
-            {overAllocated ? <Text style={{ color: palette.warning, fontSize: 12 }}>分类合计超总预算</Text> : null}
+            <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('budget.byCategoryOptional')}</Text>
+            {overAllocated ? (
+              <Text style={{ color: palette.warning, fontSize: 12 }}>{t('budget.overShort')}</Text>
+            ) : null}
           </View>
           <View style={[styles.card, { backgroundColor: palette.card }]}>
             {expenseCats.map((c, i) => (
@@ -328,10 +338,12 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
                       size={14}
                     />
                   </View>
-                  <Text style={{ color: palette.textPrimary, fontSize: 15, flex: 1 }}>{c.name}</Text>
+                  <Text style={{ color: palette.textPrimary, fontSize: 15, flex: 1 }}>
+                    {displayCategoryName(c.name, c.is_system)}
+                  </Text>
                   <TextInput
                     style={[styles.catInput, { color: palette.textPrimary, backgroundColor: palette.base }]}
-                    placeholder="不限"
+                    placeholder={t('budget.unlimited')}
                     placeholderTextColor={palette.textTertiary}
                     value={catAmounts[c.id] ?? ''}
                     onChangeText={(v) => setCatAmounts((prev) => ({ ...prev, [c.id]: sanitizeAmountInput(v) }))}

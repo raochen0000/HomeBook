@@ -37,6 +37,7 @@ import {
 } from '@/api';
 import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { t, useLocalePreference } from '@/i18n';
 
 /** 图片网格：每行 5 格，格间距固定，单元格边长按屏宽自适应（见组件内计算）。 */
 const GRID_COLUMNS = 5;
@@ -53,13 +54,14 @@ function submitErrorText(err: unknown): string {
     msg.includes('timeout') ||
     msg.includes('timed out')
   ) {
-    return '网络不可用，请联网后重试';
+    return t('feedback.offline');
   }
-  return e?.message ?? '提交失败，请重试';
+  return e?.message ?? t('feedback.submitFail');
 }
 
 export default function FeedbackScreen() {
   const palette = usePalette();
+  useLocalePreference();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const submit = useSubmitFeedback();
@@ -86,11 +88,7 @@ export default function FeedbackScreen() {
       if (picked.length) setImages((prev) => [...prev, ...picked].slice(0, FEEDBACK_IMAGE_MAX));
     } catch (e) {
       console.warn('[feedback] pickFeedbackImages failed:', e);
-      toast.error(
-        e instanceof PermissionDeniedError
-          ? '相册权限未授予，请在系统设置中开启'
-          : '无法读取所选图片，请换一张或稍后重试',
-      );
+      toast.error(e instanceof PermissionDeniedError ? t('feedback.albumDenied') : t('feedback.imageFail'));
     }
   };
 
@@ -98,14 +96,14 @@ export default function FeedbackScreen() {
 
   const onSubmit = () => {
     if (!canSubmit) {
-      if (trimmedLen < FEEDBACK_CONTENT_MIN) toast.error(`请至少输入 ${FEEDBACK_CONTENT_MIN} 个字`);
+      if (trimmedLen < FEEDBACK_CONTENT_MIN) toast.error(t('feedback.minChars', { count: FEEDBACK_CONTENT_MIN }));
       return;
     }
     submit.mutate(
       { type, content: content.trim(), images, contactOk },
       {
         onSuccess: () => {
-          toast.success('已收到，感谢反馈');
+          toast.success(t('feedback.thanks'));
           // 停留片刻让用户看到成功提示，再返回上一页。
           setTimeout(() => router.back(), 800);
         },
@@ -116,7 +114,7 @@ export default function FeedbackScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <Stack.Screen options={{ headerShown: true, title: '意见反馈' }} />
+      <Stack.Screen options={{ headerShown: true, title: t('feedback.title') }} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
           style={styles.flex}
@@ -125,14 +123,14 @@ export default function FeedbackScreen() {
           keyboardDismissMode="interactive"
         >
           {/* 反馈类型：分段标签，单选，默认「功能」 */}
-          <Text style={[styles.label, { color: palette.textPrimary }]}>反馈类型</Text>
+          <Text style={[styles.label, { color: palette.textPrimary }]}>{t('feedback.type')}</Text>
           <View style={[styles.segment, { backgroundColor: palette.cardPill }]}>
-            {FEEDBACK_TYPES.map((t) => {
-              const active = t.value === type;
+            {FEEDBACK_TYPES.map((item) => {
+              const active = item.value === type;
               return (
                 <Pressable
-                  key={t.value}
-                  onPress={() => setType(t.value)}
+                  key={item.value}
+                  onPress={() => setType(item.value)}
                   disabled={busy}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
@@ -144,7 +142,7 @@ export default function FeedbackScreen() {
                       { color: active ? palette.onInk : palette.textSecondary, fontWeight: active ? '600' : '400' },
                     ]}
                   >
-                    {t.label}
+                    {t(`feedback.types.${item.value}`)}
                   </Text>
                 </Pressable>
               );
@@ -153,13 +151,13 @@ export default function FeedbackScreen() {
 
           {/* 问题描述：多行、必填、字数计数 */}
           <View style={styles.labelRow}>
-            <Text style={[styles.label, { color: palette.textPrimary }]}>问题描述</Text>
+            <Text style={[styles.label, { color: palette.textPrimary }]}>{t('feedback.content')}</Text>
             <Text style={[styles.required, { color: palette.danger }]}>*</Text>
           </View>
           <View style={[styles.textCard, { backgroundColor: palette.card }]}>
             <TextInput
               style={[styles.textArea, { color: palette.textPrimary }]}
-              placeholder={`请描述你遇到的问题或想法（至少 ${FEEDBACK_CONTENT_MIN} 个字）`}
+              placeholder={t('feedback.placeholder', { count: FEEDBACK_CONTENT_MIN })}
               placeholderTextColor={palette.textTertiary}
               value={content}
               onChangeText={setContent}
@@ -175,7 +173,9 @@ export default function FeedbackScreen() {
           </View>
 
           {/* 图片：选填，最多 5 张，缩略图可删 */}
-          <Text style={[styles.label, { color: palette.textPrimary }]}>图片（选填，最多 {FEEDBACK_IMAGE_MAX} 张）</Text>
+          <Text style={[styles.label, { color: palette.textPrimary }]}>
+            {t('feedback.images', { count: FEEDBACK_IMAGE_MAX })}
+          </Text>
           <View style={styles.imageGrid}>
             {images.map((img) => (
               <View key={img.uri} style={[styles.thumbWrap, { width: tileSize, height: tileSize }]}>
@@ -186,7 +186,7 @@ export default function FeedbackScreen() {
                   disabled={busy}
                   hitSlop={12}
                   accessibilityRole="button"
-                  accessibilityLabel="删除图片"
+                  accessibilityLabel={t('feedback.deleteImage')}
                 >
                   <SymbolView name="xmark" size={11} tintColor="#FFFFFF" weight="bold" />
                 </Pressable>
@@ -201,7 +201,7 @@ export default function FeedbackScreen() {
                 onPress={onAddImages}
                 disabled={busy}
                 accessibilityRole="button"
-                accessibilityLabel="添加图片"
+                accessibilityLabel={t('feedback.addImage')}
               >
                 <SymbolView name="plus" size={20} tintColor={palette.textTertiary} />
                 <Text style={[styles.addTileText, { color: palette.textTertiary }]}>
@@ -214,9 +214,9 @@ export default function FeedbackScreen() {
           {/* 可否被账号联系：默认开 */}
           <View style={[styles.toggleCard, { backgroundColor: palette.card }]}>
             <View style={styles.toggleTexts}>
-              <Text style={[styles.toggleTitle, { color: palette.textPrimary }]}>允许通过账号联系我</Text>
+              <Text style={[styles.toggleTitle, { color: palette.textPrimary }]}>{t('feedback.contact')}</Text>
               <Text style={[styles.toggleSub, { color: palette.textSecondary }]} numberOfLines={1}>
-                开启后，我们将会通过你的可用联系方式回访
+                {t('feedback.contactHint')}
               </Text>
             </View>
             <Switch
@@ -231,9 +231,7 @@ export default function FeedbackScreen() {
           <View style={styles.diag}>
             <View style={styles.diagRow}>
               <SymbolView name="info.circle" size={14} tintColor={palette.textTertiary} />
-              <Text style={[styles.diagNote, { color: palette.textTertiary }]}>
-                提交时会附带以下设备信息，帮助我们更快定位问题
-              </Text>
+              <Text style={[styles.diagNote, { color: palette.textTertiary }]}>{t('feedback.diag')}</Text>
             </View>
             <Text style={[styles.diagDevice, { color: palette.textSecondary }]} numberOfLines={1}>
               {deviceSummary}
@@ -249,7 +247,7 @@ export default function FeedbackScreen() {
             {busy ? (
               <ActivityIndicator color={palette.onInk} />
             ) : (
-              <Text style={[styles.primaryText, { color: palette.onInk }]}>提交反馈</Text>
+              <Text style={[styles.primaryText, { color: palette.onInk }]}>{t('feedback.submit')}</Text>
             )}
           </Pressable>
         </ScrollView>

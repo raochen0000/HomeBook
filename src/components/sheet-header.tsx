@@ -29,6 +29,7 @@ import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, Rect, Stop, LinearGradient as SvgLinearGradient } from 'react-native-svg';
 
+import { t } from '@/i18n/instance';
 import { Space, useSheetPalette } from '@/constants/design';
 
 /** 标题区总高：sheet 滚动内容应以此作顶部内边距。 */
@@ -163,7 +164,7 @@ export function SheetHeader({
           {onLeft ? (
             <HeaderIconButton
               icon={onBack ? 'chevron.left' : 'xmark'}
-              label={onBack ? '返回' : '关闭'}
+              label={onBack ? t('common.back') : t('common.close')}
               tintColor={palette.textPrimary}
               onPress={onLeft}
             />
@@ -176,7 +177,7 @@ export function SheetHeader({
           {onConfirm ? (
             <HeaderIconButton
               icon="checkmark"
-              label="保存"
+              label={t('common.save')}
               tintColor={confirmDisabled ? palette.textTertiary : palette.textPrimary}
               disabled={confirmDisabled}
               onPress={onConfirm}

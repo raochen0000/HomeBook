@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { singleLineTextInputStyle } from '@/constants/text-input';
+import { t, useLocalePreference } from '@/i18n';
 import { bindEmail, normalizeEmail, useSession, verifyEmailChange } from '@/lib/auth';
 
 /** OTP 位数（与 Studio 邮件模板配置一致）。 */
@@ -34,7 +35,7 @@ const OTP_LEN = 6;
 function maskEmail(email?: string | null): string {
   if (!email) return '';
   const [name, domain] = email.split('@');
-  if (!domain) return '已绑定';
+  if (!domain) return t('common.bound');
   return `${name.slice(0, 1)}***@${domain}`;
 }
 
@@ -49,13 +50,13 @@ function bindErrorText(err: unknown): string {
   const e = err as { status?: number; message?: string; name?: string; code?: string };
   const msg = (e?.message ?? '').toLowerCase();
   if (e?.status === 429 || msg.includes('daily email verification code limit')) {
-    return '今日邮箱验证码已达 5 次上限，请明天再试';
+    return t('auth.emailDailyLimit');
   }
   if (e?.code === 'email_exists' || msg.includes('already registered') || msg.includes('already been registered')) {
-    return '该邮箱已被其他账号绑定，请更换邮箱';
+    return t('account.emailTaken');
   }
   if (e?.code === 'otp_expired' || msg.includes('invalid') || msg.includes('expired') || msg.includes('token')) {
-    return '验证码错误或已过期，请重新获取';
+    return t('auth.codeInvalid');
   }
   const status = e?.status;
   const down =
@@ -67,12 +68,13 @@ function bindErrorText(err: unknown): string {
     msg.includes('timeout') ||
     msg.includes('network request failed') ||
     msg.includes('failed to fetch');
-  if (down) return '邮件服务暂时不可用，请稍后重试';
+  if (down) return t('auth.mailUnavailable');
   return e?.message ?? String(err);
 }
 
 export default function EmailScreen() {
   const palette = usePalette();
+  useLocalePreference();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { session } = useSession();
@@ -92,24 +94,24 @@ export default function EmailScreen() {
   // 倒计时：每秒自减，到 0 停。
   useEffect(() => {
     if (cooldown <= 0) return;
-    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
   }, [cooldown]);
 
   const onSend = async () => {
     if (!canSend) {
-      if (!normalized) toast.error('请输入有效的邮箱地址');
+      if (!normalized) toast.error(t('auth.invalidEmail'));
       return;
     }
     if (normalized === currentEmail) {
-      toast.error('新邮箱不能与当前邮箱相同');
+      toast.error(t('account.emailSame'));
       return;
     }
     setBusy(true);
     try {
       await bindEmail(email); // updateUser({ email }) 触发 email_change 验证码下发
       setCooldown(60);
-      toast.success('验证码已发送，请查收邮件');
+      toast.success(t('account.mailSent'));
     } catch (err) {
       toast.error(bindErrorText(err));
     } finally {
@@ -122,7 +124,7 @@ export default function EmailScreen() {
     setBusy(true);
     try {
       await verifyEmailChange(email, code);
-      toast.success(hasEmail ? '换绑成功' : '绑定成功');
+      toast.success(hasEmail ? t('account.rebindOk') : t('account.bindOk'));
       // session 由 onAuthStateChange 自动刷新；稍候返回账号页以展示成功提示。
       setTimeout(() => router.back(), 700);
     } catch (err) {
@@ -134,7 +136,7 @@ export default function EmailScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <Stack.Screen options={{ headerShown: true, title: '邮箱' }} />
+      <Stack.Screen options={{ headerShown: true, title: t('account.email') }} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
           style={styles.flex}
@@ -145,13 +147,13 @@ export default function EmailScreen() {
           {/* 已绑定：当前邮箱卡片 */}
           {hasEmail ? (
             <View style={[styles.currentCard, { backgroundColor: palette.card }]}>
-              <Text style={[styles.currentLabel, { color: palette.textSecondary }]}>当前邮箱</Text>
+              <Text style={[styles.currentLabel, { color: palette.textSecondary }]}>{t('account.currentEmail')}</Text>
               <Text style={[styles.currentValue, { color: palette.textPrimary }]}>{maskEmail(currentEmail)}</Text>
             </View>
           ) : null}
 
           <Text style={[styles.sectionTitle, { color: palette.textPrimary }]}>
-            {hasEmail ? '换绑邮箱' : '绑定邮箱'}
+            {hasEmail ? t('account.rebindEmail') : t('account.bindEmail')}
           </Text>
 
           {/* 邮箱 */}
@@ -160,7 +162,7 @@ export default function EmailScreen() {
             <View style={styles.fieldGap} />
             <TextInput
               style={[styles.input, { color: palette.textPrimary }]}
-              placeholder="请输入邮箱地址"
+              placeholder={t('auth.emailPlaceholder')}
               placeholderTextColor={palette.textTertiary}
               value={email}
               onChangeText={setEmail}
@@ -173,7 +175,7 @@ export default function EmailScreen() {
               editable={!busy}
             />
             {email.length > 0 ? (
-              <Pressable hitSlop={8} onPress={() => setEmail('')} accessibilityLabel="清除邮箱">
+              <Pressable hitSlop={8} onPress={() => setEmail('')} accessibilityLabel={t('account.clearEmail')}>
                 <SymbolView name="xmark.circle.fill" tintColor={palette.textTertiary} size={16} />
               </Pressable>
             ) : null}
@@ -183,19 +185,19 @@ export default function EmailScreen() {
           <View style={[styles.field, { backgroundColor: palette.card }]}>
             <TextInput
               style={[styles.input, { color: palette.textPrimary }]}
-              placeholder="请输入验证码"
+              placeholder={t('auth.codePlaceholder')}
               placeholderTextColor={palette.textTertiary}
               value={code}
-              onChangeText={(t) => setCode(t.replace(/\D/g, ''))}
+              onChangeText={(text) => setCode(text.replace(/\D/g, ''))}
               keyboardType="number-pad"
               textContentType="oneTimeCode"
               maxLength={OTP_LEN}
               editable={!busy}
             />
             <View style={[styles.ccDivider, { backgroundColor: palette.separator }]} />
-            <Pressable hitSlop={6} onPress={onSend} disabled={!canSend} accessibilityLabel="获取验证码">
+            <Pressable hitSlop={6} onPress={onSend} disabled={!canSend} accessibilityLabel={t('auth.getCode')}>
               <Text style={[styles.sendText, { color: canSend ? palette.textPrimary : palette.textTertiary }]}>
-                {cooldown > 0 ? `${cooldown}s 后重发` : '获取验证码'}
+                {cooldown > 0 ? t('auth.resendIn', { seconds: cooldown }) : t('auth.getCode')}
               </Text>
             </Pressable>
           </View>
@@ -209,14 +211,16 @@ export default function EmailScreen() {
             {busy ? (
               <ActivityIndicator color={palette.onInk} />
             ) : (
-              <Text style={[styles.primaryText, { color: palette.onInk }]}>{hasEmail ? '确认换绑' : '绑定邮箱'}</Text>
+              <Text style={[styles.primaryText, { color: palette.onInk }]}>
+                {hasEmail ? t('account.confirmRebind') : t('account.bindEmail')}
+              </Text>
             )}
           </Pressable>
 
           {/* 安全说明 */}
           <View style={styles.hintRow}>
             <SymbolView name="checkmark.shield" tintColor={palette.textTertiary} size={13} />
-            <Text style={[styles.hint, { color: palette.textTertiary }]}>绑定后可用邮箱 + 密码登录、找回账号。</Text>
+            <Text style={[styles.hint, { color: palette.textTertiary }]}>{t('account.bindEmailHint')}</Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

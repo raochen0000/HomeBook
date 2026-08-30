@@ -21,10 +21,12 @@ import { DEFAULT_ACCOUNTING_PREFS, useAccountingPrefs, useSaveAccountingPrefs } 
 import { toast } from '@/components/toast';
 import { Space, usePalette } from '@/constants/design';
 import { SettingsList } from '@/features/settings/native-list';
+import { t } from '@/i18n';
 import {
   isLockedCard,
   MIN_VISIBLE_CARDS,
   reportCardMeta,
+  reportCardTitle,
   resolveCardLayout,
   type ReportCardId,
 } from '@/lib/report-cards';
@@ -59,27 +61,28 @@ export default function ReportCardsScreen() {
   const resolved = resolveCardLayout(order, hiddenPrefs);
 
   // 渲染以本地序为准；偏好缓存变化（首拉 / 乐观更新 / 失败回滚 / 重拉）时再对齐。
+  // SwiftUI onMove 要求回调内同步改数据源，故用本地 state；外部偏好变化时再对齐。
   const [visible, setVisible] = useState(resolved.visible);
   const [hidden, setHidden] = useState(resolved.hidden);
   useEffect(() => {
     const next = resolveCardLayout(order, hiddenPrefs);
+    /* eslint-disable react-hooks/set-state-in-effect -- 对齐远端偏好，不是从 render 派生交互态 */
     setVisible(next.visible);
     setHidden(next.hidden);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [order, hiddenPrefs]);
 
   const { locked, movable } = splitVisible(visible);
 
   const visibleCardsHeader = (
     <Text modifiers={[font({ size: 17, weight: 'semibold' }), foregroundColor(palette.textSecondary)]}>
-      已展示（长按拖动排序）
+      {t('report.shownHeader')}
     </Text>
   );
   const visibleCardsFooter = (
     <HStack alignment="center" spacing={Space[2]}>
       <Image systemName="info.circle" size={13} color={palette.textTertiary} />
-      <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textTertiary)]}>
-        「收支概览」为核心卡，常驻置顶不可隐藏。隐藏的卡片可随时添加回来。
-      </Text>
+      <Text modifiers={[font({ size: 12 }), foregroundColor(palette.textTertiary)]}>{t('report.shownFooter')}</Text>
     </HStack>
   );
 
@@ -97,7 +100,7 @@ export default function ReportCardsScreen() {
   const hideCard = (id: ReportCardId) => {
     if (isLockedCard(id)) return;
     if (visible.length <= MIN_VISIBLE_CARDS) {
-      toast.warning(`至少展示 ${MIN_VISIBLE_CARDS} 个卡片`);
+      toast.warning(t('report.minCards', { count: MIN_VISIBLE_CARDS }));
       return;
     }
     const nextVisible = visible.filter((x) => x !== id);
@@ -117,7 +120,7 @@ export default function ReportCardsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.base }}>
-      <Stack.Screen options={{ headerShown: true, title: '报表卡片' }} />
+      <Stack.Screen options={{ headerShown: true, title: t('report.cardsTitle') }} />
       <SettingsList>
         <Section header={visibleCardsHeader} footer={visibleCardsFooter}>
           {locked.map((id) => {
@@ -125,9 +128,13 @@ export default function ReportCardsScreen() {
             return (
               <HStack key={id} alignment="center" spacing={Space[3]} modifiers={[tag(id)]}>
                 <Image systemName={meta.icon as IconName} size={19} color={palette.ink} />
-                <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{meta.title}</Text>
+                <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>
+                  {reportCardTitle(id)}
+                </Text>
                 <Spacer />
-                <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>常驻</Text>
+                <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>
+                  {t('common.pinned')}
+                </Text>
               </HStack>
             );
           })}
@@ -137,7 +144,9 @@ export default function ReportCardsScreen() {
               return (
                 <HStack key={id} alignment="center" spacing={Space[3]} modifiers={[tag(id)]}>
                   <Image systemName={meta.icon as IconName} size={19} color={palette.ink} />
-                  <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{meta.title}</Text>
+                  <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>
+                    {reportCardTitle(id)}
+                  </Text>
                   <Spacer />
                   <Image
                     systemName="minus.circle.fill"
@@ -152,13 +161,15 @@ export default function ReportCardsScreen() {
         </Section>
 
         {hidden.length > 0 ? (
-          <Section title="未展示">
+          <Section title={t('settings.hidden')}>
             {hidden.map((id) => {
               const meta = reportCardMeta(id);
               return (
                 <HStack key={id} alignment="center" spacing={Space[3]} modifiers={[tag(id)]}>
                   <Image systemName={meta.icon as IconName} size={19} color={palette.textTertiary} />
-                  <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{meta.title}</Text>
+                  <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>
+                    {reportCardTitle(id)}
+                  </Text>
                   <Spacer />
                   <Image
                     systemName="plus.circle.fill"

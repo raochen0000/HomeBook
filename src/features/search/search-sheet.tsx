@@ -55,6 +55,7 @@ import { DayGroup, EndOfListHint, type AvatarInfo, type RowData } from '@/featur
 import { TransactionDetailSheet } from '@/features/home/transaction-detail-sheet';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { RecordSheet } from '@/features/record/record-sheet';
+import { alertOk, categorySearchNames, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { clockTime, dayKey, humanDay, signForType } from '@/lib/format';
 import {
@@ -76,13 +77,26 @@ import {
 import { getSearchPresentation, shouldLockFilterControls } from './search-presentation';
 import { useSearchHistory } from './use-search-history';
 
-const DATE_PRESET_OPTIONS: { key: DatePresetKey; label: string }[] = [
-  { key: 'all', label: '不限' },
-  { key: 'thisMonth', label: '本月' },
-  { key: 'lastMonth', label: '上月' },
-  { key: 'last7', label: '近 7 天' },
-  { key: 'last30', label: '近 30 天' },
-];
+const DATE_PRESET_KEYS: DatePresetKey[] = ['all', 'thisMonth', 'lastMonth', 'last7', 'last30'];
+
+function datePresetOptionLabel(key: DatePresetKey): string {
+  switch (key) {
+    case 'all':
+      return t('common.all');
+    case 'thisMonth':
+      return t('dates.thisMonth');
+    case 'lastMonth':
+      return t('dates.lastMonth');
+    case 'last7':
+      return t('dates.last7');
+    case 'last30':
+      return t('dates.last30');
+    case 'thisYear':
+      return t('dates.thisYear');
+    case 'custom':
+      return t('dates.customDate');
+  }
+}
 
 /** 哪个筛选下拉面板正打开。 */
 type FilterKind = 'type' | 'date' | 'category' | 'member' | 'amount';
@@ -90,11 +104,31 @@ type FilterKind = 'type' | 'date' | 'category' | 'member' | 'amount';
 type ResultGroup = { key: string; label: string; totalCents: number; rows: RowData[] };
 
 const AMOUNT_RANGES = [
-  { label: '0–100', min: '0', max: '100' },
-  { label: '100–500', min: '100', max: '500' },
-  { label: '500–1000', min: '500', max: '1000' },
-  { label: '1000 以上', min: '1000', max: '' },
+  { min: '0', max: '100' },
+  { min: '100', max: '500' },
+  { min: '500', max: '1000' },
+  { min: '1000', max: '' },
 ] as const;
+
+function amountRangeLabel(range: (typeof AMOUNT_RANGES)[number]): string {
+  if (!range.max) return t('search.above1000');
+  return `${range.min}–${range.max}`;
+}
+
+function filterKindTitle(kind: FilterKind): string {
+  switch (kind) {
+    case 'type':
+      return t('search.type');
+    case 'date':
+      return t('dates.date');
+    case 'category':
+      return t('search.category');
+    case 'member':
+      return t('search.member');
+    case 'amount':
+      return t('search.amount');
+  }
+}
 
 /** 搜索结果区统一与 insetGrouped 卡片外沿对齐；需要手调时只改这里。 */
 const SEARCH_LIST_HORIZONTAL_INSET = 16;
@@ -109,6 +143,7 @@ export function SearchScreen({ onClose }: { onClose: () => void }) {
 
 function SearchBody({ onClose }: { onClose: () => void }) {
   const palette = usePalette();
+  const { locale } = useLocalePreference();
   const catColors = useCategoryColors();
 
   const txnsQ = useTransactions();
@@ -183,52 +218,69 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     const nameById = new Map(members.map((m) => [m.id, m.nickname]));
     const memberById = new Map(members.map((m) => [m.id, m]));
     const myNick = profileQ.data?.nickname;
+    void locale;
 
     const result = runSearch(txns, deferredFilters, {
-      categoryNameById: new Map(cats.map((c) => [c.id, c.name])),
+      categoryNamesById: new Map(cats.map((c) => [c.id, categorySearchNames(c.name, c.is_system)])),
       recorderNameById: nameById,
       myId,
+      meLabel: t('common.me'),
     });
 
     const avatarOf = (userId: string): AvatarInfo => {
-      const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? '成员';
+      const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? t('common.member');
       return { uri: avatarFiles.get(userId) ?? null, nickname: nick };
     };
 
     const map = new Map<string, ResultGroup>();
-    for (const t of result.matched) {
-      const cat = catById.get(t.category_id);
-      const ttype: 'income' | 'expense' = t.type === 'income' ? 'income' : 'expense';
-      const isSavings = t.source !== 'normal';
+    for (const txn of result.matched) {
+      const cat = catById.get(txn.category_id);
+      const ttype: 'income' | 'expense' = txn.type === 'income' ? 'income' : 'expense';
+      const isSavings = txn.source !== 'normal';
       // 储蓄类在备注行单独标注，金额不并入合计口径（已在 lib/search.ts 处理）。
-      const note = isSavings ? (t.note ? `储蓄 · ${t.note}` : '储蓄') : t.note;
-      const editedByOther = !!t.last_editor_user_id && t.last_editor_user_id !== t.recorder_user_id;
+      const note = isSavings
+        ? txn.note
+          ? t('record.savingsNote', { note: txn.note })
+          : t('record.savings')
+        : txn.note;
+      const editedByOther = !!txn.last_editor_user_id && txn.last_editor_user_id !== txn.recorder_user_id;
 
-      const key = dayKey(t.occurred_at);
+      const key = dayKey(txn.occurred_at);
       const group =
         map.get(key) ??
         (() => {
-          const g: ResultGroup = { key, label: humanDay(t.occurred_at), totalCents: 0, rows: [] };
+          const g: ResultGroup = { key, label: humanDay(txn.occurred_at), totalCents: 0, rows: [] };
           map.set(key, g);
           return g;
         })();
-      group.totalCents += ttype === 'income' ? t.amount : -t.amount;
+      group.totalCents += ttype === 'income' ? txn.amount : -txn.amount;
       group.rows.push({
-        id: t.id,
-        title: cat?.name ?? '未分类',
+        id: txn.id,
+        title: cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized'),
         note,
         symbol: categorySymbol(cat?.icon ?? null, ttype),
         iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype, cat?.color_key)],
-        amountCents: t.amount,
+        amountCents: txn.amount,
         sign: signForType(ttype),
         amountColor: ttype === 'income' ? palette.income : palette.expense,
-        timeLabel: clockTime(editedByOther ? t.updated_at : t.occurred_at),
-        recorder: avatarOf(t.recorder_user_id),
-        editor: editedByOther ? avatarOf(t.last_editor_user_id as string) : null,
+        timeLabel: clockTime(editedByOther ? txn.updated_at : txn.occurred_at),
+        recorder: avatarOf(txn.recorder_user_id),
+        editor: editedByOther ? avatarOf(txn.last_editor_user_id as string) : null,
       });
     }
     return { groups: Array.from(map.values()) };
-  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, deferredFilters, myId, avatarFiles, catColors, palette]);
+  }, [
+    txnsQ.data,
+    catsQ.data,
+    membersQ.data,
+    profileQ.data,
+    deferredFilters,
+    myId,
+    avatarFiles,
+    catColors,
+    palette,
+    locale,
+  ]);
 
   const categories = catsQ.data ?? [];
   const members = membersQ.data ?? [];
@@ -267,9 +319,9 @@ function SearchBody({ onClose }: { onClose: () => void }) {
 
   const onRowPress = useCallback(
     (id: string) => {
-      const txn = (txnsQ.data ?? []).find((t) => t.id === id);
+      const txn = (txnsQ.data ?? []).find((row) => row.id === id);
       if (!txn) {
-        toast.error('该记录已不存在');
+        toast.error(t('home.missingTxn'));
         txnsQ.refetch();
         return;
       }
@@ -280,14 +332,14 @@ function SearchBody({ onClose }: { onClose: () => void }) {
 
   const openEdit = useCallback(
     (id: string) => {
-      const txn = (txnsQ.data ?? []).find((t) => t.id === id);
+      const txn = (txnsQ.data ?? []).find((row) => row.id === id);
       if (!txn) {
-        toast.error('该记录已不存在');
+        toast.error(t('home.missingTxn'));
         txnsQ.refetch();
         return;
       }
       if (txn.source !== 'normal') {
-        toast.info('储蓄流水请在对应储蓄目标内管理');
+        toast.info(t('home.savingsManageHint'));
         return;
       }
       setEditing(txn);
@@ -297,17 +349,20 @@ function SearchBody({ onClose }: { onClose: () => void }) {
 
   const confirmDelete = useCallback(
     (id: string) => {
-      const txn = (txnsQ.data ?? []).find((t) => t.id === id);
+      const txn = (txnsQ.data ?? []).find((row) => row.id === id);
       if (txn?.source !== 'normal') {
-        toast.info('储蓄流水请在对应储蓄目标内管理');
+        toast.info(t('home.savingsManageHint'));
         return;
       }
-      Alert.alert('删除这笔记录？', '删除后将从账单中移除，无法在 App 内恢复。', [
-        { text: '取消', style: 'cancel' },
+      Alert.alert(t('home.deleteTxnTitle'), t('home.deleteTxnBody'), [
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: '删除',
+          text: t('common.delete'),
           style: 'destructive',
-          onPress: () => softDeleteM.mutate(id, { onError: (e) => Alert.alert('删除失败', (e as Error).message) }),
+          onPress: () =>
+            softDeleteM.mutate(id, {
+              onError: (e) => Alert.alert(t('home.deleteFailed'), (e as Error).message, alertOk()),
+            }),
         },
       ]);
     },
@@ -316,17 +371,23 @@ function SearchBody({ onClose }: { onClose: () => void }) {
 
   const amountSet = amountMinYuan.trim() !== '' || amountMaxYuan.trim() !== '';
   const filtersActive = !typeIsAll || categoryIds.size > 0 || recorderIds.size > 0 || datePreset !== 'all' || amountSet;
-  const typeLabel = types.has('expense') ? '支出' : types.has('income') ? '收入' : '类型';
+  const typeLabel = types.has('expense')
+    ? t('record.expense')
+    : types.has('income')
+      ? t('record.income')
+      : t('search.type');
   const categoryLabel =
     categoryIds.size > 0
-      ? summarizeSelectedLabels(categories.filter((c) => categoryIds.has(c.id)).map((c) => c.name))
-      : '分类';
+      ? summarizeSelectedLabels(
+          categories.filter((c) => categoryIds.has(c.id)).map((c) => displayCategoryName(c.name, c.is_system)),
+        )
+      : t('search.category');
   const memberLabel =
     recorderIds.size > 0
       ? summarizeSelectedLabels(
-          members.filter((m) => recorderIds.has(m.id)).map((m) => (m.id === myId ? '我' : m.nickname)),
+          members.filter((m) => recorderIds.has(m.id)).map((m) => (m.id === myId ? t('common.me') : m.nickname)),
         )
-      : '成员';
+      : t('search.member');
   const dateLabel =
     datePreset === 'custom' ? customDateFilterLabel(customFrom, customTo) : DATE_PRESET_LABELS[datePreset];
   const amountLabel = compactAmountFilterLabel(amountMinYuan, amountMaxYuan);
@@ -563,10 +624,11 @@ function SearchResultsSkeleton() {
 
 function InvalidFiltersEmptyState() {
   const palette = usePalette();
+  useLocalePreference();
   return (
     <View style={styles.center}>
       <SymbolView name="exclamationmark.circle" tintColor={palette.textTertiary} size={44} />
-      <Text style={{ color: palette.textSecondary }}>筛选条件有误，请检查金额 / 日期区间</Text>
+      <Text style={{ color: palette.textSecondary }}>{t('search.invalidFilters')}</Text>
     </View>
   );
 }
@@ -578,11 +640,12 @@ function supportsLiquidGlass() {
 /** iOS 26+ 用原生 SwiftUI 圆形玻璃按钮；其他平台保留可感知的普通返回键。 */
 function SearchBackButton({ onPress }: { onPress: () => void }) {
   const palette = usePalette();
+  useLocalePreference();
   if (supportsLiquidGlass()) {
     return (
       <Host matchContents>
         <Button
-          label="返回"
+          label={t('common.back')}
           systemImage={'chevron.left' as ButtonProps['systemImage']}
           onPress={onPress}
           modifiers={[
@@ -604,7 +667,7 @@ function SearchBackButton({ onPress }: { onPress: () => void }) {
       hitSlop={10}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel="返回"
+      accessibilityLabel={t('common.back')}
     >
       <SymbolView name="chevron.left" tintColor={palette.textPrimary} size={21} />
     </Pressable>
@@ -627,12 +690,13 @@ function SearchInput({
   onClear: () => void;
 }) {
   const palette = usePalette();
+  useLocalePreference();
   const content = (
     <>
       <SymbolView name="magnifyingglass" tintColor={palette.textTertiary} size={17} />
       <TextInput
         style={[styles.searchInput, { color: palette.textPrimary }]}
-        placeholder="搜索备注、分类或成员"
+        placeholder={t('search.placeholder')}
         placeholderTextColor={palette.textTertiary}
         value={keyword}
         onChangeText={onChangeKeyword}
@@ -643,7 +707,12 @@ function SearchInput({
         clearButtonMode="never"
       />
       {keyword.trim() ? (
-        <Pressable hitSlop={8} onPress={onClear} accessibilityRole="button" accessibilityLabel="清空搜索关键词">
+        <Pressable
+          hitSlop={8}
+          onPress={onClear}
+          accessibilityRole="button"
+          accessibilityLabel={t('search.clearKeyword')}
+        >
           <SymbolView name="xmark.circle.fill" tintColor={palette.textTertiary} size={17} />
         </Pressable>
       ) : null}
@@ -695,6 +764,7 @@ function FilterPill({
 
 function ResetPill({ onPress, disabled }: { onPress: () => void; disabled: boolean }) {
   const palette = usePalette();
+  useLocalePreference();
   return (
     <Pressable
       onPress={onPress}
@@ -702,7 +772,7 @@ function ResetPill({ onPress, disabled }: { onPress: () => void; disabled: boole
       hitSlop={6}
       style={[styles.resetPill, disabled && styles.disabledControl]}
     >
-      <Text style={{ color: palette.accent, fontSize: 13, fontWeight: '500' }}>重置</Text>
+      <Text style={{ color: palette.accent, fontSize: 13, fontWeight: '500' }}>{t('common.reset')}</Text>
     </Pressable>
   );
 }
@@ -710,14 +780,15 @@ function ResetPill({ onPress, disabled }: { onPress: () => void; disabled: boole
 // ── 无结果占位 ────────────────────────────────────────────────────────────────
 function NoResultEmpty({ filtersActive, onClearFilters }: { filtersActive: boolean; onClearFilters: () => void }) {
   const palette = usePalette();
+  useLocalePreference();
   return (
     <View style={styles.center}>
       <SearchEmptyIllustration />
-      <Text style={[styles.emptyTitle, { color: palette.textPrimary }]}>没有找到相关记录</Text>
-      <Text style={[styles.emptySubtitle, { color: palette.textSecondary }]}>试试更换关键词或放宽筛选条件</Text>
+      <Text style={[styles.emptyTitle, { color: palette.textPrimary }]}>{t('search.noResultsTitle')}</Text>
+      <Text style={[styles.emptySubtitle, { color: palette.textSecondary }]}>{t('search.noResultsSub')}</Text>
       {filtersActive ? (
         <Pressable onPress={onClearFilters} hitSlop={10} style={{ marginTop: Space[4] }}>
-          <Text style={{ color: palette.accent, fontSize: 15 }}>清除筛选条件</Text>
+          <Text style={{ color: palette.accent, fontSize: 15 }}>{t('search.clearFilters')}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -730,13 +801,14 @@ function NoResultEmpty({ filtersActive, onClearFilters }: { filtersActive: boole
  */
 function SearchEmptyIllustration() {
   const palette = usePalette();
+  useLocalePreference();
   return (
     <Svg
       width={150}
       height={150}
       viewBox="0 0 150 150"
       style={styles.emptyIllustration}
-      accessibilityLabel="无搜索结果"
+      accessibilityLabel={t('search.empty')}
     >
       <Path
         d="M36 39C48 23 75 20 91 34C106 48 121 48 125 68C130 91 111 110 92 116C71 123 56 113 39 104C19 93 17 57 36 39Z"
@@ -767,6 +839,7 @@ function HistoryCloud({
   onPick: (kw: string) => void;
 }) {
   const palette = usePalette();
+  useLocalePreference();
   return (
     <View style={styles.historyContainer}>
       {history.items.length > 0 ? (
@@ -774,11 +847,13 @@ function HistoryCloud({
           <View style={styles.historyHeader}>
             <View style={styles.historyTitleWrap}>
               <SymbolView name="clock" tintColor={palette.textSecondary} size={15} />
-              <Text style={[styles.historyTitle, { color: palette.textPrimary }]}>最近搜索</Text>
-              <Text style={[styles.historyHintInline, { color: palette.textTertiary }]}>长按可删除</Text>
+              <Text style={[styles.historyTitle, { color: palette.textPrimary }]}>{t('search.recent')}</Text>
+              <Text style={[styles.historyHintInline, { color: palette.textTertiary }]}>
+                {t('search.longPressDelete')}
+              </Text>
             </View>
             <Pressable hitSlop={8} onPress={history.clear} accessibilityRole="button">
-              <Text style={[styles.historyClear, { color: palette.accent }]}>清空</Text>
+              <Text style={[styles.historyClear, { color: palette.accent }]}>{t('common.clear')}</Text>
             </Pressable>
           </View>
           <View style={styles.cloud}>
@@ -788,7 +863,7 @@ function HistoryCloud({
                 style={[styles.historyTag, { backgroundColor: palette.cardPill }]}
                 onPress={() => onPick(kw)}
                 onLongPress={() => history.remove(kw)}
-                accessibilityHint="长按可删除"
+                accessibilityHint={t('search.longPressHint')}
               >
                 <Text style={[styles.historyTagText, { color: palette.textPrimary }]} numberOfLines={1}>
                   {kw}
@@ -803,9 +878,7 @@ function HistoryCloud({
         <View style={[styles.defaultEmptyIconWrap, { backgroundColor: palette.cardPill }]}>
           <SymbolView name="magnifyingglass" tintColor={palette.textTertiary} size={44} />
         </View>
-        <Text style={[styles.defaultEmptyText, { color: palette.textSecondary }]}>
-          输入关键词或选择筛选条件，开始搜索
-        </Text>
+        <Text style={[styles.defaultEmptyText, { color: palette.textSecondary }]}>{t('search.startHint')}</Text>
       </View>
     </View>
   );
@@ -829,7 +902,7 @@ type DropdownProps = {
   setCustomFrom: (d: Date) => void;
   setCustomTo: (d: Date) => void;
   dateError: boolean;
-  categories: { id: string; name: string }[];
+  categories: { id: string; name: string; is_system: boolean }[];
   categoryIds: Set<string>;
   setCategoryIds: (s: Set<string>) => void;
   members: { id: string; nickname: string }[];
@@ -842,14 +915,6 @@ type DropdownProps = {
   setAmountMaxYuan: (s: string) => void;
   amountError: boolean;
   toggle: (set: Set<string>, setter: (s: Set<string>) => void, id: string) => void;
-};
-
-const TITLES: Record<FilterKind, string> = {
-  type: '类型',
-  date: '日期',
-  category: '分类',
-  member: '成员',
-  amount: '金额',
 };
 
 function formatSlashDate(d: Date): string {
@@ -866,6 +931,7 @@ function matchesQuickRange(minYuan: string, maxYuan: string, range: (typeof AMOU
 function FilterDropdown(props: DropdownProps) {
   const { kind, onClose, isSearching } = props;
   const palette = usePalette();
+  useLocalePreference();
   return (
     <Modal visible={kind !== null} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.flex}>
@@ -879,14 +945,16 @@ function FilterDropdown(props: DropdownProps) {
             <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
             <View style={styles.sheetHeader}>
               <View style={styles.sheetHeaderSide} />
-              <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>{kind ? TITLES[kind] : ''}</Text>
+              <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>
+                {kind ? filterKindTitle(kind) : ''}
+              </Text>
               <View style={styles.sheetHeaderSide}>
                 {isSearching ? (
                   <ActivityIndicator
                     color={palette.accent}
                     size="small"
                     accessibilityRole="progressbar"
-                    accessibilityLabel="正在搜索"
+                    accessibilityLabel={t('search.searching')}
                   />
                 ) : null}
               </View>
@@ -901,6 +969,7 @@ function FilterDropdown(props: DropdownProps) {
 
 function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
   const palette = usePalette();
+  useLocalePreference();
   const {
     kind,
     types,
@@ -934,15 +1003,20 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
   if (kind === 'type') {
     return (
       <View>
-        <OptionRow label="不限" active={typeIsAll} onPress={() => setType(null)} disabled={filterControlsLocked} />
         <OptionRow
-          label="支出"
+          label={t('common.all')}
+          active={typeIsAll}
+          onPress={() => setType(null)}
+          disabled={filterControlsLocked}
+        />
+        <OptionRow
+          label={t('record.expense')}
           active={types.has('expense')}
           onPress={() => setType('expense')}
           disabled={filterControlsLocked}
         />
         <OptionRow
-          label="收入"
+          label={t('record.income')}
           active={types.has('income')}
           onPress={() => setType('income')}
           disabled={filterControlsLocked}
@@ -967,26 +1041,28 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
     return (
       <View style={styles.sheetBody}>
         <View style={[styles.optionCard, { backgroundColor: palette.card }]}>
-          {DATE_PRESET_OPTIONS.map((p, i) => (
+          {DATE_PRESET_KEYS.map((key, i) => (
             <OptionRow
-              key={p.key}
-              label={p.label}
-              active={datePreset === p.key}
-              onPress={() => onPickPreset(p.key)}
+              key={key}
+              label={datePresetOptionLabel(key)}
+              active={datePreset === key}
+              onPress={() => onPickPreset(key)}
               disabled={filterControlsLocked}
-              showDivider={i < DATE_PRESET_OPTIONS.length - 1}
+              showDivider={i < DATE_PRESET_KEYS.length - 1}
             />
           ))}
         </View>
         <View style={[styles.customDateCard, { backgroundColor: palette.card }]}>
-          <Text style={[styles.customDateTitle, { color: palette.textPrimary }]}>自定义日期</Text>
+          <Text style={[styles.customDateTitle, { color: palette.textPrimary }]}>{t('dates.customDate')}</Text>
           <View style={styles.customDateFields} pointerEvents={filterControlsLocked ? 'none' : 'auto'}>
-            <DateFieldBox label="开始日期" date={customFrom} onChange={onCustomFrom} />
+            <DateFieldBox label={t('dates.startDate')} date={customFrom} onChange={onCustomFrom} />
             <Text style={[styles.customDateDash, { color: palette.textTertiary }]}>—</Text>
-            <DateFieldBox label="结束日期" date={customTo} onChange={onCustomTo} />
+            <DateFieldBox label={t('dates.endDate')} date={customTo} onChange={onCustomTo} />
           </View>
         </View>
-        {dateError ? <Text style={[styles.errorText, { color: palette.danger }]}>起始日期不能晚于结束日期</Text> : null}
+        {dateError ? (
+          <Text style={[styles.errorText, { color: palette.danger }]}>{t('search.dateOrderError')}</Text>
+        ) : null}
       </View>
     );
   }
@@ -995,7 +1071,7 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
     return (
       <ScrollView style={styles.sheetScroll} keyboardShouldPersistTaps="handled">
         <OptionRow
-          label="全部分类"
+          label={t('search.allCategories')}
           active={categoryIds.size === 0}
           onPress={() => onFilterChange(() => setCategoryIds(new Set()))}
           disabled={filterControlsLocked}
@@ -1003,7 +1079,7 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
         {categories.map((c) => (
           <OptionRow
             key={c.id}
-            label={c.name}
+            label={displayCategoryName(c.name, c.is_system)}
             active={categoryIds.has(c.id)}
             onPress={() => toggle(categoryIds, setCategoryIds, c.id)}
             disabled={filterControlsLocked}
@@ -1017,7 +1093,7 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
     return (
       <ScrollView style={styles.sheetScroll} keyboardShouldPersistTaps="handled">
         <OptionRow
-          label="全部成员"
+          label={t('search.allMembers')}
           active={recorderIds.size === 0}
           onPress={() => onFilterChange(() => setRecorderIds(new Set()))}
           disabled={filterControlsLocked}
@@ -1025,7 +1101,7 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
         {members.map((m) => (
           <OptionRow
             key={m.id}
-            label={m.id === myId ? '我' : m.nickname}
+            label={m.id === myId ? t('common.me') : m.nickname}
             active={recorderIds.has(m.id)}
             onPress={() => toggle(recorderIds, setRecorderIds, m.id)}
             disabled={filterControlsLocked}
@@ -1040,7 +1116,7 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
   return (
     <View style={styles.amountSheet}>
       <View style={styles.amountSectionHeader}>
-        <Text style={[styles.quickRangeTitle, { color: palette.textPrimary }]}>自定义</Text>
+        <Text style={[styles.quickRangeTitle, { color: palette.textPrimary }]}>{t('search.custom')}</Text>
         {!amountFilterIsUnrestricted ? (
           <Pressable
             style={styles.amountClearButton}
@@ -1052,36 +1128,36 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
               })
             }
             accessibilityRole="button"
-            accessibilityLabel="清空金额筛选"
+            accessibilityLabel={t('search.clearAmount')}
           >
-            <Text style={[styles.amountClearText, { color: palette.accent }]}>清空</Text>
+            <Text style={[styles.amountClearText, { color: palette.accent }]}>{t('common.clear')}</Text>
           </Pressable>
         ) : null}
       </View>
       <View style={styles.amountInputsRow}>
         <AmountField
-          label="最低金额"
+          label={t('search.minAmount')}
           value={amountMinYuan}
           onChange={setAmountMinYuan}
           editable={!filterControlsLocked}
         />
         <AmountField
-          label="最高金额"
+          label={t('search.maxAmount')}
           value={amountMaxYuan}
           onChange={setAmountMaxYuan}
           editable={!filterControlsLocked}
         />
       </View>
       <View style={styles.amountSectionHeader}>
-        <Text style={[styles.quickRangeTitle, { color: palette.textPrimary }]}>快捷区间</Text>
+        <Text style={[styles.quickRangeTitle, { color: palette.textPrimary }]}>{t('search.quickRanges')}</Text>
       </View>
       <View style={styles.quickRangeRow}>
         {AMOUNT_RANGES.map((range) => {
           const selected = matchesQuickRange(amountMinYuan, amountMaxYuan, range);
           return (
             <QuickRangeChip
-              key={range.label}
-              label={range.label}
+              key={`${range.min}-${range.max}`}
+              label={amountRangeLabel(range)}
               selected={selected}
               disabled={filterControlsLocked}
               onPress={() =>
@@ -1094,7 +1170,9 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
           );
         })}
       </View>
-      {amountError ? <Text style={[styles.errorText, { color: palette.danger }]}>最小金额不能大于最大金额</Text> : null}
+      {amountError ? (
+        <Text style={[styles.errorText, { color: palette.danger }]}>{t('search.amountOrderError')}</Text>
+      ) : null}
     </View>
   );
 }

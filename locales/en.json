@@ -1,0 +1,8 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "HomeBook",
+    "NSCameraUsageDescription": "Allow HomeBook to use the camera to scan a family invite QR code",
+    "NSPhotoLibraryUsageDescription": "Allow HomeBook to access your photos to choose an avatar or family cover, or to save an invite QR code",
+    "NSPhotoLibraryAddUsageDescription": "Allow HomeBook to save invite QR codes to your photo library"
+  }
+}

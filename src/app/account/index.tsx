@@ -29,26 +29,28 @@ import { Space, usePalette } from '@/constants/design';
 import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { Row, SettingsList } from '@/features/settings/native-list';
+import { alertOk, t, useLocalePreference } from '@/i18n';
 import { deleteAccount, useSession } from '@/lib/auth';
 import { NICKNAME_MAX_LENGTH, NICKNAME_MIN_LENGTH, validateNickname } from '@/lib/profile';
 
 /** +86 手机号脱敏为 138****5678。 */
 function maskPhone(e164?: string | null): string {
-  if (!e164) return '未绑定';
+  if (!e164) return t('common.notBound');
   const local = e164.replace(/^\+?86/, '');
-  if (local.length !== 11) return '已绑定';
+  if (local.length !== 11) return t('common.bound');
   return `${local.slice(0, 3)}****${local.slice(7)}`;
 }
 /** 邮箱脱敏为 r***@gmail.com。 */
 function maskEmail(email?: string | null): string {
-  if (!email) return '未绑定';
+  if (!email) return t('common.notBound');
   const [name, domain] = email.split('@');
-  if (!domain) return '已绑定';
+  if (!domain) return t('common.bound');
   return `${name.slice(0, 1)}***@${domain}`;
 }
 
 export default function AccountScreen() {
   const palette = usePalette();
+  useLocalePreference();
   const router = useRouter();
   const { session } = useSession();
   const { data: profile } = useMyProfile();
@@ -69,23 +71,25 @@ export default function AccountScreen() {
   const onChangeAvatar = () => {
     if (!profile?.id || updateAvatar.isPending) return;
     updateAvatar.mutate(profile.id, {
-      onError: (e) => Alert.alert('头像更新失败', (e as Error).message ?? String(e)),
+      onError: (e) => Alert.alert(t('account.avatarFailed'), (e as Error).message ?? String(e), alertOk()),
     });
   };
 
   const onEditNickname = () => {
     Alert.prompt(
-      '修改昵称',
-      `请输入 ${NICKNAME_MIN_LENGTH}-${NICKNAME_MAX_LENGTH} 个字符`,
+      t('account.editNickname'),
+      t('account.nicknameRange', { min: NICKNAME_MIN_LENGTH, max: NICKNAME_MAX_LENGTH }),
       (text) => {
         const v = text?.trim();
         if (!v || v === profile?.nickname) return;
         const invalid = validateNickname(v);
         if (invalid) {
-          Alert.alert('昵称不符合要求', invalid);
+          Alert.alert(t('account.nicknameInvalid'), invalid, alertOk());
           return;
         }
-        updateNickname.mutate(v, { onError: (e) => Alert.alert('保存失败', (e as Error).message ?? String(e)) });
+        updateNickname.mutate(v, {
+          onError: (e) => Alert.alert(t('account.saveFailed'), (e as Error).message ?? String(e), alertOk()),
+        });
       },
       'plain-text',
       profile?.nickname ?? '',
@@ -98,7 +102,7 @@ export default function AccountScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.base }}>
-      <Stack.Screen options={{ headerShown: true, title: '账号与安全' }} />
+      <Stack.Screen options={{ headerShown: true, title: t('account.title') }} />
       <SettingsList>
         {/* 个人资料 */}
         <Section>
@@ -107,12 +111,12 @@ export default function AccountScreen() {
             spacing={Space[3]}
             modifiers={[contentShape(shapes.rectangle()), onTapGesture(onChangeAvatar)]}
           >
-            <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>头像</Text>
+            <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{t('account.avatar')}</Text>
             <Spacer />
             <RNHostView matchContents>
               <UserAvatar
                 avatarUrl={avatarUri ?? profile?.avatar_url}
-                nickname={profile?.nickname ?? '用户'}
+                nickname={profile?.nickname ?? t('common.user')}
                 size={32}
               />
             </RNHostView>
@@ -123,7 +127,7 @@ export default function AccountScreen() {
             spacing={Space[3]}
             modifiers={[contentShape(shapes.rectangle()), onTapGesture(onEditNickname)]}
           >
-            <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>昵称</Text>
+            <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{t('account.nickname')}</Text>
             <Spacer />
             <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>
               {profile?.nickname ?? '—'}
@@ -136,7 +140,9 @@ export default function AccountScreen() {
         <Section
           header={
             <HStack alignment="center" spacing={Space[1]}>
-              <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>登录方式</Text>
+              <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>
+                {t('account.loginMethod')}
+              </Text>
               <Popover isPresented={loginInfoOpen} onIsPresentedChange={setLoginInfoOpen} arrowEdge="top">
                 <Popover.Trigger>
                   <Image
@@ -158,7 +164,7 @@ export default function AccountScreen() {
                       multilineTextAlignment('leading'),
                     ]}
                   >
-                    账号需至少保留一种登录方式；仅剩一种时该方式不可解绑。换绑 / 解绑等敏感操作需先验证身份。
+                    {t('account.loginSafety')}
                   </Text>
                 </Popover.Content>
               </Popover>
@@ -168,36 +174,40 @@ export default function AccountScreen() {
         >
           <Row
             icon="iphone"
-            label="手机号"
+            label={t('account.phone')}
             value={maskPhone(user?.phone)}
             onPress={() => router.push('/account/phone' as Href)}
           />
           <Row
             icon="envelope.fill"
-            label="邮箱"
+            label={t('account.email')}
             value={maskEmail(user?.email)}
             onPress={() => router.push('/account/email' as Href)}
           />
           <Row
             icon="apple.logo"
-            label="Apple"
-            value={hasApple ? '已连接' : '未连接'}
+            label={t('account.apple')}
+            value={hasApple ? t('common.connected') : t('common.notConnected')}
             onPress={() => router.push('/account/apple' as Href)}
           />
         </Section>
 
         {/* 密码 */}
         <Section>
-          <Row icon="lock.fill" label="修改密码" onPress={() => router.push('/account/password' as Href)} />
+          <Row
+            icon="lock.fill"
+            label={t('account.password')}
+            onPress={() => router.push('/account/password' as Href)}
+          />
         </Section>
 
         {/* 危险操作：风险提示以行内小字落在「账号注销」右侧（替代原常驻脚注）。 */}
         <Section>
           <Row
             icon="person.crop.circle.badge.xmark"
-            label="账号注销"
+            label={t('account.deleteAccount')}
             danger
-            value="注销将永久删除，不可恢复"
+            value={t('account.deleteHint')}
             valueSize={12}
             onPress={onDeleteAccount}
           />
@@ -207,11 +217,11 @@ export default function AccountScreen() {
       {/* 账号注销二次确认：输入「我确认注销」解锁危险红滑块，滑到底执行（像滑动关机）。 */}
       <DangerConfirmSheet
         visible={deleteOpen}
-        title="账号注销"
-        message="注销后手机号、邮箱、密码等账号数据将被永久删除、不可恢复；你在家庭中的流水会保留给其他成员查看。"
-        matchLabel="请输入「我确认注销」进行确认操作"
-        matchValue="我确认注销"
-        slideLabel="滑动以确认注销"
+        title={t('account.deleteAccount')}
+        message={t('account.deleteMessage')}
+        matchLabel={t('account.deleteMatch')}
+        matchValue={t('account.deleteMatchValue')}
+        slideLabel={t('account.deleteSlide')}
         onConfirm={deleteAccount}
         onClose={() => setDeleteOpen(false)}
       />

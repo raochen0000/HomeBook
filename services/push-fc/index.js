@@ -40,31 +40,61 @@ const TYPE_CATEGORY = {
 };
 
 // ── 通知 → 推送标题/正文（与 App 内 center-sheet.tsx 的 describe 保持一致口径）──────────
-function famName(p) {
-  return p && p.family_name ? `「${p.family_name}」` : '家庭';
+function famName(p, locale) {
+  const fallback = locale === 'en' ? 'the family' : '家庭';
+  return p && p.family_name ? `「${p.family_name}」` : fallback;
 }
 
-function describe(type, payload, userId) {
+function describe(type, payload, userId, locale) {
   const p = payload || {};
+  const en = locale === 'en';
   switch (type) {
     case 'removed':
-      return p.reason === 'dissolved'
-        ? { title: '家庭已解散', body: `${famName(p)}已被户主解散` }
-        : { title: '你已被移出家庭', body: `你已被移出${famName(p)}` };
+      if (p.reason === 'dissolved') {
+        return en
+          ? { title: 'Family dissolved', body: `${famName(p, locale)} was dissolved by the owner` }
+          : { title: '家庭已解散', body: `${famName(p, locale)}已被户主解散` };
+      }
+      return en
+        ? { title: 'You were removed', body: `You were removed from ${famName(p, locale)}` }
+        : { title: '你已被移出家庭', body: `你已被移出${famName(p, locale)}` };
     case 'transfer':
-      return p.new_owner_user_id === userId
-        ? { title: '户主变更', body: `你已成为${famName(p)}的户主` }
-        : { title: '户主变更', body: `${p.new_owner_name || '一位家庭成员'}已成为${famName(p)}的户主` };
+      if (p.new_owner_user_id === userId) {
+        return en
+          ? { title: 'Owner changed', body: `You are now the owner of ${famName(p, locale)}` }
+          : { title: '户主变更', body: `你已成为${famName(p, locale)}的户主` };
+      }
+      {
+        const who = p.new_owner_name || (en ? 'A family member' : '一位家庭成员');
+        return en
+          ? { title: 'Owner changed', body: `${who} is now the owner of ${famName(p, locale)}` }
+          : { title: '户主变更', body: `${who}已成为${famName(p, locale)}的户主` };
+      }
     case 'succession':
-      return { title: '户主继任', body: '有成员发起了户主继任申请' };
-    case 'goal_achieved':
-      return { title: '储蓄目标达成', body: `${p.goal_name ? `「${p.goal_name}」` : '一个储蓄目标'}已达成 🎉` };
+      return en
+        ? { title: 'Owner succession', body: 'Someone requested to become the owner' }
+        : { title: '户主继任', body: '有成员发起了户主继任申请' };
+    case 'goal_achieved': {
+      const goal = p.goal_name ? `「${p.goal_name}」` : en ? 'A savings goal' : '一个储蓄目标';
+      return en
+        ? { title: 'Savings goal reached', body: `${goal} is complete 🎉` }
+        : { title: '储蓄目标达成', body: `${goal}已达成 🎉` };
+    }
     case 'budget_alert':
+      if (en) {
+        return { title: 'Budget alert', body: 'This month’s budget needs attention' };
+      }
       return { title: '预算预警', body: p.text || '本月预算需要关注' };
-    case 'monthly_summary':
-      return { title: '月度总结', body: `${p.period || '上月'}的家庭总结已生成` };
+    case 'monthly_summary': {
+      const period = p.period || (en ? 'last month' : '上月');
+      return en
+        ? { title: 'Monthly recap', body: `The ${period} household recap is ready` }
+        : { title: '月度总结', body: `${period}的家庭总结已生成` };
+    }
     default:
-      return { title: '家账', body: '你有一条新通知' };
+      return en
+        ? { title: 'HomeBook', body: 'You have a new notification' }
+        : { title: '家账', body: '你有一条新通知' };
   }
 }
 
@@ -112,14 +142,14 @@ async function runPollCycle() {
       terminalIds.push(n.id); // 无设备令牌：等待下次新通知，而不让旧消息无限轮询
       continue;
     }
-    const { title, body } = describe(n.type, n.payload, n.user_id);
     delivery.set(n.id, { notification: n, failed: false });
     const url = notificationUrl(n.type, n.payload);
-    for (const token of tokens) {
+    for (const device of tokens) {
+      const { title, body } = describe(n.type, n.payload, n.user_id, device.locale);
       messages.push({
         notification: n,
-        token,
-        message: { to: token, title, body, sound: 'default', data: { type: n.type, id: n.id, url } },
+        token: device.token,
+        message: { to: device.token, title, body, sound: 'default', data: { type: n.type, id: n.id, url } },
       });
     }
   }
@@ -212,8 +242,13 @@ async function isEnabled(userId, category, prefCache) {
 /** 该用户的全部设备令牌。 */
 async function tokensFor(userId, tokenCache) {
   if (!tokenCache.has(userId)) {
-    const rows = await sbFetch('GET', `device_tokens?select=token&user_id=eq.${userId}`);
-    tokenCache.set(userId, (rows || []).map((r) => r.token).filter(Boolean));
+    const rows = await sbFetch('GET', `device_tokens?select=token,locale&user_id=eq.${userId}`);
+    tokenCache.set(
+      userId,
+      (rows || [])
+        .filter((r) => r && r.token)
+        .map((r) => ({ token: r.token, locale: r.locale === 'en' ? 'en' : 'zh' })),
+    );
   }
   return tokenCache.get(userId);
 }

@@ -28,6 +28,7 @@ import {
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
+import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import {
   categoryColorKey,
   CUSTOM_CATEGORY_COLORS,
@@ -41,7 +42,7 @@ type IconGroup = { title: string; icons: readonly SymbolName[] };
 /** 分类图标库（SF Symbols），收入/支出共用同一套分组交互。 */
 const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
   {
-    title: '娱乐',
+    title: 'category.gFun',
     icons: [
       'gamecontroller.fill',
       'film.fill',
@@ -56,7 +57,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '饮食',
+    title: 'category.gFood',
     icons: [
       'fork.knife',
       'cup.and.saucer.fill',
@@ -71,7 +72,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '医疗',
+    title: 'category.gHealth',
     icons: [
       'cross.case.fill',
       'pills.fill',
@@ -86,7 +87,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '学习',
+    title: 'category.gLearn',
     icons: [
       'book.fill',
       'books.vertical.fill',
@@ -101,7 +102,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '交通',
+    title: 'category.gTransit',
     icons: [
       'car.fill',
       'bus.fill',
@@ -116,7 +117,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '购物',
+    title: 'category.gShop',
     icons: [
       'cart.fill',
       'bag.fill',
@@ -131,7 +132,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '生活',
+    title: 'category.gLife',
     icons: [
       'phone.fill',
       'wifi',
@@ -146,7 +147,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '个人',
+    title: 'category.gPersonal',
     icons: [
       'person.fill',
       'person.crop.circle.fill',
@@ -161,7 +162,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '居家',
+    title: 'category.gHome',
     icons: [
       'house.fill',
       'bed.double.fill',
@@ -176,7 +177,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '宠物',
+    title: 'category.gPet',
     icons: [
       'pawprint.fill',
       'pawprint.circle.fill',
@@ -191,7 +192,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '健身',
+    title: 'category.gFit',
     icons: [
       'figure.run',
       'dumbbell.fill',
@@ -206,7 +207,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '办公',
+    title: 'category.gWork',
     icons: [
       'briefcase.fill',
       'folder.fill',
@@ -221,7 +222,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '理财',
+    title: 'category.gMoney',
     icons: [
       'dollarsign.circle.fill',
       'banknote.fill',
@@ -238,7 +239,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     ],
   },
   {
-    title: '其它',
+    title: 'category.gOther',
     icons: [
       'ellipsis.circle.fill',
       'questionmark.circle.fill',
@@ -273,6 +274,7 @@ export function CategoryManageSheet({ visible, onClose }: { visible: boolean; on
 
 function Body() {
   const palette = useSheetPalette();
+  useLocalePreference();
   const [view, setView] = useState<ViewState>({ mode: 'list' });
 
   // 单壳内切换「列表 / 编辑器」，不再嵌套第二层 pageSheet（DESIGN §9.9：pageSheet 不叠加）。
@@ -285,6 +287,7 @@ function Body() {
 // ── 列表 ─────────────────────────────────────────────────────────────────────
 function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; setView: (v: ViewState) => void }) {
   const catColors = useCategoryColors();
+  useLocalePreference();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
   const catsQ = useCategories();
@@ -308,28 +311,32 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
 
   const onArchive = (c: Category) => {
     if (!isOwner) {
-      Alert.alert('仅户主可停用', '停用分类会影响全家，请联系户主操作。');
+      Alert.alert(t('category.ownerOnlyDisable'), t('category.ownerOnlyDisableBody'), alertOk());
       return;
     }
-    Alert.alert('停用分类', `停用「${c.name}」后，记账时将不再出现。已记录的流水仍保留该分类名。`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '停用',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await archiveM.mutateAsync(c.id);
-          } catch (e) {
-            Alert.alert('停用失败', (e as Error).message ?? String(e));
-          }
+    Alert.alert(
+      t('category.disableTitle'),
+      t('category.disableBody', { name: displayCategoryName(c.name, c.is_system) }),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('category.disable'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await archiveM.mutateAsync(c.id);
+            } catch (e) {
+              Alert.alert(t('category.disableFailed'), (e as Error).message ?? String(e), alertOk());
+            }
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   const onToggleHide = (c: Category) => {
     if (!isOwner) {
-      Alert.alert('仅户主可操作', '隐藏/显示系统分类会影响全家，请联系户主操作。');
+      Alert.alert(t('category.ownerOnlyHide'), t('category.ownerOnlyHideBody'), alertOk());
       return;
     }
     if (!familyId) return;
@@ -339,16 +346,20 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
         if (isHidden) await unhideM.mutateAsync({ familyId, categoryId: c.id });
         else await hideM.mutateAsync({ familyId, categoryId: c.id });
       } catch (e) {
-        Alert.alert(isHidden ? '显示失败' : '隐藏失败', (e as Error).message ?? String(e));
+        Alert.alert(
+          isHidden ? t('category.showFailed') : t('category.hideFailed'),
+          (e as Error).message ?? String(e),
+          alertOk(),
+        );
       }
     };
     if (isHidden) {
       void run(); // 恢复显示无需确认
       return;
     }
-    Alert.alert('隐藏分类', `隐藏「${c.name}」后，记账时将不再出现；可随时恢复。已记录的流水不受影响。`, [
-      { text: '取消', style: 'cancel' },
-      { text: '隐藏', style: 'destructive', onPress: () => void run() },
+    Alert.alert(t('category.hideTitle'), t('category.hideBody', { name: displayCategoryName(c.name, c.is_system) }), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.hide'), style: 'destructive', onPress: () => void run() },
     ]);
   };
 
@@ -366,14 +377,18 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
         <View style={[styles.iconDot, { backgroundColor: color, opacity: isHidden ? 0.4 : 1 }]}>
           <SymbolView name={(c.icon ?? 'circle.fill') as SymbolViewProps['name']} tintColor="#FFFFFF" size={17} />
         </View>
-        <Text style={[styles.rowName, { color: palette.textPrimary, opacity: isHidden ? 0.4 : 1 }]}>{c.name}</Text>
+        <Text style={[styles.rowName, { color: palette.textPrimary, opacity: isHidden ? 0.4 : 1 }]}>
+          {displayCategoryName(c.name, c.is_system)}
+        </Text>
         <View style={styles.flex} />
         {c.is_system ? (
           isProtected ? (
-            <Text style={[styles.sysTag, { color: palette.textTertiary }]}>系统</Text>
+            <Text style={[styles.sysTag, { color: palette.textTertiary }]}>{t('category.system')}</Text>
           ) : (
             <>
-              {isHidden ? <Text style={[styles.sysTag, { color: palette.textTertiary }]}>已隐藏</Text> : null}
+              {isHidden ? (
+                <Text style={[styles.sysTag, { color: palette.textTertiary }]}>{t('category.hidden')}</Text>
+              ) : null}
               <Pressable hitSlop={10} onPress={() => onToggleHide(c)} style={styles.archiveBtn}>
                 <SymbolView name={isHidden ? 'eye.slash' : 'eye'} tintColor={palette.textSecondary} size={20} />
               </Pressable>
@@ -395,17 +410,17 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
-        <SheetHeader title="分类管理" />
+        <SheetHeader title={t('category.title')} />
 
         {/* 支出 / 收入：iOS 原生分段控件（SwiftUI Picker.segmented） */}
         <Host style={styles.segmentHost}>
           <Picker
             modifiers={[pickerStyle('segmented')]}
             selection={type}
-            onSelectionChange={(t) => setType(t as CategoryType)}
+            onSelectionChange={(txn) => setType(txn as CategoryType)}
           >
-            <UIText modifiers={[tag('expense')]}>支出</UIText>
-            <UIText modifiers={[tag('income')]}>收入</UIText>
+            <UIText modifiers={[tag('expense')]}>{t('record.expense')}</UIText>
+            <UIText modifiers={[tag('income')]}>{t('record.income')}</UIText>
           </Picker>
         </Host>
 
@@ -419,13 +434,13 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
               <SymbolView name="plus" tintColor={palette.onAccent} size={17} weight="semibold" />
             </View>
             <Text style={[styles.rowName, { color: palette.accent }]}>
-              新增{type === 'expense' ? '支出' : '收入'}分类
+              {type === 'expense' ? t('category.addExpense') : t('category.addIncome')}
             </Text>
           </Pressable>
 
           {custom.length > 0 ? (
             <View style={styles.group}>
-              <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>自定义</Text>
+              <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('category.custom')}</Text>
               <View style={[styles.card, { backgroundColor: palette.card }]}>
                 {custom.map((c) => renderRow(c, true))}
               </View>
@@ -433,7 +448,7 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
           ) : null}
 
           <View style={styles.group}>
-            <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>系统预设</Text>
+            <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('category.systemPreset')}</Text>
             <View style={[styles.card, { backgroundColor: palette.card }]}>
               {system.map((c) => renderRow(c, false))}
             </View>
@@ -447,6 +462,7 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
 // ── 新增 / 编辑 ───────────────────────────────────────────────────────────────
 function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; onBack: () => void }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const catColors = useCategoryColors();
   const familyQ = useMyFamily();
   const catsQ = useCategories();
@@ -471,7 +487,7 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
   const handleSave = async () => {
     if (!trimmed) return;
     if (nameTooLong) {
-      Alert.alert('名称过长', `分类名称最多只能输入 ${CATEGORY_NAME_MAX_LENGTH} 个字符。`);
+      Alert.alert(t('category.tooLongTitle'), t('category.nameTooLong', { max: CATEGORY_NAME_MAX_LENGTH }), alertOk());
       return;
     }
     // 同类型同名查重（排除自身），与历史/系统分类不冲突。
@@ -479,7 +495,7 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
       (c) => c.type === type && c.name === trimmed && c.status === 'active' && (!isEdit || c.id !== view.category.id),
     );
     if (dup) {
-      Alert.alert('分类已存在', `已有同名「${trimmed}」分类，换个名字吧。`);
+      Alert.alert(t('category.existsTitle'), t('category.exists', { name: trimmed }), alertOk());
       return;
     }
     try {
@@ -488,14 +504,14 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
       } else {
         const fid = familyQ.data?.id;
         if (!fid) {
-          Alert.alert('暂时无法创建', '请先创建或加入一个家庭。');
+          Alert.alert(t('category.cannotCreate'), t('category.noFamily'), alertOk());
           return;
         }
         await createM.mutateAsync({ family_id: fid, name: trimmed, icon, type, color_key: colorKey });
       }
       onBack();
     } catch (e) {
-      Alert.alert('保存失败', (e as Error).message ?? String(e));
+      Alert.alert(t('account.saveFailed'), (e as Error).message ?? String(e), alertOk());
     }
   };
 
@@ -522,7 +538,7 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
     );
   };
 
-  const renderColorChoice = ({ key, label }: (typeof CUSTOM_CATEGORY_COLORS)[number]) => {
+  const renderColorChoice = ({ key }: (typeof CUSTOM_CATEGORY_COLORS)[number]) => {
     const active = key === colorKey;
     return (
       <Pressable
@@ -530,7 +546,10 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
         onPress={() => setColorKey(key)}
         accessibilityRole="radio"
         accessibilityState={{ selected: active }}
-        accessibilityLabel={`${label}色${active ? '，已选择' : ''}`}
+        accessibilityLabel={t('category.colorA11y', {
+          label: t(`categoryColors.${key}`),
+          selected: active ? t('category.selected') : '',
+        })}
         style={[
           styles.colorCell,
           { backgroundColor: catColors[key] },
@@ -595,7 +614,7 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
         <SheetHeader
-          title={isEdit ? '编辑分类' : '新增分类'}
+          title={isEdit ? t('category.edit') : t('category.add')}
           onBack={onBack}
           onConfirm={handleSave}
           confirmDisabled={!trimmed || nameTooLong || saving}
@@ -614,13 +633,13 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
               />
             </View>
             <Text style={[styles.previewType, { color: palette.textSecondary }]}>
-              {type === 'expense' ? '支出分类' : '收入分类'}
+              {type === 'expense' ? t('category.expenseType') : t('category.incomeType')}
             </Text>
           </View>
 
           <TextInput
             style={[styles.nameInput, { backgroundColor: palette.card, color: palette.textPrimary }]}
-            placeholder={`分类名称（最多 ${CATEGORY_NAME_MAX_LENGTH} 个字符）`}
+            placeholder={t('category.namePlaceholder', { max: CATEGORY_NAME_MAX_LENGTH })}
             placeholderTextColor={palette.textTertiary}
             value={name}
             onChangeText={setName}
@@ -630,7 +649,7 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
           />
 
           <View style={styles.colorSection}>
-            <Text style={[styles.colorTitle, { color: palette.textPrimary }]}>分类颜色</Text>
+            <Text style={[styles.colorTitle, { color: palette.textPrimary }]}>{t('category.color')}</Text>
             <View style={[styles.colorCard, { backgroundColor: palette.card }]}>{renderColorGrid()}</View>
           </View>
 
@@ -643,7 +662,7 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
             <View style={styles.iconGroupList}>
               {CATEGORY_ICON_GROUPS.map((group) => (
                 <View key={group.title} style={styles.iconPickerGroup}>
-                  <Text style={[styles.iconGroupTitle, { color: palette.textSecondary }]}>{group.title}</Text>
+                  <Text style={[styles.iconGroupTitle, { color: palette.textSecondary }]}>{t(group.title)}</Text>
                   {renderIconGrid(group.icons)}
                 </View>
               ))}

@@ -14,23 +14,28 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useCategories, useFamilyMembers, useMyProfile, useTransactions, type Transaction } from '@/api';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { displayCategoryName, i18n, INTL_LOCALE, t, useLocalePreference } from '@/i18n';
+import { fromI18nLanguage } from '@/i18n/locale';
 import { currentPeriod, formatAmount, signForNet } from '@/lib/format';
 
-// 已结算月：回顾口吻；进行中（本月至今）：进行口吻。
-const WARM_POOL_SETTLED = [
-  '这个月你们一起记下了 {count} 笔，每一笔都是生活的痕迹。',
-  '{top} 是这个月家里最大的开销，钱花在了在意的地方。',
-  '一家人的账，记着记着就成了日子的样子。',
-  '{recorder} 是这个月记账最勤快的人，给 TA 一个家庭勋章 🏅',
-  '把每一分钱都看见，也把每一天的用心看见。',
-];
-const WARM_POOL_PROGRESS = [
-  '这个月你们已经一起记下了 {count} 笔，继续保持～',
-  '本月还在进行中，{top} 是目前最大的开销。',
-  '日子还在记，月底再回来看看完整的总结吧。',
-  '{recorder} 是本月目前最勤快的记账人 🏅',
-  '把每一天的用心都记下来，月末会有惊喜。',
-];
+const WARM_KEYS_SETTLED = [
+  'summary.warmCount',
+  'summary.warmTop',
+  'summary.warmDays',
+  'summary.warmRecorder',
+  'summary.warmSee',
+] as const;
+const WARM_KEYS_PROGRESS = [
+  'summary.warmCountNow',
+  'summary.warmTopNow',
+  'summary.warmKeep',
+  'summary.warmRecorderNow',
+  'summary.warmSurprise',
+] as const;
+
+function intlLocale(): string {
+  return INTL_LOCALE[fromI18nLanguage(i18n.language)];
+}
 
 /** YYYY-MM → 上一个月 YYYY-MM。 */
 function prevPeriod(period: string): string {
@@ -47,7 +52,7 @@ function nextPeriod(period: string): string {
 /** 「YYYY 年 M 月」基础标题；进行中实例在外层追加「· 截至今日」。 */
 function periodLabel(period: string): string {
   const [y, m] = period.split('-').map(Number);
-  return `${y} 年 ${m} 月`;
+  return t('dates.yearMonth', { year: y, month: m });
 }
 
 type Summary = {
@@ -70,7 +75,7 @@ function computeSummary(
   catName: (id: string) => string,
   memberName: (id: string) => string,
 ): Summary | null {
-  const inMonth = txns.filter((t) => currentPeriod(new Date(t.occurred_at)) === period);
+  const inMonth = txns.filter((txn) => currentPeriod(new Date(txn.occurred_at)) === period);
   if (inMonth.length === 0) return null;
 
   let totalExpense = 0;
@@ -80,20 +85,20 @@ function computeSummary(
   let consumTotal = 0;
   let maxExpense: Summary['maxExpense'] = null;
 
-  for (const t of inMonth) {
-    if (t.type === 'expense') totalExpense += t.amount;
-    else totalIncome += t.amount;
-    byRecorder.set(t.recorder_user_id, (byRecorder.get(t.recorder_user_id) ?? 0) + 1);
+  for (const txn of inMonth) {
+    if (txn.type === 'expense') totalExpense += txn.amount;
+    else totalIncome += txn.amount;
+    byRecorder.set(txn.recorder_user_id, (byRecorder.get(txn.recorder_user_id) ?? 0) + 1);
 
     // 日常消费（排除储蓄类）用于最大单笔 / 最高分类
-    if (t.type === 'expense' && t.source === 'normal') {
-      consumTotal += t.amount;
-      consumByCat.set(t.category_id, (consumByCat.get(t.category_id) ?? 0) + t.amount);
-      if (!maxExpense || t.amount > maxExpense.amount) {
+    if (txn.type === 'expense' && txn.source === 'normal') {
+      consumTotal += txn.amount;
+      consumByCat.set(txn.category_id, (consumByCat.get(txn.category_id) ?? 0) + txn.amount);
+      if (!maxExpense || txn.amount > maxExpense.amount) {
         maxExpense = {
-          amount: t.amount,
-          category: catName(t.category_id),
-          date: new Date(t.occurred_at).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }),
+          amount: txn.amount,
+          category: catName(txn.category_id),
+          date: new Date(txn.occurred_at).toLocaleDateString(intlLocale(), { month: 'numeric', day: 'numeric' }),
         };
       }
     }
@@ -120,20 +125,21 @@ function computeSummary(
   const dayCap = new Date().getDate();
   let prevExpense = 0;
   let prevIncome = 0;
-  for (const t of txns) {
-    const d = new Date(t.occurred_at);
+  for (const txn of txns) {
+    const d = new Date(txn.occurred_at);
     if (currentPeriod(d) !== prev) continue;
     if (isCurrent && d.getDate() > dayCap) continue;
-    if (t.type === 'expense') prevExpense += t.amount;
-    else prevIncome += t.amount;
+    if (txn.type === 'expense') prevExpense += txn.amount;
+    else prevIncome += txn.amount;
   }
   const mom = (cur: number, base: number): number | null => (base > 0 ? Math.round(((cur - base) / base) * 100) : null);
 
-  const pool = isCurrent ? WARM_POOL_PROGRESS : WARM_POOL_SETTLED;
-  const warm = pool[Math.floor(Math.random() * pool.length)]
-    .replace('{count}', String(inMonth.length))
-    .replace('{top}', topCategory?.name ?? '生活')
-    .replace('{recorder}', topRecorder?.name ?? '你们');
+  const pool = isCurrent ? WARM_KEYS_PROGRESS : WARM_KEYS_SETTLED;
+  const warm = t(pool[Math.floor(Math.random() * pool.length)], {
+    count: inMonth.length,
+    top: topCategory?.name ?? t('summary.life'),
+    recorder: topRecorder?.name ?? t('summary.youAll'),
+  });
 
   return {
     count: inMonth.length,
@@ -155,6 +161,7 @@ export function MonthlySummaryScreen({ initialPeriod, onClose }: { initialPeriod
 
 function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: () => void }) {
   const palette = usePalette();
+  const { locale } = useLocalePreference();
   const txnsQ = useTransactions();
   const catsQ = useCategories();
   const membersQ = useFamilyMembers();
@@ -166,8 +173,8 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
   // 翻月下界：最早一笔流水所在月（无数据时为本月）。
   const minPeriod = useMemo(() => {
     let min = cur;
-    for (const t of txnsQ.data ?? []) {
-      const p = currentPeriod(new Date(t.occurred_at));
+    for (const txn of txnsQ.data ?? []) {
+      const p = currentPeriod(new Date(txn.occurred_at));
       if (p < min) min = p;
     }
     return min;
@@ -197,20 +204,25 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
   );
 
   const summary = useMemo(() => {
-    const catById = new Map((catsQ.data ?? []).map((c) => [c.id, c.name]));
+    void locale;
+    const catById = new Map((catsQ.data ?? []).map((c) => [c.id, c]));
     const memById = new Map((membersQ.data ?? []).map((m) => [m.id, m.nickname]));
     const myId = profileQ.data?.id;
     return computeSummary(
       txnsQ.data ?? [],
       period,
       isCurrent,
-      (id) => catById.get(id) ?? '未分类',
-      (id) => (id === myId ? '我' : (memById.get(id) ?? '成员')),
+      (id) => {
+        const cat = catById.get(id);
+        return cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized');
+      },
+      (id) => (id === myId ? t('common.me') : (memById.get(id) ?? t('common.member'))),
     );
-  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, period, isCurrent]);
+  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, period, isCurrent, locale]);
 
-  const title = `${periodLabel(period)}${isCurrent ? ' · 截至今日' : ''}`;
-  const momText = (v: number | null) => (v == null ? '—' : v === 0 ? '持平' : v > 0 ? `↑ ${v}%` : `↓ ${Math.abs(v)}%`);
+  const title = isCurrent ? `${periodLabel(period)} · ${t('dates.untilToday')}` : periodLabel(period);
+  const momText = (v: number | null) =>
+    v == null ? '—' : v === 0 ? t('report.flat') : v > 0 ? `↑ ${v}%` : `↓ ${Math.abs(v)}%`;
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
@@ -219,7 +231,7 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
           <Pressable hitSlop={8} onPress={onClose} style={[styles.navBack, { backgroundColor: palette.cardPill }]}>
             <SymbolView name="chevron.left" tintColor={palette.textPrimary} size={17} weight="semibold" />
           </Pressable>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>月度总结</Text>
+          <Text style={[styles.title, { color: palette.textPrimary }]}>{t('summary.title')}</Text>
           <View style={styles.navSide} />
         </View>
 
@@ -246,10 +258,10 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
           <View style={styles.center} {...pan.panHandlers}>
             <SymbolView name="doc.text" tintColor={palette.textTertiary} size={48} />
             <Text style={{ color: palette.textSecondary }}>
-              {isCurrent ? '本月还没有记账' : `${periodLabel(period)}还没有记账`}
+              {isCurrent ? t('summary.noTxnsCurrent') : t('summary.noTxnsPast', { period: periodLabel(period) })}
             </Text>
             <Text style={{ color: palette.textTertiary, fontSize: 13 }}>
-              {isCurrent ? '记一笔后，这里会生成总结' : '这个月没有总结'}
+              {isCurrent ? t('summary.emptyAfterRecord') : t('summary.emptyPast')}
             </Text>
           </View>
         ) : (
@@ -259,21 +271,28 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
                 <Text style={[styles.balance, { color: palette.textPrimary }]}>
                   {formatAmount(summary.balance, signForNet(summary.balance))}
                 </Text>
-                <Text style={{ color: palette.textSecondary }}>{isCurrent ? '本月结余 · 截至今日' : '本月结余'}</Text>
+                <Text style={{ color: palette.textSecondary }}>
+                  {isCurrent ? t('summary.balanceUntilToday') : t('summary.balanceMonth')}
+                </Text>
                 <View style={styles.heroRow}>
                   <HeroStat
-                    label="支出"
+                    label={t('record.expense')}
                     value={formatAmount(summary.totalExpense, '')}
                     color={palette.expense}
                     palette={palette}
                   />
                   <HeroStat
-                    label="收入"
+                    label={t('record.income')}
                     value={formatAmount(summary.totalIncome, '')}
                     color={palette.income}
                     palette={palette}
                   />
-                  <HeroStat label="记账" value={`${summary.count} 笔`} color={palette.textPrimary} palette={palette} />
+                  <HeroStat
+                    label={t('summary.recordStat')}
+                    value={t('report.countWithUnit', { count: summary.count })}
+                    color={palette.textPrimary}
+                    palette={palette}
+                  />
                 </View>
               </View>
 
@@ -281,7 +300,7 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
                 {summary.maxExpense ? (
                   <StatRow
                     icon="arrow.up.right"
-                    label="最大单笔支出"
+                    label={t('summary.topExpense')}
                     value={`${formatAmount(summary.maxExpense.amount, '')}`}
                     sub={`${summary.maxExpense.category} · ${summary.maxExpense.date}`}
                     palette={palette}
@@ -290,27 +309,33 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
                 {summary.topCategory ? (
                   <StatRow
                     icon="chart.pie.fill"
-                    label="支出最高分类"
+                    label={t('summary.topCategory')}
                     value={`${summary.topCategory.name} ${formatAmount(summary.topCategory.amount, '')}`}
-                    sub={`占消费 ${summary.topCategory.pct}%`}
+                    sub={t('summary.topShare', { pct: summary.topCategory.pct })}
                     palette={palette}
                   />
                 ) : null}
                 {summary.topRecorder ? (
                   <StatRow
                     icon="pencil.circle.fill"
-                    label="记账最积极的人"
+                    label={t('summary.topRecorder')}
                     value={summary.topRecorder.name}
-                    sub={`${isCurrent ? '已记' : '共记'} ${summary.topRecorder.count} 笔`}
+                    sub={
+                      isCurrent
+                        ? t('summary.recordedSoFar', { count: summary.topRecorder.count })
+                        : t('summary.recordedCount', { count: summary.topRecorder.count })
+                    }
                     palette={palette}
                   />
                 ) : null}
                 <StatRow
                   icon="arrow.left.arrow.right"
-                  label="对比上月"
-                  value={`支出 ${momText(summary.momExpense)}`}
+                  label={t('summary.vsLastMonth')}
+                  value={t('summary.vsExpense', { delta: momText(summary.momExpense) })}
                   sub={
-                    isCurrent ? `收入 ${momText(summary.momIncome)} · 较上月同期` : `收入 ${momText(summary.momIncome)}`
+                    isCurrent
+                      ? t('summary.vsIncomeSame', { delta: momText(summary.momIncome) })
+                      : t('summary.vsIncome', { delta: momText(summary.momIncome) })
                   }
                   palette={palette}
                   last
@@ -323,9 +348,7 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
               </View>
 
               {isCurrent ? (
-                <Text style={[styles.footnote, { color: palette.textTertiary }]}>
-                  本月仍在进行中，月底结算后可保存为图片
-                </Text>
+                <Text style={[styles.footnote, { color: palette.textTertiary }]}>{t('summary.inProgressHint')}</Text>
               ) : null}
             </ScrollView>
           </View>

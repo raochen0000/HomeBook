@@ -35,6 +35,7 @@ import {
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
+import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 
 type TxnType = 'expense' | 'income';
@@ -91,6 +92,7 @@ export function RecurringSheet({ visible, onClose, familyId, recorderId, editing
 
 function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<RecurringSheetProps, 'visible'>) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const catColors = useCategoryColors();
 
   const categoriesQ = useCategories();
@@ -110,7 +112,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
 
   const members = membersQ.data ?? [];
   const showRecorder = members.some((m) => m.userId === recorderId && m.role === 'owner');
-  const recorderName = members.find((m) => m.userId === recorderUserId)?.nickname ?? '我';
+  const recorderName = members.find((m) => m.userId === recorderUserId)?.nickname ?? t('common.me');
 
   const categories = useMemo<Category[]>(() => {
     const hidden = hiddenQ.data ?? new Set<string>();
@@ -176,7 +178,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
       onSaved?.();
       onClose();
     } catch (e) {
-      Alert.alert('保存失败', (e as Error).message ?? String(e));
+      Alert.alert(t('record.saveFailed'), (e as Error).message ?? String(e), alertOk());
     }
   };
 
@@ -203,7 +205,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
             maxWidth: 56,
           }}
         >
-          {c.name}
+          {displayCategoryName(c.name, c.is_system)}
         </Text>
       </Pressable>
     );
@@ -219,7 +221,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
 
       <View style={styles.topBar}>
         <Text style={[styles.topTitle, { color: palette.textPrimary }]}>
-          {editing ? '编辑定时收支' : '新增定时收支'}
+          {editing ? t('record.editRecurring') : t('record.addRecurring')}
         </Text>
       </View>
 
@@ -228,10 +230,10 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
         <Picker
           modifiers={[pickerStyle('segmented')]}
           selection={type}
-          onSelectionChange={(t) => setType(t as TxnType)}
+          onSelectionChange={(value) => setType(value as TxnType)}
         >
-          <UIText modifiers={[tag('expense')]}>支出</UIText>
-          <UIText modifiers={[tag('income')]}>收入</UIText>
+          <UIText modifiers={[tag('expense')]}>{t('record.expense')}</UIText>
+          <UIText modifiers={[tag('income')]}>{t('record.income')}</UIText>
         </Picker>
       </Host>
 
@@ -245,7 +247,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
       {/* 详情卡：分类 / 记账日 / 备注 / 记账人 */}
       <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
         <View style={styles.catHeader}>
-          <Text style={[styles.catHeaderLabel, { color: palette.textSecondary }]}>分类</Text>
+          <Text style={[styles.catHeaderLabel, { color: palette.textSecondary }]}>{t('record.category')}</Text>
         </View>
         {categoriesQ.isLoading ? (
           <View style={styles.catLoading}>
@@ -267,7 +269,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
         {/* 每月记账日 */}
         <View style={styles.rowInner}>
           <SymbolView name="calendar" tintColor={palette.textTertiary} size={16} />
-          <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>每月记账日</Text>
+          <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.monthlyDay')}</Text>
           <View style={styles.rowSpacer} />
           <Host matchContents style={styles.dayHost}>
             <Picker
@@ -276,7 +278,9 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
               onSelectionChange={(v) => setDayOfMonth(Number(v))}
             >
               {Array.from({ length: 28 }, (_, i) => (
-                <UIText key={i} modifiers={[tag(String(i + 1))]}>{`${i + 1} 号`}</UIText>
+                <UIText key={i} modifiers={[tag(String(i + 1))]}>
+                  {t('common.dayOfMonth', { day: i + 1 })}
+                </UIText>
               ))}
             </Picker>
           </Host>
@@ -289,7 +293,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
           <SymbolView name="pencil" tintColor={palette.textTertiary} size={16} />
           <TextInput
             style={[styles.noteInput, { color: palette.textPrimary }]}
-            placeholder="加个备注…（如 工资、Apple Music）"
+            placeholder={t('record.recurringNotePlaceholder')}
             placeholderTextColor={palette.textTertiary}
             value={note}
             onChangeText={setNote}
@@ -304,7 +308,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
             {divider}
             <Pressable style={styles.rowInner} onPress={() => setMemberOpen(true)}>
               <SymbolView name="person.crop.circle" tintColor={palette.textTertiary} size={16} />
-              <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>记账人</Text>
+              <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.recorder')}</Text>
               <View style={styles.rowSpacer} />
               <Text style={[styles.infoValue, { color: palette.textSecondary }]}>{recorderName}</Text>
               <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
@@ -337,7 +341,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
       {/* 取消 / 保存 */}
       <View style={styles.actions}>
         <Pressable style={[styles.cancel, { borderColor: palette.separator }]} onPress={onClose}>
-          <Text style={[styles.cancelText, { color: palette.textSecondary }]}>取消</Text>
+          <Text style={[styles.cancelText, { color: palette.textSecondary }]}>{t('common.cancel')}</Text>
         </Pressable>
         <Pressable
           disabled={!canSave}
@@ -347,7 +351,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
           {saving ? (
             <ActivityIndicator color={palette.onInk} />
           ) : (
-            <Text style={[styles.saveText, { color: palette.onInk }]}>保存</Text>
+            <Text style={[styles.saveText, { color: palette.onInk }]}>{t('common.save')}</Text>
           )}
         </Pressable>
       </View>
@@ -381,6 +385,7 @@ function MemberPickerSheet({
   onClose: () => void;
 }) {
   const palette = usePalette();
+  useLocalePreference();
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -392,7 +397,7 @@ function MemberPickerSheet({
           <View style={[styles.grabber, { backgroundColor: palette.separator, marginTop: Space[2] }]} />
           <View style={styles.memberHeader}>
             <View style={styles.memberHeaderSide} />
-            <Text style={[styles.memberTitle, { color: palette.textPrimary }]}>记账人</Text>
+            <Text style={[styles.memberTitle, { color: palette.textPrimary }]}>{t('record.recorder')}</Text>
             <Pressable style={styles.memberHeaderSide} hitSlop={8} onPress={onClose}>
               <SymbolView name="xmark" tintColor={palette.textTertiary} size={16} />
             </Pressable>

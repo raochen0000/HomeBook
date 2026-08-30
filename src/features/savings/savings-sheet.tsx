@@ -25,6 +25,8 @@ import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { toast } from '@/components/toast';
 import { Radius, Space, usePalette, useSheetPalette } from '@/constants/design';
+import { alertOk, t, useLocalePreference } from '@/i18n';
+import { INTL_LOCALE } from '@/i18n/locale';
 import { formatAmount } from '@/lib/format';
 
 const MAX_ACTIVE = 5;
@@ -69,6 +71,7 @@ export function SavingsSheet({
 
 function Body({ initialGoalId }: { initialGoalId?: string | null }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const goalsQ = useSavingsGoals();
   const [view, setView] = useState<ViewState>(
     initialGoalId ? { mode: 'detail', goalId: initialGoalId } : { mode: 'list' },
@@ -89,7 +92,7 @@ function Body({ initialGoalId }: { initialGoalId?: string | null }) {
         goal={g}
         dir={view.dir}
         onBack={() => setView({ mode: 'detail', goalId: g.id })}
-        onAchieved={(name) => toast.success(`「${name}」已达成`)}
+        onAchieved={(name) => toast.success(t('savings.achieved', { name }))}
       />
     ) : null;
   } else {
@@ -112,9 +115,10 @@ function GoalList({
   loading: boolean;
   setView: (v: ViewState) => void;
 }) {
+  useLocalePreference();
   const onNew = () => {
     if (goals.length >= MAX_ACTIVE) {
-      Alert.alert('目标已满', `最多同时进行 ${MAX_ACTIVE} 个储蓄目标，完成或删除后再新建。`);
+      Alert.alert(t('savings.fullTitle'), t('savings.fullBody', { max: MAX_ACTIVE }), alertOk());
       return;
     }
     setView({ mode: 'form', goal: null });
@@ -123,7 +127,7 @@ function GoalList({
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
       {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
-      <SheetHeader title="储蓄目标" />
+      <SheetHeader title={t('savings.title')} />
 
       {loading ? (
         <View style={styles.center}>
@@ -132,10 +136,10 @@ function GoalList({
       ) : goals.length === 0 ? (
         <View style={styles.center}>
           <SymbolView name="target" tintColor={palette.textTertiary} size={48} />
-          <Text style={{ color: palette.textSecondary }}>还没有储蓄目标</Text>
-          <Text style={{ color: palette.textTertiary, fontSize: 13 }}>一家人一起攒个小目标吧</Text>
+          <Text style={{ color: palette.textSecondary }}>{t('savings.empty')}</Text>
+          <Text style={{ color: palette.textTertiary, fontSize: 13 }}>{t('savings.emptyHint')}</Text>
           <Pressable onPress={onNew} style={[styles.primary, { backgroundColor: palette.ink }]}>
-            <Text style={[styles.primaryText, { color: palette.onInk }]}>新建目标</Text>
+            <Text style={[styles.primaryText, { color: palette.onInk }]}>{t('savings.create')}</Text>
           </Pressable>
         </View>
       ) : (
@@ -161,7 +165,7 @@ function GoalList({
                     <Text style={{ color: palette.textTertiary }}> / {formatAmount(g.target_amount, '')}</Text>
                   </Text>
                   <Text style={{ color: palette.textSecondary, fontSize: 13 }}>
-                    {pct}%{dl != null ? (dl >= 0 ? ` · 剩 ${dl} 天` : ' · 已过期') : ''}
+                    {pct}%{dl != null ? (dl >= 0 ? t('savings.daysLeft', { count: dl }) : t('savings.expired')) : ''}
                   </Text>
                 </View>
               </Pressable>
@@ -169,7 +173,7 @@ function GoalList({
           })}
           <Pressable onPress={onNew} style={[styles.addGoal, { borderColor: palette.separator }]}>
             <SymbolView name="plus" tintColor={palette.accent} size={18} />
-            <Text style={{ color: palette.accent, fontSize: 16 }}>新建目标</Text>
+            <Text style={{ color: palette.accent, fontSize: 16 }}>{t('savings.create')}</Text>
           </Pressable>
         </ScrollView>
       )}
@@ -188,6 +192,7 @@ function GoalDetail({
   setView: (v: ViewState) => void;
 }) {
   const palette = useSheetPalette();
+  const { locale } = useLocalePreference();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
   const entriesQ = useSavingsEntries(goal.id);
@@ -200,23 +205,23 @@ function GoalDetail({
 
   const onDelete = () => {
     if (!isOwner) {
-      Alert.alert('仅户主可删除', '删除储蓄目标需要户主操作。');
+      Alert.alert(t('savings.ownerOnlyDelete'), t('savings.ownerOnlyDeleteBody'), alertOk());
       return;
     }
     Alert.alert(
-      '删除目标',
-      `删除「${goal.name}」后，已存的 ${formatAmount(goal.saved_amount, '')} 会作为一笔收入退回家庭账本（资金不会消失）。确定删除吗？`,
+      t('savings.deleteTitle'),
+      t('savings.deleteBody', { name: goal.name, amount: formatAmount(goal.saved_amount, '') }),
       [
-        { text: '取消', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: '删除',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await deleteM.mutateAsync(goal.id);
               onBack();
             } catch (e) {
-              Alert.alert('删除失败', (e as Error).message ?? String(e));
+              Alert.alert(t('home.deleteFailed'), (e as Error).message ?? String(e), alertOk());
             }
           },
         },
@@ -234,12 +239,24 @@ function GoalDetail({
           <Text style={[styles.detailSaved, { color: palette.textPrimary }]}>
             {formatAmount(goal.saved_amount, '')}
           </Text>
-          <Text style={{ color: palette.textSecondary }}>目标 {formatAmount(goal.target_amount, '')}</Text>
+          <Text style={{ color: palette.textSecondary }}>
+            {t('savings.targetOf', { amount: formatAmount(goal.target_amount, '') })}
+          </Text>
           <ProgressBar pct={pct} palette={palette} big />
           <View style={styles.detailMetaRow}>
-            <Detail label="进度" value={`${pct}%`} palette={palette} />
-            <Detail label="还差" value={formatAmount(remaining, '')} palette={palette} />
-            <Detail label="期限" value={dl != null ? (dl >= 0 ? `${dl} 天` : '已过期') : '无'} palette={palette} />
+            <Detail label={t('savings.progress')} value={`${pct}%`} palette={palette} />
+            <Detail label={t('savings.remain')} value={formatAmount(remaining, '')} palette={palette} />
+            <Detail
+              label={t('savings.deadline')}
+              value={
+                dl != null
+                  ? dl >= 0
+                    ? t('savings.daysValue', { count: dl })
+                    : t('savings.expiredShort')
+                  : t('common.none')
+              }
+              palette={palette}
+            />
           </View>
         </View>
 
@@ -250,7 +267,7 @@ function GoalDetail({
             style={[styles.txnBtn, { backgroundColor: palette.ink }]}
           >
             <SymbolView name="arrow.down" tintColor={palette.onInk} size={16} weight="semibold" />
-            <Text style={[styles.txnBtnText, { color: palette.onInk }]}>存入</Text>
+            <Text style={[styles.txnBtnText, { color: palette.onInk }]}>{t('savings.deposit')}</Text>
           </Pressable>
           <Pressable
             onPress={() => setView({ mode: 'txn', goalId: goal.id, dir: 'withdraw' })}
@@ -262,13 +279,13 @@ function GoalDetail({
             ]}
           >
             <SymbolView name="arrow.up" tintColor={palette.textPrimary} size={16} weight="semibold" />
-            <Text style={[styles.txnBtnText, { color: palette.textPrimary }]}>取出</Text>
+            <Text style={[styles.txnBtnText, { color: palette.textPrimary }]}>{t('savings.withdraw')}</Text>
           </Pressable>
         </View>
 
         {/* 编辑入口（从标题区移入内容区，DESIGN §9.9：非保存动作不放标题两侧） */}
         <Pressable onPress={() => setView({ mode: 'form', goal })} hitSlop={8} style={styles.editLink}>
-          <Text style={{ color: palette.info, fontSize: 15 }}>编辑目标信息</Text>
+          <Text style={{ color: palette.info, fontSize: 15 }}>{t('savings.editInfo')}</Text>
         </Pressable>
 
         {goal.note ? (
@@ -278,10 +295,10 @@ function GoalDetail({
         ) : null}
 
         {/* 存取记录 */}
-        <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>存取记录</Text>
+        <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('savings.history')}</Text>
         <View style={[styles.card, { backgroundColor: palette.card }]}>
           {(entriesQ.data ?? []).length === 0 ? (
-            <Text style={{ color: palette.textTertiary, padding: Space[4] }}>还没有存取记录</Text>
+            <Text style={{ color: palette.textTertiary, padding: Space[4] }}>{t('savings.historyEmpty')}</Text>
           ) : (
             (entriesQ.data ?? []).map((e, i) => {
               const dep = e.direction === 'deposit';
@@ -295,9 +312,11 @@ function GoalDetail({
                       size={22}
                     />
                     <View style={styles.flex}>
-                      <Text style={{ color: palette.textPrimary, fontSize: 15 }}>{dep ? '存入' : '取出'}</Text>
+                      <Text style={{ color: palette.textPrimary, fontSize: 15 }}>
+                        {dep ? t('savings.deposit') : t('savings.withdraw')}
+                      </Text>
                       <Text style={{ color: palette.textTertiary, fontSize: 12 }}>
-                        {new Date(e.created_at).toLocaleDateString('zh-CN')}
+                        {new Date(e.created_at).toLocaleDateString(INTL_LOCALE[locale])}
                         {e.note ? ` · ${e.note}` : ''}
                       </Text>
                     </View>
@@ -313,7 +332,7 @@ function GoalDetail({
 
         {isOwner ? (
           <Pressable onPress={onDelete} style={styles.deleteRow}>
-            <Text style={{ color: palette.danger, fontSize: 16 }}>删除目标</Text>
+            <Text style={{ color: palette.danger, fontSize: 16 }}>{t('savings.deleteTitle')}</Text>
           </Pressable>
         ) : null}
       </ScrollView>
@@ -331,11 +350,11 @@ function Detail({ label, value, palette }: { label: string; value: string; palet
 }
 
 // ── 新建 / 编辑目标 ───────────────────────────────────────────────────────────
-const DEADLINE_PRESETS: { key: string; label: string; months: number | null }[] = [
-  { key: 'none', label: '无期限', months: null },
-  { key: '3m', label: '3 个月', months: 3 },
-  { key: '6m', label: '6 个月', months: 6 },
-  { key: '1y', label: '1 年', months: 12 },
+const DEADLINE_PRESETS: { key: string; labelKey: string; months: number | null }[] = [
+  { key: 'none', labelKey: 'savings.noDeadline', months: null },
+  { key: '3m', labelKey: 'savings.months3', months: 3 },
+  { key: '6m', labelKey: 'savings.months6', months: 6 },
+  { key: '1y', labelKey: 'savings.year1', months: 12 },
 ];
 
 function deadlineFromMonths(months: number | null): string | null {
@@ -347,6 +366,7 @@ function deadlineFromMonths(months: number | null): string | null {
 
 function GoalForm({ goal, onBack }: { goal: SavingsGoal | null; onBack: () => void }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const familyQ = useMyFamily();
   const createM = useCreateGoal();
   const updateM = useUpdateGoal();
@@ -384,7 +404,7 @@ function GoalForm({ goal, onBack }: { goal: SavingsGoal | null; onBack: () => vo
       } else {
         const fid = familyQ.data?.id;
         if (!fid) {
-          Alert.alert('暂时无法创建', '请先创建或加入一个家庭。');
+          Alert.alert(t('category.cannotCreate'), t('category.noFamily'), alertOk());
           return;
         }
         await createM.mutateAsync({
@@ -397,7 +417,7 @@ function GoalForm({ goal, onBack }: { goal: SavingsGoal | null; onBack: () => vo
       }
       onBack();
     } catch (e) {
-      Alert.alert('保存失败', (e as Error).message ?? String(e));
+      Alert.alert(t('account.saveFailed'), (e as Error).message ?? String(e), alertOk());
     }
   };
 
@@ -405,17 +425,17 @@ function GoalForm({ goal, onBack }: { goal: SavingsGoal | null; onBack: () => vo
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
       {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
       <SheetHeader
-        title={isEdit ? '编辑目标' : '新建目标'}
+        title={isEdit ? t('savings.edit') : t('savings.create')}
         onBack={onBack}
         onConfirm={handleSave}
         confirmDisabled={!canSave}
       />
 
       <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
-        <Field label="目标名称" palette={palette}>
+        <Field label={t('savings.name')} palette={palette}>
           <TextInput
             style={[styles.input, { backgroundColor: palette.card, color: palette.textPrimary }]}
-            placeholder="如：全家三亚游"
+            placeholder={t('savings.namePlaceholder')}
             placeholderTextColor={palette.textTertiary}
             value={name}
             onChangeText={setName}
@@ -424,7 +444,7 @@ function GoalForm({ goal, onBack }: { goal: SavingsGoal | null; onBack: () => vo
           />
         </Field>
 
-        <Field label="目标金额" palette={palette}>
+        <Field label={t('savings.amount')} palette={palette}>
           <TextInput
             style={[styles.input, { backgroundColor: palette.card, color: palette.textPrimary }]}
             placeholder="0.00"
@@ -435,31 +455,32 @@ function GoalForm({ goal, onBack }: { goal: SavingsGoal | null; onBack: () => vo
           />
         </Field>
 
-        <Field label="截止日期（可选）" palette={palette}>
+        <Field label={t('savings.deadlineOptional')} palette={palette}>
           <View style={styles.chips}>
-            {(isEdit ? [{ key: 'keep', label: '不修改', months: null }, ...DEADLINE_PRESETS] : DEADLINE_PRESETS).map(
-              (p) => {
-                const active = preset === p.key;
-                return (
-                  <Pressable
-                    key={p.key}
-                    onPress={() => setPreset(p.key)}
-                    style={[styles.chip, { backgroundColor: active ? palette.accent : palette.card }]}
-                  >
-                    <Text style={{ color: active ? palette.onAccent : palette.textPrimary, fontSize: 14 }}>
-                      {p.label}
-                    </Text>
-                  </Pressable>
-                );
-              },
-            )}
+            {(isEdit
+              ? [{ key: 'keep', labelKey: 'savings.keep', months: null }, ...DEADLINE_PRESETS]
+              : DEADLINE_PRESETS
+            ).map((p) => {
+              const active = preset === p.key;
+              return (
+                <Pressable
+                  key={p.key}
+                  onPress={() => setPreset(p.key)}
+                  style={[styles.chip, { backgroundColor: active ? palette.accent : palette.card }]}
+                >
+                  <Text style={{ color: active ? palette.onAccent : palette.textPrimary, fontSize: 14 }}>
+                    {t(p.labelKey)}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </Field>
 
-        <Field label="备注（可选）" palette={palette}>
+        <Field label={t('savings.noteOptional')} palette={palette}>
           <TextInput
             style={[styles.input, { backgroundColor: palette.card, color: palette.textPrimary }]}
-            placeholder="给目标加一句话"
+            placeholder={t('savings.notePlaceholder')}
             placeholderTextColor={palette.textTertiary}
             value={note}
             onChangeText={setNote}
@@ -484,6 +505,7 @@ function TxnForm({
   onAchieved: (name: string) => void;
 }) {
   const palette = useSheetPalette();
+  useLocalePreference();
   const depositM = useSavingsDeposit();
   const withdrawM = useSavingsWithdraw();
   const isDep = dir === 'deposit';
@@ -514,18 +536,27 @@ function TxnForm({
         onBack();
       }
     } catch (e) {
-      Alert.alert(isDep ? '存入失败' : '取出失败', (e as Error).message ?? String(e));
+      Alert.alert(
+        isDep ? t('savings.depositFail') : t('savings.withdrawFail'),
+        (e as Error).message ?? String(e),
+        alertOk(),
+      );
     }
   };
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
       {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
-      <SheetHeader title={isDep ? '存入' : '取出'} onBack={onBack} onConfirm={handleSave} confirmDisabled={!canSave} />
+      <SheetHeader
+        title={isDep ? t('savings.deposit') : t('savings.withdraw')}
+        onBack={onBack}
+        onConfirm={handleSave}
+        confirmDisabled={!canSave}
+      />
 
       <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
         <Text style={{ color: palette.textSecondary, paddingHorizontal: Space[1] }}>
-          {goal.name} · 已存 {formatAmount(goal.saved_amount, '')}
+          {t('savings.savedOf', { name: goal.name, amount: formatAmount(goal.saved_amount, '') })}
         </Text>
         <TextInput
           style={[styles.bigAmount, { backgroundColor: palette.card, color: isDep ? palette.expense : palette.income }]}
@@ -537,18 +568,18 @@ function TxnForm({
           autoFocus
         />
         {overWithdraw ? (
-          <Text style={{ color: palette.danger, paddingHorizontal: Space[1] }}>取出金额超过已存金额</Text>
+          <Text style={{ color: palette.danger, paddingHorizontal: Space[1] }}>{t('savings.overWithdraw')}</Text>
         ) : null}
         <TextInput
           style={[styles.input, { backgroundColor: palette.card, color: palette.textPrimary }]}
-          placeholder={isDep ? '备注（可选）' : '用途备注（可选）'}
+          placeholder={isDep ? t('savings.depositNote') : t('savings.withdrawNote')}
           placeholderTextColor={palette.textTertiary}
           value={note}
           onChangeText={setNote}
           maxLength={50}
         />
         <Text style={{ color: palette.textTertiary, fontSize: 12, paddingHorizontal: Space[1] }}>
-          {isDep ? '存入会记一笔「储蓄·目标存入」支出流水' : '取出会记一笔「储蓄·目标取出」收入流水'}，家庭账本可对账。
+          {isDep ? t('savings.depositHint') : t('savings.withdrawHint')}
         </Text>
       </ScrollView>
     </SafeAreaView>
