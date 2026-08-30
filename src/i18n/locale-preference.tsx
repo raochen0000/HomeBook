@@ -14,7 +14,7 @@ const LocalePreferenceContext = createContext<{
   setLocale: (locale: AppLocale) => void;
 } | null>(null);
 
-/** App 壳每帧写入当前路由；切语言前拷到 pending，导航 remount 后还原。 */
+/** 切语言前记录路由，供重建导航壳后还原当前位置。 */
 export const localePathRef = { current: '/' };
 export const pendingLocaleRestoreRef = { current: null as string | null };
 
@@ -49,13 +49,17 @@ export function LocalePreferenceProvider({ children }: { children: ReactNode }) 
     };
   }, []);
 
-  const setLocale = useCallback((next: AppLocale) => {
-    hasUserChanged.current = true;
-    pendingLocaleRestoreRef.current = localePathRef.current;
-    setAppLocale(next);
-    setLocaleState(next);
-    void AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {});
-  }, []);
+  const setLocale = useCallback(
+    (next: AppLocale) => {
+      if (next === locale) return;
+      hasUserChanged.current = true;
+      pendingLocaleRestoreRef.current = localePathRef.current;
+      setAppLocale(next);
+      setLocaleState(next);
+      void AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {});
+    },
+    [locale],
+  );
 
   return <LocalePreferenceContext value={{ locale, setLocale }}>{children}</LocalePreferenceContext>;
 }

@@ -54,7 +54,7 @@ import { displayCategoryName, i18n, INTL_LOCALE, t, useLocalePreference } from '
 import { fromI18nLanguage } from '@/i18n/locale';
 import { daysToMonthEnd } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import { currentPeriod, formatAmount, maskAmount, signForNet } from '@/lib/format';
+import { currentPeriod, formatAmount, formatMonthDay, maskAmount, signForNet } from '@/lib/format';
 import {
   balanceRate,
   equalPeriodIncomeExpenseSeries,
@@ -373,23 +373,35 @@ export default function ReportScreen() {
     const cats = catsQ.data ?? [];
     const mem = membersQ.data ?? [];
     const catById = new Map(cats.map((c) => [c.id, c]));
-    const nameById = new Map(mem.map((m) => [m.id, m.nickname]));
     const myId = profileQ.data?.id;
+    const uncategorized = t('common.uncategorized');
+    const otherIncome = t('categories.otherIncome');
+    const memberFallback = t('common.member');
+    const memberNameById = new Map(mem.map((member) => [member.id, member.nickname]));
+    if (myId) memberNameById.set(myId, t('common.me'));
 
-    // 分类展示信息（识别色 + 图标），分类环比里上期独有分类也要用。
+    // 分类展示信息（识别色 + 图标）按分类预先计算；流水循环只查 Map。
+    const categoryDisplayById = new Map(
+      cats.map((category) => [
+        category.id,
+        {
+          name: displayCategoryName(category.name, category.is_system),
+          color:
+            catColors[
+              categoryColorKey(category.name, category.type === 'income' ? 'income' : 'expense', category.color_key)
+            ],
+          symbol: categorySymbol(category.icon, category.type === 'income' ? 'income' : 'expense'),
+        },
+      ]),
+    );
     const catDisplay = (id: string, type: 'income' | 'expense') => {
-      const cat = catById.get(id);
-      const storedName = cat?.name ?? (type === 'income' ? '其他收入' : '未分类');
-      const displayName = cat
-        ? displayCategoryName(cat.name, cat.is_system)
-        : type === 'income'
-          ? t('categories.otherIncome')
-          : t('common.uncategorized');
-      return {
-        name: displayName,
-        color: catColors[categoryColorKey(storedName, type, cat?.color_key)],
-        symbol: categorySymbol(cat?.icon ?? null, type),
-      };
+      return (
+        categoryDisplayById.get(id) ?? {
+          name: type === 'income' ? otherIncome : uncategorized,
+          color: catColors[categoryColorKey(type === 'income' ? '其他收入' : '未分类', type)],
+          symbol: categorySymbol(null, type),
+        }
+      );
     };
 
     let inc = 0;
@@ -435,8 +447,7 @@ export default function ReportScreen() {
         entry.amount += txn.amount;
         catMap.set(txn.category_id, entry);
 
-        const who =
-          txn.recorder_user_id === myId ? t('common.me') : (nameById.get(txn.recorder_user_id) ?? t('common.member'));
+        const who = memberNameById.get(txn.recorder_user_id) ?? memberFallback;
         const me = memMap.get(txn.recorder_user_id) ?? {
           id: txn.recorder_user_id,
           name: who,
@@ -454,7 +465,7 @@ export default function ReportScreen() {
           color: d.color,
           symbol: d.symbol,
           amount: txn.amount,
-          date: new Date(txn.occurred_at).toLocaleDateString(intlLocale(), { month: 'numeric', day: 'numeric' }),
+          date: formatMonthDay(txn.occurred_at),
         });
       }
     }

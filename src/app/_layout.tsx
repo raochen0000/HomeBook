@@ -51,20 +51,19 @@ export default function RootLayout() {
 }
 
 /**
- * NativeTabs + SwiftUI Host 不会随 JS 文案更新已挂着的原生树；
- * 切语言时重挂导航壳。启动时读存档导致的 locale 变化不还原路由。
+ * 仍有全局 t() 调用的原生页面不会订阅 locale Context；语言变化时重建导航壳，
+ * 让 NativeTabs / SwiftUI Host 与所有已挂载页面使用同一份新文案。
  */
 function RestoreLocaleRoute() {
   const { locale } = useLocalePreference();
   const router = useRouter();
-  const prev = useRef(locale);
+  const previousLocale = useRef(locale);
   useLayoutEffect(() => {
-    if (prev.current === locale) return;
-    prev.current = locale;
+    if (previousLocale.current === locale) return;
+    previousLocale.current = locale;
     const path = pendingLocaleRestoreRef.current;
     pendingLocaleRestoreRef.current = null;
     if (!path) return;
-    // 等新 Stack 挂上再还原，避免 replace 打在正在卸载的导航上。
     requestAnimationFrame(() => router.replace(path as Href));
   }, [locale, router]);
   return null;
@@ -98,7 +97,7 @@ function AppShell() {
         {/*
          * 根导航栈：已登录页用 Stack.Protected 守住。注销后账号与安全等原生页会从栈里摘掉，
          * 落到 login（覆盖层无法盖住 Native Stack，这是停留在账号页的根因）。
-         * key=locale：拆掉 NativeTabs / Host 的旧原生树，否则切语言后各 Tab 会中英混排。
+         * 目前仍有全局 t() 调用的原生页面；key=locale 让整棵已挂载原生树同步更新。
          */}
         <Stack key={locale} screenOptions={{ headerShown: false, headerBackButtonDisplayMode: 'minimal' }}>
           <Stack.Protected guard={signedIn}>

@@ -204,6 +204,12 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const errors = validateFilters(filters);
   const valid = !errors.amount && !errors.date;
   const hasCurrentQuery = hasAnyQuery(filters);
+  const categoryNameById = useMemo(() => {
+    void locale;
+    return new Map(
+      (catsQ.data ?? []).map((category) => [category.id, displayCategoryName(category.name, category.is_system)]),
+    );
+  }, [catsQ.data, locale]);
   const presentation = getSearchPresentation({
     isValid: valid,
     hasCurrentQuery,
@@ -218,7 +224,8 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     const nameById = new Map(members.map((m) => [m.id, m.nickname]));
     const memberById = new Map(members.map((m) => [m.id, m]));
     const myNick = profileQ.data?.nickname;
-    void locale;
+    const memberFallback = t('common.member');
+    const uncategorized = t('common.uncategorized');
 
     const result = runSearch(txns, deferredFilters, {
       categoryNamesById: new Map(cats.map((c) => [c.id, categorySearchNames(c.name, c.is_system)])),
@@ -228,7 +235,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     });
 
     const avatarOf = (userId: string): AvatarInfo => {
-      const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? t('common.member');
+      const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? memberFallback;
       return { uri: avatarFiles.get(userId) ?? null, nickname: nick };
     };
 
@@ -256,7 +263,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       group.totalCents += ttype === 'income' ? txn.amount : -txn.amount;
       group.rows.push({
         id: txn.id,
-        title: cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized'),
+        title: categoryNameById.get(txn.category_id) ?? uncategorized,
         note,
         symbol: categorySymbol(cat?.icon ?? null, ttype),
         iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype, cat?.color_key)],
@@ -279,7 +286,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     avatarFiles,
     catColors,
     palette,
-    locale,
+    categoryNameById,
   ]);
 
   const categories = catsQ.data ?? [];

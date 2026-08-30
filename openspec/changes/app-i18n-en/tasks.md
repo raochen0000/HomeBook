@@ -31,3 +31,4 @@
 - [x] 5.1 更新 PRD / DESIGN / IA / TECH / DATAMODEL 中语言与推送口径
 - [x] 5.2 为 locale 解析、分类显示名、搜索双语命中补充单元测试
 - [x] 5.3 运行 `pnpm test`、`pnpm exec tsc --noEmit` 与相关 lint
+- [x] 5.4 缓存数据密集页面的分类显示名与日期 formatter，降低语言切换的重算成本

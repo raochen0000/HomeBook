@@ -39,7 +39,7 @@ PRD §18.3.5 已定该组合。SDK 56 的 Localization 指南把 `react-i18next`
 
 `LocalePreferenceProvider` 读/写 `homebook.locale-preference.v1`。无存档则用 `getLocales()[0].languageCode`：`zh*` → `zh`，否则 `en`。用户选择后只认存档。不写 Supabase。
 
-切语言：`i18n.changeLanguage()` + `LocalePreferenceProvider` 状态。NativeTabs / SwiftUI Host 不会把新文案写进已挂着的原生树，所以根导航用 `key={locale}` 整棵重挂，再 `replace` 回切语言前所在路由。不默认整包 `Updates.reloadAsync()`。
+切语言：`i18n.changeLanguage()` + `LocalePreferenceProvider` 状态。现有页面仍有全局 `t()` 调用，NativeTabs / SwiftUI Host 不会把新文案写进已挂着的原生树，所以根导航用 `key={locale}` 整棵重挂，再 `replace` 回切语言前所在路由。不默认整包 `Updates.reloadAsync()`。
 
 系统权限弹窗跟 iOS「每 App 语言」，JS 改不了。`expo-localization` plugin 声明 `supportedLocales: { ios: ["zh-Hans", "en"] }`，`supportsRTL: false`。`app.json` `locales` 提供 `CFBundleDisplayName` 与相机/相册用法说明。
 

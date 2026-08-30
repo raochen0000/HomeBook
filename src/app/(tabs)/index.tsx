@@ -270,6 +270,12 @@ export default function HomeScreen() {
   );
   // 成员头像 → 本地缓存路径（仅预取已加载流水中涉及的成员）。
   const avatarFiles = useAvatarFiles(membersQ.data ?? [], avatarMemberIds);
+  const categoryNameById = useMemo(() => {
+    void locale;
+    return new Map(
+      (categoriesQ.data ?? []).map((category) => [category.id, displayCategoryName(category.name, category.is_system)]),
+    );
+  }, [categoriesQ.data, locale]);
 
   const { groups } = useMemo(() => {
     const txns = transactions;
@@ -279,10 +285,12 @@ export default function HomeScreen() {
     const memberById = new Map(members.map((m) => [m.id, m]));
     const myId = profileQ.data?.id;
     const myNick = profileQ.data?.nickname;
+    const memberFallback = t('common.member');
+    const uncategorized = t('common.uncategorized');
 
     // 用户 → 头像信息（真实照片本地路径，缺图回退为共用的昵称渐变头像）。
     const avatarOf = (userId: string): AvatarInfo => {
-      const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? t('common.member');
+      const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? memberFallback;
       return { uri: avatarFiles.get(userId) ?? null, nickname: nick };
     };
 
@@ -305,7 +313,7 @@ export default function HomeScreen() {
       const editedByOther = !!txn.last_editor_user_id && txn.last_editor_user_id !== txn.recorder_user_id;
       group.rows.push({
         id: txn.id,
-        title: cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized'),
+        title: categoryNameById.get(txn.category_id) ?? uncategorized,
         symbol: categorySymbol(cat?.icon ?? null, ttype),
         iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype, cat?.color_key)],
         amountCents: txn.amount,
@@ -321,7 +329,17 @@ export default function HomeScreen() {
     return {
       groups: Array.from(map.values()),
     };
-  }, [transactions, categoriesQ.data, membersQ.data, profileQ.data, avatarFiles, catColors, palette, locale]);
+  }, [
+    transactions,
+    categoriesQ.data,
+    membersQ.data,
+    profileQ.data,
+    avatarFiles,
+    catColors,
+    palette,
+    categoryNameById,
+    locale,
+  ]);
 
   // 记一笔：若当前用户还没有家庭，先自动建「单人家庭」（M1：登录 + 单人家庭自动创建）。
   const openCreate = async () => {

@@ -14,9 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useCategories, useFamilyMembers, useMyProfile, useTransactions, type Transaction } from '@/api';
 import { Radius, Space, usePalette } from '@/constants/design';
-import { displayCategoryName, i18n, INTL_LOCALE, t, useLocalePreference } from '@/i18n';
-import { fromI18nLanguage } from '@/i18n/locale';
-import { currentPeriod, formatAmount, signForNet } from '@/lib/format';
+import { displayCategoryName, t, useLocalePreference } from '@/i18n';
+import { currentPeriod, formatAmount, formatMonthDay, signForNet } from '@/lib/format';
 
 const WARM_KEYS_SETTLED = [
   'summary.warmCount',
@@ -32,10 +31,6 @@ const WARM_KEYS_PROGRESS = [
   'summary.warmRecorderNow',
   'summary.warmSurprise',
 ] as const;
-
-function intlLocale(): string {
-  return INTL_LOCALE[fromI18nLanguage(i18n.language)];
-}
 
 /** YYYY-MM → 上一个月 YYYY-MM。 */
 function prevPeriod(period: string): string {
@@ -98,7 +93,7 @@ function computeSummary(
         maxExpense = {
           amount: txn.amount,
           category: catName(txn.category_id),
-          date: new Date(txn.occurred_at).toLocaleDateString(intlLocale(), { month: 'numeric', day: 'numeric' }),
+          date: formatMonthDay(txn.occurred_at),
         };
       }
     }

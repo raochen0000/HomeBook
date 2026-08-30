@@ -13,6 +13,22 @@ function intlLocale() {
   return INTL_LOCALE[activeLocale()];
 }
 
+const monthDayFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function monthDayFormatter(locale: string): Intl.DateTimeFormat {
+  let formatter = monthDayFormatters.get(locale);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, { month: 'numeric', day: 'numeric' });
+    monthDayFormatters.set(locale, formatter);
+  }
+  return formatter;
+}
+
+/** 使用当前界面语言格式化月日；复用 formatter，避免列表逐行重复构造 Intl 对象。 */
+export function formatMonthDay(iso: string): string {
+  return monthDayFormatter(intlLocale()).format(new Date(iso));
+}
+
 export type AmountParts = {
   /** 符号：'+' | '-' | ''（中性/结余） */
   sign: '+' | '-' | '';
@@ -121,7 +137,7 @@ export function humanDay(iso: string): string {
     a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   if (sameDay(d, today)) return t('dates.today');
   if (sameDay(d, yesterday)) return t('dates.yesterday');
-  return d.toLocaleDateString(intlLocale(), { month: 'numeric', day: 'numeric' });
+  return formatMonthDay(iso);
 }
 
 /** 24 小时制时刻（HH:mm），用于流水行的记录/修改时间。 */
