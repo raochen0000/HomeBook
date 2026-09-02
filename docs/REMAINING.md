@@ -1,14 +1,15 @@
 # 家账 · 剩余开发清单（按阶段）
 
-> 生成：2026-06-22 · 依据 PRD.md 逐流程核对**实际代码**得出（非 MVP.md 的 ✅ 自述）。
+> 生成：2026-06-22；迁移决策更新：2026-08-31。依据 PRD.md 逐流程核对**实际代码**得出（非 MVP.md 的 ✅ 自述）。
 > 用途：作为后续分阶段开发的执行清单。完成一项勾一项。
 
-## 决策基线（2026-06-22 已拍板）
+## 决策基线（2026-08-31 更新）
 
 1. **离线能力**（WatermelonDB / 本地同步队列）→ **留到远期**，MVP 保持纯在线（Supabase + React Query）。
 2. **转让 / 移除二次确认** → 不用「手机号后 4 位」（MVP 无手机号），改为**输入对方昵称**；解散仍为**输入家庭名**。
 3. **优先级** → 先做「阶段一·数据安全」，再做「阶段二·体验完整度」。
-4. **家庭封面图床** → **现在就接阿里云 OSS**（与储蓄目标封面共用上传链路）。
+4. **后端与登录** → 路径 A 迁移到 Supabase Cloud；海外首版为邮箱密码 + Apple，手机号 OTP 暂停。
+5. **图片存储** → 统一使用 Supabase Storage；迁移期验证三个公开媒体桶与一个私有反馈桶。
 
 ## ⚠️ 先行技术债（阻塞下列功能，需先处理）
 
@@ -53,7 +54,7 @@
   - [x] **保存二维码到相册** — 用 `expo-media-library` + `expo-file-system/legacy` 写 PNG；app.json 已加 media-library 插件（相册权限）
   - ⚠️ **后两项需先重建 dev client**（新增原生模块 `expo-clipboard` / `expo-media-library`）才能生效
 - [x] **#8 流程 2 首次记账庆祝** ✅ 2026-06-22：家庭第一笔成功后,**先关闭记账面板、再在父层弹居中庆祝弹窗**（半透明遮罩 + 🎉 + 文案 + 「好的」手动关闭，DESIGN v0.5.0 去礼花），替代顶部 toast。record-sheet 经 `onSaved({firstRecord})` 上报 + `onDismiss` 在面板关闭动画结束后由 [index.tsx](../src/app/index.tsx) 触发 [FirstRecordCelebration](../src/features/record/first-record-celebration.tsx)。判定 = 新建 + 流水列表已加载为空。纯前端，免重建。
-- [ ] **#9 横切：接入阿里云 OSS 图床**：家庭封面 + 储蓄目标封面共用上传链路（#5/#6 前置）。
+- [ ] **#9 横切：Cloud Storage 验收**：家庭头像/背景、用户头像和反馈图片在目标 Supabase Cloud 验证 bucket 可见性、RLS、上传、覆盖、读取与删除。
 
 ---
 
@@ -75,13 +76,17 @@
 
 ## 阶段三 · 发布前补齐（MVP.md §2.4，已明确推迟，非缺陷）
 
-- [x] **#10 手机号短信 OTP 登录** — ✅ **已部署、端到端验证通过**（2026-06-30）。
+- [x] **#10 手机号短信 OTP 登录（历史自托管实现）** — ✅ **曾在阿里云自托管环境部署并端到端验证通过**（2026-06-30）；2026-08-31 决定不进入海外首版，待客户端移除入口与 Cloud 关闭 phone provider 后归档。
   - **方案（绕开企业资质）**：弃用 GoTrue 原生 Aliyun SMS provider（走「短信服务」需企业报备签名/模板）。
     改用阿里云**「短信认证服务(PNVS)」`dypnsapi.SendSmsVerifyCode`**——个人开发者免企业资质（仅个人实名 + 系统赠送签名/模板，约 10 元/年）。
     经 Supabase **Send SMS Hook → 阿里云 FC** 接入：**GoTrue 仍自己生成/校验 OTP、签发 session，FC 只当短信下发管道**（不用 CheckSmsVerifyCode、不自签 session）。
   - 已完成：客户端封装（`src/lib/auth.ts`，**无需改动**）+ 登录页 UI（`PHONE_OTP_ENABLED = true`）；**FC 已上线**（`services/sms-hook-fc/`，函数名 `homebooksms`/cn-hangzhou/Web 函数/无需认证）；GoTrue Send SMS hook 已启用并指向 **FC 内网地址**；真机真实短信 + 登录成功。
   - **关键经验**：GoTrue hook URI 必须用 **FC 内网/VPC 地址**（公网会 `hook_timeout`，auth 容器无公网出口）；模板 100001 含 `${code}`+`${min}`；测试号会短路不调 hook。详见 `services/sms-hook-fc/README.md` 与记忆 `supabase-phone-otp-native-aliyun`。
-  - **上线前收尾**：① **轮换 `HOOK_SECRET`**（联调时贴过明文，FC 与 GoTrue 两边同换）；② 真机回归（登录/注册/绑号/注销）；③ 可选：FC 预留实例消冷启动 + 开 SLS 日志。
+  - **迁移收尾**：确认 Cloud phone provider 关闭、production App 无手机号入口后，撤销 Hook/FC secret 与触发链路；旧代码待迁移观察期结束后再决定删除。
+- [ ] **#10A 海外首版认证改造**：
+  - [x] 登录页和账号页已移除手机号入口与 `/account/phone` 页面；顶部账号信息改显示邮箱。
+  - [x] 注册确认、找回密码与换绑已对齐生产自定义 SMTP：注册用确认链接、找回密码用 6 位验证码、换绑用旧/新邮箱双确认链接。
+  - [ ] Apple 登录/绑定/解绑在 Cloud 真机回归；敏感操作补近期重新认证。
 - [ ] **#11 iOS 系统推送上线验收**（Expo Push → APNs）：现有 App 内通知中心与 Expo Push/FC 投递代码待真机、APNs 凭据和线上 FC 定时器端到端验证；Android 推送不在第一版范围。
 - [ ] **#12 月度总结服务端快照 + 保存图片**（现：客户端实时计算）。
 

@@ -1,7 +1,7 @@
 /**
  * 我的（Tab 4，G1）：账号信息 + 设置入口（PRD §18 / IA §6 G1 / DESIGN §10.5）。
  * 原生 SwiftUI List(insetGrouped) + Section 实现（2026-07-02 按用户要求由 RN 卡片改原生 Form/List）。
- * 入口收敛（PRD §18.1）：原列表「个人信息 / 账号与安全 / 绑定手机号」已并入顶部用户块 → 账号页（G2）。
+ * 入口收敛（PRD §18.1）：原列表「个人信息 / 账号与安全」已并入顶部用户块 → 账号页（G2）。
  * - 顶部用户块整块点击 → push /account（换头像在账号页「头像」行）。
  * - 记账设置 / 导出数据 / 通知设置 / 帮助 / 反馈 / 关于 → push 各子页。
  * - 深色模式 / 语言 → 行内原生菜单式 Picker 下拉；当前值与箭头使用主题次级文字色（语言仅简体中文）。
@@ -29,12 +29,12 @@ import { signOut, useSession } from '@/lib/auth';
 
 const APP_VERSION = 'v1.0.0';
 
-/** +86 手机号脱敏为「138 **** 5678」；无号时占位。 */
-function maskPhone(e164?: string | null): string {
-  if (!e164) return t('common.notBound');
-  const local = e164.replace(/^\+?86/, '');
-  if (local.length !== 11) return t('common.bound');
-  return `${local.slice(0, 3)} **** ${local.slice(7)}`;
+/** 邮箱脱敏为 r***@gmail.com；无邮箱时显示绑定状态。 */
+function maskEmail(email?: string | null): string {
+  if (!email) return t('common.notBound');
+  const [name, domain] = email.split('@');
+  if (!domain) return t('common.bound');
+  return `${name.slice(0, 1)}***@${domain}`;
 }
 
 export default function MineScreen() {
@@ -96,7 +96,7 @@ export default function MineScreen() {
                 {profile?.nickname ?? t('common.user')}
               </Text>
               <Text modifiers={[font({ size: 14 }), foregroundColor(palette.textSecondary)]}>
-                {t('settings.phoneLine', { phone: maskPhone(session?.user.phone) })}
+                {t('settings.emailLine', { email: maskEmail(session?.user.email) })}
               </Text>
             </VStack>
             <Spacer />

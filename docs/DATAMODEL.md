@@ -1,7 +1,7 @@
 # 家账 · 数据模型文档（DATAMODEL）
 
-> 文档版本：v0.1.1（FAMILY 新增 `cover_url` 家庭封面；INVITATION.code 明确为 6 位大写字母数字、排除易混字符——支撑加入家庭手输码与预览卡，详见 PRD 流程 3/4、§3.5）
-> 最后更新：2026-06-21
+> 文档版本：v0.1.2（海外首版认证模型对齐：USER 拆分为 Supabase Auth 的邮箱/Apple identity 与 `public.profiles`，移除“手机号登录主键”旧蓝图）
+> 最后更新：2026-08-31
 > 关联文档：PRD.md（§18 数据模型；流程 3/4、§3.5）
 > 负责人：产品组 / 后端
 
@@ -62,29 +62,41 @@ erDiagram
 
 ### 3.1 USER（用户）
 
-| 字段                        | 类型      | 约束      | 说明                                   |
-| --------------------------- | --------- | --------- | -------------------------------------- |
-| `id`                        | UUID      | PK        | 用户唯一标识                           |
-| `phone`                     | string    | unique    | 手机号（登录主键）                     |
-| `nickname`                  | string    | not null  | 昵称（可重复、可改，不作校验凭据）     |
-| `avatar_url`                | string    | null      | 头像                                   |
-| `current_family_id`         | UUID      | FK→FAMILY | 当前所属家庭（一人仅一个）             |
-| `last_login_at`             | timestamp |           | 用于户主 30 天继任判定                 |
-| `status`                    | enum      |           | `active` / `deactivated`（注销，远期） |
-| `created_at` / `updated_at` | timestamp |           |                                        |
+`USER` 是领域概念，物理上拆为 Supabase Auth 管理的 `auth.users` / `auth.identities` 与业务表 `public.profiles`。邮箱、密码 hash、Apple identity 和 session 不复制进 `public.profiles`，客户端也不能直接读取 Auth 管理表。
+
+**认证侧（Supabase Auth 管理）**
+
+| 字段/关系                       | 约束                      | 说明                                                |
+| ------------------------------- | ------------------------- | --------------------------------------------------- |
+| `auth.users.id`                 | UUID, PK                  | 与 `public.profiles.id` 一对一                      |
+| `auth.users.email`              | nullable, Auth 侧唯一     | 邮箱密码账号；Apple-only 用户可能暂时为空           |
+| `auth.users.encrypted_password` | Auth 管理                 | 仅保存 hash，不进入业务导出或客户端                 |
+| `auth.identities.provider`      | `email` / `apple`（首版） | 一个账号可绑定邮箱与 Apple；identity 不得跨账号重复 |
+
+**业务侧（`public.profiles`）**
+
+| 字段                        | 类型        | 约束                | 说明                                 |
+| --------------------------- | ----------- | ------------------- | ------------------------------------ |
+| `id`                        | UUID        | PK, FK→`auth.users` | 用户唯一标识                         |
+| `nickname`                  | string      | not null            | 昵称（可重复、可改，不作校验凭据）   |
+| `avatar_url`                | string      | null                | 头像                                 |
+| `current_family_id`         | UUID        | FK→FAMILY           | 当前所属家庭（一人仅一个）           |
+| `last_login_at`             | timestamptz |                     | 用于户主 30 天继任判定               |
+| `status`                    | enum        |                     | `active` / `deactivated`（注销墓碑） |
+| `created_at` / `updated_at` | timestamptz |                     |                                      |
 
 ### 3.2 FAMILY（家庭）
 
-| 字段                        | 类型      | 约束     | 说明                                                                                                       |
-| --------------------------- | --------- | -------- | ---------------------------------------------------------------------------------------------------------- |
-| `id`                        | UUID      | PK       |                                                                                                            |
-| `name`                      | string    | not null | 家庭名（解散二次确认凭据）                                                                                 |
-| `cover_url`                 | string    | null     | 家庭封面图（阿里云 OSS）；无封面时前端用暖色默认底 / 插画占位（加入预览卡、家庭页头用，PRD §3.5 / 流程 4） |
-| `owner_user_id`             | UUID      | FK→USER  | 户主，**每家唯一**                                                                                         |
-| `timezone`                  | string    | not null | 账期时区（创建时落定，见 PRD §2.5）                                                                        |
-| `member_count`              | int       | ≤ 5      | 冗余计数，便于上限校验                                                                                     |
-| `status`                    | enum      |          | `active` / `dissolved`                                                                                     |
-| `created_at` / `updated_at` | timestamp |          |                                                                                                            |
+| 字段                        | 类型      | 约束     | 说明                                                                                                            |
+| --------------------------- | --------- | -------- | --------------------------------------------------------------------------------------------------------------- |
+| `id`                        | UUID      | PK       |                                                                                                                 |
+| `name`                      | string    | not null | 家庭名（解散二次确认凭据）                                                                                      |
+| `cover_url`                 | string    | null     | Supabase Storage 家庭封面 URL；无封面时前端用暖色默认底 / 插画占位（加入预览卡、家庭页头用，PRD §3.5 / 流程 4） |
+| `owner_user_id`             | UUID      | FK→USER  | 户主，**每家唯一**                                                                                              |
+| `timezone`                  | string    | not null | 账期时区（创建时落定，见 PRD §2.5）                                                                             |
+| `member_count`              | int       | ≤ 5      | 冗余计数，便于上限校验                                                                                          |
+| `status`                    | enum      |          | `active` / `dissolved`                                                                                          |
+| `created_at` / `updated_at` | timestamp |          |                                                                                                                 |
 
 ### 3.3 MEMBERSHIP（成员关系）
 
@@ -137,11 +149,11 @@ erDiagram
 
 系统预设分类是全局单行（`CATEGORY.family_id = null`），无法用 `CATEGORY.status='hidden'` 做「按家庭隐藏」——置全局行 `hidden` 会对所有家庭生效。故用本覆盖表：一行 = 「该家庭在记账/预算选择器中隐藏了该系统分类」，全局分类行保持 `active`，**历史流水仍能解析其名称/图标（显示零回归）**。
 
-| 字段          | 类型        | 约束                        | 说明                                       |
-| ------------- | ----------- | --------------------------- | ------------------------------------------ |
-| `family_id`   | UUID        | PK, FK→FAMILY(on delete cascade)   | 哪个家庭                            |
+| 字段          | 类型        | 约束                               | 说明                                       |
+| ------------- | ----------- | ---------------------------------- | ------------------------------------------ |
+| `family_id`   | UUID        | PK, FK→FAMILY(on delete cascade)   | 哪个家庭                                   |
 | `category_id` | UUID        | PK, FK→CATEGORY(on delete cascade) | 被隐藏的系统分类（触发器校验须为系统分类） |
-| `created_at`  | timestamptz | default now()               |                                            |
+| `created_at`  | timestamptz | default now()                      |                                            |
 
 > 仅系统分类可入此表（`before insert` 触发器校验 `family_id is null and is_system`）；自定义分类的删除仍走 `CATEGORY.status='archived'`。「其他支出 / 其他收入」作兜底，前端不提供隐藏入口；「储蓄·\*」从分类管理列表过滤。RLS：家庭成员可读/增/删本家庭覆盖行，户主门禁在前端（与停用自定义分类一致）。
 
@@ -229,16 +241,16 @@ erDiagram
 
 ### 5.3 NOTIFICATION（通知）
 
-| 字段      | 类型      | 约束    | 说明                                                                                         |
-| --------- | --------- | ------- | -------------------------------------------------------------------------------------------- |
-| `id`      | UUID      | PK      |                                                                                              |
-| `user_id` | UUID      | FK→USER | 接收者                                                                                       |
-| `type`    | enum      |         | `removed` / `transfer` / `succession` / `goal_achieved` / `budget_alert` / `monthly_summary` |
-| `channel` | enum      |         | `in_app` / `push`                                                                            |
-| `payload` | json      | null    | 事件附加数据                                                                                 |
-| `pushed_at` | timestamp | null  | Expo 已接受系统推送或该消息被明确跳过后的终态时间；不代表手机已展示 |
-| `push_attempts` | smallint | not null, default 0 | Expo/API 临时失败次数（迁移 0042） |
-| `push_next_attempt_at` | timestamp | null | 下次允许 FC 重试的时间；指数退避最长 1 小时（迁移 0042） |
+| 字段                   | 类型      | 约束                | 说明                                                                                         |
+| ---------------------- | --------- | ------------------- | -------------------------------------------------------------------------------------------- |
+| `id`                   | UUID      | PK                  |                                                                                              |
+| `user_id`              | UUID      | FK→USER             | 接收者                                                                                       |
+| `type`                 | enum      |                     | `removed` / `transfer` / `succession` / `goal_achieved` / `budget_alert` / `monthly_summary` |
+| `channel`              | enum      |                     | `in_app` / `push`                                                                            |
+| `payload`              | json      | null                | 事件附加数据                                                                                 |
+| `pushed_at`            | timestamp | null                | Expo 已接受系统推送或该消息被明确跳过后的终态时间；不代表手机已展示                          |
+| `push_attempts`        | smallint  | not null, default 0 | Expo/API 临时失败次数（迁移 0042）                                                           |
+| `push_next_attempt_at` | timestamp | null                | 下次允许 FC 重试的时间；指数退避最长 1 小时（迁移 0042）                                     |
 
 > 第一版通知中心只查询最新 100 条 `in_app` 消息；用户阅读或确认后，客户端物理删除该消息。没有已读状态、分页、归档或保留策略。
 > 事件去重键保存在仅服务端可访问的 `private.notification_event_keys`：预算每账期的 80% / 超支各一次，月度总结每家庭每月一次；它不保存用户可见消息内容。
@@ -267,18 +279,18 @@ erDiagram
 
 > 用户主动提交的问题 / 建议。MVP 单向提交：客户端只 insert（走 `submit_feedback` RPC），不读回历史；运营侧经 service_role 查看跟进。
 
-| 字段          | 类型          | 约束                                                      | 说明                                                             |
-| ------------- | ------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
-| `id`          | UUID          | PK                                                        |                                                                  |
-| `user_id`     | UUID          | FK→USER, not null                                         | 提交者（服务端由 `auth.uid()` 落定，客户端不可传）              |
-| `family_id`   | UUID          | FK→FAMILY, null                                           | 提交时的当前家庭快照（便于复现家庭态问题）                       |
-| `type`        | enum          | `feature`/`bug`/`suggestion`/`other`                     | 反馈类型（对应 UI「功能 / Bug / 建议 / 其它」）                  |
-| `content`     | string        | not null, `trim` 后 5–200 字                              | 问题描述                                                         |
-| `image_paths` | text[]        | default `{}`，≤ 5                                         | `homebook-feedback-images` 桶内对象路径（`{userId}_{uuid}.jpg`） |
-| `contact_ok`  | bool          | default true                                              | 是否同意通过账号（手机 / 邮箱）回访                              |
-| `device`      | jsonb         |                                                           | 诊断信息：`app_version`/`build`/`platform`/`os_version`/`device_model`/`brand`/`timezone` |
-| `status`      | enum          | `open`/`in_progress`/`resolved`/`closed`，default `open` | 运营侧流转态（MVP 客户端不展示）                                 |
-| `created_at` / `updated_at` | timestamp |                                              |                                                                  |
+| 字段                        | 类型      | 约束                                                     | 说明                                                                                      |
+| --------------------------- | --------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `id`                        | UUID      | PK                                                       |                                                                                           |
+| `user_id`                   | UUID      | FK→USER, not null                                        | 提交者（服务端由 `auth.uid()` 落定，客户端不可传）                                        |
+| `family_id`                 | UUID      | FK→FAMILY, null                                          | 提交时的当前家庭快照（便于复现家庭态问题）                                                |
+| `type`                      | enum      | `feature`/`bug`/`suggestion`/`other`                     | 反馈类型（对应 UI「功能 / Bug / 建议 / 其它」）                                           |
+| `content`                   | string    | not null, `trim` 后 5–200 字                             | 问题描述                                                                                  |
+| `image_paths`               | text[]    | default `{}`，≤ 5                                        | `homebook-feedback-images` 桶内对象路径（`{userId}_{uuid}.jpg`）                          |
+| `contact_ok`                | bool      | default true                                             | 是否同意通过账号邮箱回访；仅 Apple 隐藏邮箱无法投递时不保证站外回访                       |
+| `device`                    | jsonb     |                                                          | 诊断信息：`app_version`/`build`/`platform`/`os_version`/`device_model`/`brand`/`timezone` |
+| `status`                    | enum      | `open`/`in_progress`/`resolved`/`closed`，default `open` | 运营侧流转态（MVP 客户端不展示）                                                          |
+| `created_at` / `updated_at` | timestamp |                                                          |                                                                                           |
 
 **防刷**：`submit_feedback` RPC 服务端校验相邻两条最短间隔 30s、每人每日 ≤ 20 条。
 
@@ -286,16 +298,16 @@ erDiagram
 
 > 每用户一行、六列布尔的通知分类开关。客户端直读 + `upsert`（`onConflict = user_id`），RLS 仅本人可读写。行不存在（老用户 / 从未改过）→ 客户端回落**全开**默认。本表只落用户「愿不愿收该类系统推送」的意愿，App 内通知中心不受影响；系统推送落地后由投递侧读取本表决定是否推送对应分类。
 
-| 字段                | 类型      | 约束                              | 说明                                          |
-| ------------------- | --------- | --------------------------------- | --------------------------------------------- |
-| `user_id`           | UUID      | PK, FK→USER, on delete cascade    | 接收者（注销时随账号级联删除）                |
-| `family_activity`   | bool      | not null, default true            | 家庭动态（被移出 / 户主变更等，见 §15 事件）  |
-| `budget_alert`      | bool      | not null, default true            | 预算超支预警                                  |
-| `savings_progress`  | bool      | not null, default true            | 储蓄目标进展                                  |
-| `monthly_summary`   | bool      | not null, default true            | 月度总结提醒                                  |
-| `member_change`     | bool      | not null, default true            | 成员与邀请变动                                |
-| `account_security`  | bool      | not null, default true            | 账号安全                                      |
-| `created_at` / `updated_at` | timestamp |                           |                                               |
+| 字段                        | 类型      | 约束                           | 说明                                         |
+| --------------------------- | --------- | ------------------------------ | -------------------------------------------- |
+| `user_id`                   | UUID      | PK, FK→USER, on delete cascade | 接收者（注销时随账号级联删除）               |
+| `family_activity`           | bool      | not null, default true         | 家庭动态（被移出 / 户主变更等，见 §15 事件） |
+| `budget_alert`              | bool      | not null, default true         | 预算超支预警                                 |
+| `savings_progress`          | bool      | not null, default true         | 储蓄目标进展                                 |
+| `monthly_summary`           | bool      | not null, default true         | 月度总结提醒                                 |
+| `member_change`             | bool      | not null, default true         | 成员与邀请变动                               |
+| `account_security`          | bool      | not null, default true         | 账号安全                                     |
+| `created_at` / `updated_at` | timestamp |                                |                                              |
 
 **RLS**：`select` / `insert` / `update` 三条本人策略（`user_id = auth.uid()`）；无 delete 策略（随账号级联）。
 
@@ -303,14 +315,14 @@ erDiagram
 
 > 每台设备一行的推送令牌，供服务端投递侧按 `notification_preferences` 决定后向该用户的设备发系统推送。**一台设备一行**（`token` 作主键）：同设备换登录用户时该行改挂新 `user_id`（设备只推给当前登录者）。客户端登录后注册、登出/注销时注销，均走 **SECURITY DEFINER RPC**（`register_device_token(p_token, p_platform, p_provider, p_locale)` / `unregister_device_token`，`p_locale` 有 default，旧三参数调用仍合法）；投递侧以 `service_role` 读。**层级二 · 令牌获取（`getExpoPushTokenAsync` / APNs）依赖付费 Apple Developer + Push 能力**，故本表 + RPC 的落库链路先建、由客户端 `PUSH_DELIVERY_ENABLED` 开关灰度（默认关，配好 APNs 后开）。
 
-| 字段         | 类型      | 约束                              | 说明                                              |
-| ------------ | --------- | --------------------------------- | ------------------------------------------------- |
-| `token`      | text      | PK                                | Expo push token 或 APNs device token（设备唯一）  |
-| `user_id`    | UUID      | FK→USER, not null, on delete cascade | 当前登录者（注销随账号级联删除）               |
-| `platform`   | text      | `ios` / `android`                 | 设备平台                                          |
-| `provider`   | text      | `expo` / `apns`，default `expo`   | 令牌类型（Expo 推送服务 / 直连 APNs）             |
-| `locale`     | text      | not null, default `zh`, in(`zh`,`en`) | 该设备界面语言；`push-fc` 按此选中/英模板 |
-| `created_at` / `updated_at` | timestamp |                     |                                                   |
+| 字段                        | 类型      | 约束                                  | 说明                                             |
+| --------------------------- | --------- | ------------------------------------- | ------------------------------------------------ |
+| `token`                     | text      | PK                                    | Expo push token 或 APNs device token（设备唯一） |
+| `user_id`                   | UUID      | FK→USER, not null, on delete cascade  | 当前登录者（注销随账号级联删除）                 |
+| `platform`                  | text      | `ios` / `android`                     | 设备平台                                         |
+| `provider`                  | text      | `expo` / `apns`，default `expo`       | 令牌类型（Expo 推送服务 / 直连 APNs）            |
+| `locale`                    | text      | not null, default `zh`, in(`zh`,`en`) | 该设备界面语言；`push-fc` 按此选中/英模板        |
+| `created_at` / `updated_at` | timestamp |                                       |                                                  |
 
 **RLS**：仅 `select` 本人策略（`user_id = auth.uid()`，便于客户端自查）；写（注册/注销）只走上述两个 RPC，投递读走 `service_role`。
 
@@ -318,16 +330,16 @@ erDiagram
 
 > 每用户一行的**个人级**记账偏好（仅影响本人视角，不涉及全家共享数据）。客户端直读 + 整行 `upsert`（`onConflict = user_id`），RLS 仅本人可读写；行不存在（老用户 / 从未改过）→ 客户端回落默认。收纳：默认记账类型、记一笔后行为、金额隐私、报表卡片显隐 / 排序。
 
-| 字段                    | 类型      | 约束                                          | 说明                                             |
-| ----------------------- | --------- | --------------------------------------------- | ------------------------------------------------ |
-| `user_id`               | UUID      | PK, FK→USER, on delete cascade                | 归属用户（注销随账号级联删除）                   |
-| `default_txn_type`      | text      | not null, default `expense`, in(expense,income) | 打开记账面板默认选中类型                        |
-| `after_record_behavior` | text      | not null, default `close`, in(close,continue) | 记一笔后：保存即关 / 继续记下一笔                |
-| `amount_privacy`        | bool      | not null, default false                       | 开启后首页 / 报表金额显示 `****`（防窥屏）        |
-| `report_card_order`     | text[]    | not null, default `{}`                        | 报表卡片用户排序（卡 id 全序；空 = 用默认序）     |
-| `report_card_hidden`    | text[]    | not null, default `{}`                        | 报表隐藏卡片 id 集合（「收支概览」锁定卡恒不入）  |
-| `show_monthly_summary_entry` | bool | not null, default true                        | 首页「上月总结来啦」月度总结入口横幅显隐（迁移 0030 增列） |
-| `created_at` / `updated_at` | timestamp |                                           |                                                  |
+| 字段                         | 类型      | 约束                                            | 说明                                                       |
+| ---------------------------- | --------- | ----------------------------------------------- | ---------------------------------------------------------- |
+| `user_id`                    | UUID      | PK, FK→USER, on delete cascade                  | 归属用户（注销随账号级联删除）                             |
+| `default_txn_type`           | text      | not null, default `expense`, in(expense,income) | 打开记账面板默认选中类型                                   |
+| `after_record_behavior`      | text      | not null, default `close`, in(close,continue)   | 记一笔后：保存即关 / 继续记下一笔                          |
+| `amount_privacy`             | bool      | not null, default false                         | 开启后首页 / 报表金额显示 `****`（防窥屏）                 |
+| `report_card_order`          | text[]    | not null, default `{}`                          | 报表卡片用户排序（卡 id 全序；空 = 用默认序）              |
+| `report_card_hidden`         | text[]    | not null, default `{}`                          | 报表隐藏卡片 id 集合（「收支概览」锁定卡恒不入）           |
+| `show_monthly_summary_entry` | bool      | not null, default true                          | 首页「上月总结来啦」月度总结入口横幅显隐（迁移 0030 增列） |
+| `created_at` / `updated_at`  | timestamp |                                                 |                                                            |
 
 **RLS**：`select` / `insert` / `update` 三条本人策略（`user_id = auth.uid()`）；无 delete（随账号级联）。卡片显隐 / 排序的合并语义（未知卡兜底、锁定卡、至少展示 3 张）由客户端 `@/lib/report-cards resolveCardLayout` 负责。
 
@@ -337,32 +349,32 @@ erDiagram
 
 **RECURRING_TRANSACTION（规则）**
 
-| 字段               | 类型      | 约束                                         | 说明                                        |
-| ------------------ | --------- | -------------------------------------------- | ------------------------------------------- |
-| `id`               | UUID      | PK, default gen_random_uuid()                |                                             |
-| `family_id`        | UUID      | FK→FAMILY, not null, on delete cascade       | 归属家庭                                    |
-| `type`             | text      | not null, in(expense,income)                 | 收支类型                                    |
-| `amount`           | bigint    | not null, > 0                                | 单位：分                                    |
-| `category_id`      | UUID      | FK→CATEGORY, not null                        | 分类                                        |
-| `note`             | text      |                                              | 备注（如「工资」「Apple Music」）           |
-| `recorder_user_id` | UUID      | FK→USER, not null                            | 生成流水的记账人 = 规则创建者               |
-| `created_by`       | UUID      | FK→USER, not null                            | 规则创建者（RLS insert 校验 = auth.uid()）  |
-| `day_of_month`     | int       | not null, between 1 and 28                   | 每月记账日（限 1–28，规避小月边界）         |
-| `frequency`        | text      | not null, default `monthly`, in(monthly)     | 预留列，MVP 仅按月                          |
-| `start_date`       | date      | not null                                     | 首个生效月（含）；客户端落当月 1 日         |
-| `end_date`         | date      |                                              | 可选结束（含）；null = 长期有效             |
-| `enabled`          | bool      | not null, default true                       | 关闭 = 暂停自动记账（不删规则）             |
-| `created_at` / `updated_at` | timestamp |                                    |                                             |
+| 字段                        | 类型      | 约束                                     | 说明                                       |
+| --------------------------- | --------- | ---------------------------------------- | ------------------------------------------ |
+| `id`                        | UUID      | PK, default gen_random_uuid()            |                                            |
+| `family_id`                 | UUID      | FK→FAMILY, not null, on delete cascade   | 归属家庭                                   |
+| `type`                      | text      | not null, in(expense,income)             | 收支类型                                   |
+| `amount`                    | bigint    | not null, > 0                            | 单位：分                                   |
+| `category_id`               | UUID      | FK→CATEGORY, not null                    | 分类                                       |
+| `note`                      | text      |                                          | 备注（如「工资」「Apple Music」）          |
+| `recorder_user_id`          | UUID      | FK→USER, not null                        | 生成流水的记账人 = 规则创建者              |
+| `created_by`                | UUID      | FK→USER, not null                        | 规则创建者（RLS insert 校验 = auth.uid()） |
+| `day_of_month`              | int       | not null, between 1 and 28               | 每月记账日（限 1–28，规避小月边界）        |
+| `frequency`                 | text      | not null, default `monthly`, in(monthly) | 预留列，MVP 仅按月                         |
+| `start_date`                | date      | not null                                 | 首个生效月（含）；客户端落当月 1 日        |
+| `end_date`                  | date      |                                          | 可选结束（含）；null = 长期有效            |
+| `enabled`                   | bool      | not null, default true                   | 关闭 = 暂停自动记账（不删规则）            |
+| `created_at` / `updated_at` | timestamp |                                          |                                            |
 
 **RECURRING_RUN（幂等台账，每规则每期至多一行）**
 
-| 字段             | 类型      | 约束                                          | 说明                                          |
-| ---------------- | --------- | --------------------------------------------- | --------------------------------------------- |
-| `id`             | UUID      | PK, default gen_random_uuid()                 |                                               |
-| `rule_id`        | UUID      | FK→RECURRING_TRANSACTION, on delete cascade   | 所属规则                                      |
-| `period_key`     | text      | not null, `unique(rule_id, period_key)`       | 期键，如 `2026-07`                            |
-| `transaction_id` | UUID      | FK→TRANSACTION（可空）                        | 该期生成的流水；先占位 run 抢 unique 再回填   |
-| `created_at`     | timestamp |                                               |                                               |
+| 字段             | 类型      | 约束                                        | 说明                                        |
+| ---------------- | --------- | ------------------------------------------- | ------------------------------------------- |
+| `id`             | UUID      | PK, default gen_random_uuid()               |                                             |
+| `rule_id`        | UUID      | FK→RECURRING_TRANSACTION, on delete cascade | 所属规则                                    |
+| `period_key`     | text      | not null, `unique(rule_id, period_key)`     | 期键，如 `2026-07`                          |
+| `transaction_id` | UUID      | FK→TRANSACTION（可空）                      | 该期生成的流水；先占位 run 抢 unique 再回填 |
+| `created_at`     | timestamp |                                             |                                             |
 
 **RLS**：`RECURRING_TRANSACTION` 家庭成员可 select/insert/update/delete（`private.is_family_member(family_id)`，insert 另校验 `created_by = auth.uid()`）；`RECURRING_RUN` 经所属规则的家庭做只读（写入仅经 RPC，`SECURITY DEFINER` 绕过 RLS）。**RPC `generate_due_recurring_transactions()`**：为调用者当前家庭遍历 `enabled` 规则，plpgsql 计算到期月份，「先占位 run（`on conflict do nothing`）→ 抢到者建流水并回填 `transaction_id`」，返回本次新生成条数。
 

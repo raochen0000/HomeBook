@@ -33,13 +33,6 @@ import { alertOk, t, useLocalePreference } from '@/i18n';
 import { deleteAccount, useSession } from '@/lib/auth';
 import { NICKNAME_MAX_LENGTH, NICKNAME_MIN_LENGTH, validateNickname } from '@/lib/profile';
 
-/** +86 手机号脱敏为 138****5678。 */
-function maskPhone(e164?: string | null): string {
-  if (!e164) return t('common.notBound');
-  const local = e164.replace(/^\+?86/, '');
-  if (local.length !== 11) return t('common.bound');
-  return `${local.slice(0, 3)}****${local.slice(7)}`;
-}
 /** 邮箱脱敏为 r***@gmail.com。 */
 function maskEmail(email?: string | null): string {
   if (!email) return t('common.notBound');
@@ -172,12 +165,6 @@ export default function AccountScreen() {
             </HStack>
           }
         >
-          <Row
-            icon="iphone"
-            label={t('account.phone')}
-            value={maskPhone(user?.phone)}
-            onPress={() => router.push('/account/phone' as Href)}
-          />
           <Row
             icon="envelope.fill"
             label={t('account.email')}

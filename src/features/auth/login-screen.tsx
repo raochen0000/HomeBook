@@ -1,21 +1,14 @@
 /**
- * 登录页（流程 1）。目标形态：手机号 OTP 为主 + 邮箱 / Apple 为次；登录即注册、无独立注册页。
- *
- * **当前阶段（2026-06-30）：手机号 OTP 入口已展示**（手机号为主 + 邮箱 / Apple 为次）。
- * 短信通道已定方案——阿里云「短信认证服务」经 Send SMS Hook → FC 下发（免企业资质，代码见
- * `services/sms-hook-fc/`），客户端流程不变；待 FC 部署 + GoTrue 配 hook 后即通（详见 REMAINING #10）。
- * 未部署完成前「获取验证码」会失败，开发阶段用邮箱登录推进；由 `PHONE_OTP_ENABLED` 开关控制。
- *
- * 单屏内 phone / email 两态切换（「其它方式登录」互跳）；手机号单屏放「手机号 + 验证码」，
- * 「获取验证码」带 60s 倒计时。作为 `/login` 路由全屏渲染（无 session 时由 Stack.Protected 落到本页），
+ * 登录页（流程 1）：邮箱密码 + Apple，登录即注册、无独立注册页。
+ * 作为 `/login` 路由全屏渲染（无 session 时由 Stack.Protected 落到本页），
  * 登录成功后随 session 变化切回已登录栈（见 _layout.tsx）。
  *
  * 设计取舍（2026-06-26 与用户确认）：纯品牌头无插画；忘记密码先占位（toast）；
  * 用户协议 / 隐私政策复用 settings/legal-sheet（与「关于家账」同一信源）。
  * 走设计令牌、适配 Light/Night。
  *
- * 协议勾选（2026-07-17 改）：默认不勾选，且是硬闸门——未勾选时全部登录入口（手机验证码 /
- * 邮箱 / Apple / 获取验证码）均被 ensureAgreed 拦下并 toast 提示。原为默认勾选且仅告知，
+ * 协议勾选（2026-07-17 改）：默认不勾选，且是硬闸门——未勾选时全部登录入口（邮箱 / Apple）
+ * 均被 ensureAgreed 拦下并 toast 提示。原为默认勾选且仅告知，
  * 不符合《个人信息保护法》明示同意与工信部对「默认勾选隐私政策」的认定。
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -55,10 +48,10 @@ import { LegalSheet, type LegalKind } from '@/features/settings/legal-sheet';
 
 import { ForgotPasswordSheet } from './forgot-password-sheet';
 
-/** OTP 位数（与 Studio Phone provider 配置一致）。 */
-const OTP_LEN = 6;
-/** 切换手机号 / 邮箱登录时，底部内容区保持同一视觉高度。 */
+/** 底部内容区的最小高度。 */
 const LOGIN_PANEL_MIN_HEIGHT = 382;
+/** 历史手机号表单的验证码长度；首版不渲染该表单。 */
+const LEGACY_PHONE_OTP_LENGTH = 6;
 
 /**
  * 插画区高度的回退值：仅用于卡片高度测出来之前的首帧（见 artHeight）。
@@ -91,11 +84,9 @@ const ART_OPACITY_LIGHT = 0.72;
 const ART_OPACITY_DARK = 0.3;
 
 /**
- * 手机号 OTP 总开关。当前为开：手机号为主、显示「手机号 / 邮箱」互跳入口。
- * 注意短信通道需先完成运维部署（FC + GoTrue hook，REMAINING #10 / services/sms-hook-fc/），
- * 未部署完成前「获取验证码」会失败，开发阶段请改用邮箱登录。置 false 可隐藏手机号入口、回退为仅邮箱 + Apple。
+ * 海外首版不提供手机号 OTP；保留显式开关以避免恢复该能力时误将它带入生产。
  */
-const PHONE_OTP_ENABLED = true;
+const PHONE_OTP_ENABLED = false;
 
 /**
  * 把手机号 OTP 收/验的错误映射成友好文案：
@@ -427,7 +418,7 @@ function PhoneForm({
 
   const e164 = normalizeCnPhone(phone);
   const canSend = !!e164 && cooldown === 0 && !busy;
-  const canLogin = !!e164 && code.length === OTP_LEN && !busy;
+  const canLogin = !!e164 && code.length === LEGACY_PHONE_OTP_LENGTH && !busy;
 
   // 倒计时：每秒自减，到 0 停。
   useEffect(() => {
@@ -495,7 +486,7 @@ function PhoneForm({
           value={code}
           onChangeText={(t) => setCode(t.replace(/\D/g, ''))}
           keyboardType="number-pad"
-          maxLength={OTP_LEN}
+          maxLength={LEGACY_PHONE_OTP_LENGTH}
           editable={!busy}
         />
         <View style={[styles.ccDivider, { backgroundColor: palette.separator }]} />

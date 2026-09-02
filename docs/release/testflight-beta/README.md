@@ -13,12 +13,12 @@
 
 ## 核心概念
 
-| 名称 | 用途 |
-| --- | --- |
-| EAS Build | 在云端生成已签名的 `.ipa` 安装包。|
-| EAS Submit | 把已有 `.ipa` 上传到 App Store Connect；不等于提交 App Review。|
-| TestFlight | 将 App Store Connect 中的构建分发给测试者，并收集崩溃与反馈。|
-| 公开版本 | 面向所有 App Store 用户的版本，必须另行提交 App Review。|
+| 名称       | 用途                                                            |
+| ---------- | --------------------------------------------------------------- |
+| EAS Build  | 在云端生成已签名的 `.ipa` 安装包。                              |
+| EAS Submit | 把已有 `.ipa` 上传到 App Store Connect；不等于提交 App Review。 |
+| TestFlight | 将 App Store Connect 中的构建分发给测试者，并收集崩溃与反馈。   |
+| 公开版本   | 面向所有 App Store 用户的版本，必须另行提交 App Review。        |
 
 EAS 构建详情页提供的 `.ipa` 链接只用于下载归档或手动上传的备用方案；不要把它当作普通用户安装链接传播。
 
@@ -74,12 +74,11 @@ pnpm exec eas submit --platform ios
 
 ### 登录与网络
 
-- [ ] 邮箱登录；
-- [ ] 找回密码或邮箱验证链接能跳回 App；
-- [ ] 手机验证码登录；
-- [ ] `https://api.homebook-app.com` 可正常访问；不能回退到裸 IP 或 HTTP；
+- [ ] 邮箱注册确认与登录；
+- [ ] 找回密码、换绑邮箱及验证码/链接流程正常；
+- [ ] 生产构建访问目标 `https://<project-ref>.supabase.co`，不能访问旧 `api.homebook-app.com`、裸 IP 或 HTTP；
 - [ ] 弱网、断网、恢复网络后数据状态符合预期；
-- [ ] Apple 登录（仅在该入口已启用时测试）。
+- [ ] Apple 登录、绑定与解绑；
 
 ### 核心功能与系统能力
 
@@ -142,7 +141,7 @@ Beta 阶段每次修复都发布为**同一公开版本号下的新构建**：
 ## 发布前安全检查
 
 - 不在 App、`EXPO_PUBLIC_*` 环境变量、Git 仓库或截图中放入 Supabase `service_role`；
-- `service_role` 仅可存在于可信服务端环境（例如 FC）；
+- secret/service-role key 仅可存在于可信服务端环境（例如过渡期 FC 或 Supabase Edge Function secrets）；
 - SMTP 密码、Apple API Key 私钥、FC AccessKey 同样不得粘贴进文档、Issue 或聊天截图；
 - 若轮换了 anon/public Supabase key，需同步更新 EAS production 环境变量并重新构建；仅轮换 server-side `service_role` 或 SMTP 密码，不会改变已构建 App 中的客户端配置。
 
@@ -163,4 +162,3 @@ Beta 阶段每次修复都发布为**同一公开版本号下的新构建**：
 - [Expo：Distribute an iOS app with TestFlight](https://docs.expo.dev/submit/testflight/)
 - [Apple：Add internal testers](https://developer.apple.com/help/app-store-connect/test-a-beta-version/add-internal-testers)
 - [Apple：App build statuses](https://developer.apple.com/help/app-store-connect/reference/app-build-statuses/)
-

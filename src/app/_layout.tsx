@@ -109,7 +109,6 @@ function AppShell() {
             <Stack.Screen name="feedback" />
             <Stack.Screen name="help" />
             <Stack.Screen name="account/index" />
-            <Stack.Screen name="account/phone" />
             <Stack.Screen name="account/email" />
             <Stack.Screen name="account/apple" />
             <Stack.Screen name="account/password" />

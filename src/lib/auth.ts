@@ -1,8 +1,5 @@
 /**
- * 登录态与登录方式（流程 1）。**手机号 OTP 为主 + 邮箱密码 / Apple 为次**，登录即注册、无独立注册页。
- * 手机号 OTP：GoTrue 原生流程——GoTrue 自己生成/校验 OTP、签发 session；短信下发改由
- * **Send SMS Hook → 阿里云 FC → dypnsapi 短信认证**（个人开发者免企业资质，见 services/sms-hook-fc/）。
- * 客户端仅调 signInWithOtp / verifyOtp；仅 +86 大陆号。账号合并＝已登录时 bindPhone 绑定（见 TECH §7.3）。
+ * 登录态与登录方式（流程 1）：邮箱密码 + Apple，登录即注册、无独立注册页。
  *
  * 用户主表 = `auth.users`（Supabase Auth）+ `public.profiles`（业务字段，由 handle_new_user 触发器自动建行）。
  */
@@ -15,6 +12,7 @@ import { Platform } from 'react-native';
 import { unregisterCurrentDevice } from '@/api/device-tokens';
 import { t } from '@/i18n/instance';
 
+import { classifyEmailSignInFailure, isObfuscatedExistingSignUpUser } from './email-auth-flow';
 import { normalizeDefaultNickname } from './profile';
 import { supabase } from './supabase';
 
@@ -63,25 +61,24 @@ export function useSession(): { session: Session | null; loading: boolean } {
 }
 
 /**
- * 邮箱登录；账号不存在则自动注册（实例已开 mailer_autoconfirm，注册即拿到 session）。
- * Supabase 出于防枚举对「无此账号」与「密码错误」都返回同一错误，故先试登录、失败再试注册：
- * 注册成功＝原本没账号；注册报「已注册」＝登录凭据不匹配，对外仍给合并提示。
- * 密码校验 Hook 返回 429 时代表服务端已锁定账号，绝不能再回退到注册流程。
+ * 邮箱登录；账号不存在则自动注册。
+ * Supabase 出于防枚举对「无此账号」与「密码错误」不保证可区分，故先试登录、凭据类失败再试注册。
+ * 已注册但未确认邮箱会返回稳定的 `email_not_confirmed`，必须直接提示确认而非再次注册。
  */
 export async function signInWithEmail(email: string, password: string): Promise<void> {
   const trimmed = email.trim();
   const signIn = await supabase.auth.signInWithPassword({ email: trimmed, password });
   if (!signIn.error) return;
 
-  // Password Verification Hook 的 reject 未承诺固定 HTTP 状态码，故先按其服务端文案识别。
-  // 一旦账户锁定，不能再回退到 signUp，否则会吞掉锁定提示。
-  if (signIn.error.message.includes('账号已锁定')) throw new Error(t('auth.accountLocked'));
-  if (signIn.error.status === 429) {
-    // 其它 429 也不尝试注册，避免把限流误当成账号不存在。
-    throw new Error(t('auth.tooManyAttempts'));
-  }
-  if (signIn.error.status && ![400, 401].includes(signIn.error.status)) {
-    throw new Error(signIn.error.message || t('auth.loginFailed'));
+  switch (classifyEmailSignInFailure(signIn.error)) {
+    case 'confirm-email':
+      throw new Error(t('auth.emailNotConfirmed'));
+    case 'rate-limited':
+      throw new Error(t('auth.tooManyAttempts'));
+    case 'stop':
+      throw new Error(signIn.error.message || t('auth.loginFailed'));
+    case 'try-sign-up':
+      break;
   }
 
   const signUp = await supabase.auth.signUp({
@@ -97,6 +94,9 @@ export async function signInWithEmail(email: string, password: string): Promise<
     }
     throw new Error(signUp.error.message || t('auth.signUpFailed'));
   }
+  if (isObfuscatedExistingSignUpUser(signUp.data.user)) {
+    throw new Error(t('auth.emailOrPasswordWrong'));
+  }
   // autoconfirm 关闭的环境下 signUp 不直接给 session，这里兜底提示
   if (!signUp.data.session) {
     throw new Error(t('auth.confirmEmail'));
@@ -104,8 +104,8 @@ export async function signInWithEmail(email: string, password: string): Promise<
 }
 
 /**
- * 忘记密码 · 发送找回验证码。resetPasswordForEmail 触发 recovery 动作；自托管无 SMTP 出口，
- * 邮件经 Send Email Hook → 阿里云 FC → 邮件推送下发 6 位 OTP（见 services/email-hook-fc/）。
+ * 忘记密码 · 发送找回验证码。resetPasswordForEmail 触发 recovery 动作，
+ * 邮件由 Cloud Auth 的自定义 SMTP 下发 6 位 OTP。
  * 出于防枚举，账号不存在时服务端同样返回成功（用户只是收不到码），故不据此判断账号是否存在。
  */
 export async function sendPasswordResetOtp(email: string): Promise<void> {
@@ -126,7 +126,7 @@ export async function verifyPasswordResetOtp(email: string, token: string): Prom
   if (error) throw error;
 }
 
-// ── 手机号 OTP（主登录方式，仅 +86 大陆）──────────────────────────────────────
+// ── 已停用的手机号 OTP（仅保留历史兼容实现；首版不暴露入口）──────────────────────
 
 /**
  * 把输入规整为大陆手机号的 E.164（`+86…`）。
@@ -185,21 +185,13 @@ export function normalizeEmail(raw: string): string | null {
 
 /**
  * 已登录用户绑定 / 换绑邮箱（把邮箱挂到当前 auth.users）。
- * updateUser({ email }) 会向新邮箱发确认（email_change）；若开启 secure email change，
- * 且当前已有邮箱，则新旧邮箱各发一封，均需确认。随后调 verifyEmailChange 完成。
+ * Cloud 的 Secure email change 开启时，已有邮箱的换绑会分别向旧、新邮箱发送确认链接；
+ * 两个链接均被确认后由服务端提交变更。客户端不消费 email_change OTP。
  */
 export async function bindEmail(email: string): Promise<void> {
   const normalized = normalizeEmail(email);
   if (!normalized) throw new Error(t('auth.invalidEmail'));
   const { error } = await supabase.auth.updateUser({ email: normalized });
-  if (error) throw error;
-}
-
-/** 邮箱绑定的验证码确认（type=email_change，需邮件模板含 {{ .Token }}）。 */
-export async function verifyEmailChange(email: string, token: string): Promise<void> {
-  const normalized = normalizeEmail(email);
-  if (!normalized) throw new Error(t('auth.invalidEmail'));
-  const { error } = await supabase.auth.verifyOtp({ email: normalized, token, type: 'email_change' });
   if (error) throw error;
 }
 
