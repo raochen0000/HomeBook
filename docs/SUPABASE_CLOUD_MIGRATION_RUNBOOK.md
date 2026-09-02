@@ -237,7 +237,7 @@ Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对
 - [x] 从空项目按文件名顺序执行全部 migration，不在 Dashboard 手工补 DDL。
 - [x] 追加新的版本化 migration，创建/校准此前由阿里云 Studio 手工创建的 `homebook-user-avatars` 与 `homebook-family-covers` bucket；不得修改历史 migration。
 - [x] 生成 Cloud 数据库类型并与 `src/lib/database.types.ts` 比较。
-- [ ] 运行数据库 lint/advisor，并处理与 Cloud 托管角色、扩展、权限相关的差异。
+- [x] 运行数据库 lint/advisor，并处理与 Cloud 托管角色、扩展、权限相关的差异。
 
 #### 路径 B
 
@@ -249,20 +249,23 @@ Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对
 
 两条路径都必须验证：
 
-- [ ] 表、列、PK/FK、unique/check、索引数量与预期一致。
-- [ ] 所有 SECURITY DEFINER 函数固定安全的 `search_path`，执行权限最小化。
-- [ ] 所有暴露给客户端的表/视图/RPC 都有明确 RLS/grant。
-- [ ] 至少用两个家庭、户主/成员/非成员三个身份做允许与拒绝矩阵。
-- [ ] 系统分类种子幂等，不产生重复行。
-- [ ] Realtime publication 只包含实际需要的表。
+- [x] 表、列、PK/FK、unique/check、索引数量与预期一致。
+- [x] 所有 SECURITY DEFINER 函数固定安全的 `search_path`，执行权限最小化。
+- [x] 所有暴露给客户端的表/视图/RPC 都有明确 RLS/grant。
+- [x] 至少用两个家庭、户主/成员/非成员三个身份做允许与拒绝矩阵。
+- [x] 系统分类种子幂等，不产生重复行。
+- [x] Realtime publication 只包含实际需要的表。
 
-阶段 3 执行记录（进行中，2026-08-31）：
+阶段 3 执行记录（完成，2026-09-02）：
 
 - 已通过 Supabase CLI 创建 `20260831124018_create_legacy_public_storage_buckets.sql`；它幂等创建/校准两个公开 bucket，复用既有 `storage.objects` policy，不修改任何历史 migration。
-- 当前仓库目标 migration 总数为 47（历史基线 44 + Cloud Storage 兼容 migration + 安全修复 migration + Data API grant migration）。已完成静态审查与本地基线 44 个 migration 的 SHA-256 复核。
+- 当前仓库目标 migration 总数为 48（历史基线 44 + Cloud Storage 兼容 migration + 两条安全修复 migration + Data API grant migration + invitation lint 修复 migration）。已完成静态审查与本地基线 44 个 migration 的 SHA-256 复核。
 - `2026-09-01` 已成功 link 到 `ygbfvzmomeobkgjzmzla`；先以 `supabase db push --dry-run` 核对 45 条基线待应用，再执行 `supabase db push` 成功应用全部 45 条。之后分别预演并应用两条追加 migration；最终以只读 `supabase migration list --linked` 核对，本地与 Cloud 的 47 条 migration 编号完全一致。
 - Cloud Advisor 与 `db lint` 发现：三个内部 `SECURITY DEFINER` trigger 函数被默认 `PUBLIC` 执行权限暴露，三个旧 trigger 函数未固定 `search_path`，且 `submit_feedback` 将 HTTP `429` 作为无效的 PostgreSQL SQLSTATE。已新建并成功应用 `20260901045243_harden_trigger_functions_and_feedback_rate_limit.sql`：撤销三个内部 trigger 函数的公共执行权限、固定三个 `search_path`，并将反馈限流异常码改为有效的 `P0001`。复核确认这些内部函数均不再对 `anon` 或 `authenticated` 可执行，`submit_feedback` lint 错误消失。
-- 当前远端与本地已一致为 46 条 migration；远端结构只读核验结果为 22 张 `public` 表、全部开启 RLS、45 条 RLS policy，四个目标 Storage bucket 均存在且可见性符合目标。Advisor 仍提示 16 个供已登录用户调用的业务 `SECURITY DEFINER` RPC；它们须在后续两家庭、三身份的允许/拒绝矩阵中证明调用者身份校验与最小授权，故本阶段的完整 advisor/RLS 验证任务尚未勾选。`db lint` 仅余 `create_invitation` 的三个既有 warning，未再出现 error。
+- `2026-09-02`：以 `20260902045929_harden_create_invitation_lint.sql` 追加重写 `create_invitation`；仅移除 PL/pgSQL 自动循环变量的重复声明，并补齐理论上不可达的失败出口，不改变邀请码长度、权限、重试次数或业务流程。`supabase db push --dry-run` 仅列出该 migration，应用后 `supabase migration list --linked` 确认本地与 Cloud 同为 48 条，`supabase db lint --linked --level warning --fail-on warning` 通过且无结果。
+- `2026-09-02`：Cloud Security/Performance Advisor 无 `ERROR`。`feedback` 与 `verification_delivery_daily_limits` 的“RLS enabled no policy”是有意设计：前者仅经 `submit_feedback` RPC 写入、运营侧以 service role 读取；后者仅经 service-role 专用 RPC 写入，客户端直连应被拒绝。16 个面向 `authenticated` 的业务 `SECURITY DEFINER` RPC 属于预期 API 面，但必须在后续两家庭、户主/成员/非成员的允许/拒绝矩阵中证明内部身份校验和最小授权；在该实测完成前，本阶段的 advisor/RLS 验证任务不得勾选。Advisor 还提示 Auth 的 leaked password protection 关闭；经当日官方文档核对，该能力仅适用于 Pro 及以上套餐，故在既定 Free 方案中记录为套餐限制，不作为可立即修复的配置遗漏。未索引外键、未使用索引及 `profiles` 的多个 permissive `SELECT` policy 来自干净且尚无真实负载的项目，本阶段不删除索引或盲目新增索引，留待真机/查询负载后复核。
+- `2026-09-02`：用户完成并确认三身份矩阵的六项用例全部通过：户主创建家庭和邀请码成功；成员预览/加入成功并能与户主共享同一家庭的新流水；成员无户主邀请入口且其越权调用被拒绝；非成员在独立家庭中不能读取目标家庭的家庭、流水、预算或储蓄数据；非成员的邀请码预览仅返回设计允许的有限信息且未加入；登出冷启动不保留家庭数据页面。该结果关闭本阶段的跨家庭允许/拒绝验证；账号注销、Apple、换绑邮箱、Storage 和推送的专项验收仍分别属于阶段 4/5/6/8，未因本项而视为通过。
+- `2026-09-02`：Cloud 只读结构核验结果为 22 张 `public` 表且 22 张均启用 RLS、45 条 `public` policy、系统分类重复组为 0、`supabase_realtime` 未发布业务表。全部 `public SECURITY DEFINER` 函数均固定 `search_path`；`anon` 对它们均无 EXECUTE，只有预期的用户 API 对 `authenticated` 授权。系统分类 seed 使用 `on conflict do nothing`，与零重复结果一致。
 - 已从 linked Cloud 的 `public` schema 生成类型并替换 `src/lib/database.types.ts` 的手写定义；生成文件已按项目 Prettier 格式化，TypeScript `tsc --noEmit` 已通过。
 
 退出条件：数据库可从仓库重建，RLS 越权用例全部被拒绝，业务 RPC 正常。
@@ -288,6 +291,7 @@ Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对
 - `2026-09-01`：Cloud Auth 已启用自定义 SMTP，使用 `no-reply@auth.homebook-app.com` / `HomeBook`、`smtp.resend.com:465` 与 Resend 的域名受限发送权限凭据。凭据未记录到仓库或本运行手册。
 - 模板兼容性审计：注册页面没有输入邮箱 OTP，故 Confirm sign up 保留 `{{ .ConfirmationURL }}`；找回密码客户端以 `verifyOtp(type=recovery)` 消费 6 位 OTP，故 Reset password 包含 `{{ .Token }}`；Cloud Secure email change 开启，Change email address 通过 `{{ .ConfirmationURL }}` 分别向旧、新邮箱确认，客户端不再消费 `email_change` OTP。
 - `2026-09-01`：已保存“Confirm sign up”双语模板（`{{ .ConfirmationURL }}`）、“Reset password”双语模板（`{{ .Token }}`）及“Change email address”双语模板（`{{ .ConfirmationURL }}`）。模板与当前 App 流程匹配；端到端收件与链接有效性仍待阶段 8 真机/邮箱矩阵验证。
+- `2026-09-02`：用户在 iOS 真机已安装的 Beta 中确认“通过 Apple 登录”可完成系统授权并正常进入应用。此前模拟器显示的未知授权错误不作为 Cloud Auth 失败证据；Expo 仅支持在模拟器做有限测试，Apple 链路以真机结果为准。经 EAS 只读核对，当前最新 production iOS build 3 创建于 `2026-08-30`，早于本次 Cloud 切换，故该结果仅证明原生 Apple 授权正常，不能作为目标 Cloud provider 的验收；也不推定首次/重复登录、隐藏邮箱、绑定/解绑或注销后重新登录已通过。
 
 #### Apple ID
 
