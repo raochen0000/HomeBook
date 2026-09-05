@@ -154,9 +154,17 @@ function ToastView({ item, onHide }: { item: ToastItem; onHide: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 100 },
+  wrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingHorizontal: Space[3],
+    zIndex: 100,
+  },
   // 阴影层（elevation/1，DESIGN §7 浮层档）——不裁切，故阴影不被 masksToBounds 吃掉。
   shadow: {
+    maxWidth: '100%',
     borderRadius: Radius.full,
     shadowColor: '#000',
     shadowOpacity: 0.2,
@@ -174,5 +182,5 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
-  text: { fontSize: 15, fontWeight: '600' },
+  text: { flexShrink: 1, fontSize: 15, fontWeight: '600' },
 });

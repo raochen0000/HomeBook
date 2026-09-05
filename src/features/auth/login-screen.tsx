@@ -537,7 +537,11 @@ function EmailForm({
     }
     setBusy(true);
     try {
-      await signInWithEmail(email, password);
+      const result = await signInWithEmail(email, password);
+      if (result === 'confirmation-required') {
+        toast.success(t('auth.confirmEmail'));
+        return;
+      }
       onRememberLogin({ mode: 'email', email });
       // 成功后 session 变化会卸载本页。
     } catch (err) {

@@ -65,10 +65,12 @@ export function useSession(): { session: Session | null; loading: boolean } {
  * Supabase 出于防枚举对「无此账号」与「密码错误」不保证可区分，故先试登录、凭据类失败再试注册。
  * 已注册但未确认邮箱会返回稳定的 `email_not_confirmed`，必须直接提示确认而非再次注册。
  */
-export async function signInWithEmail(email: string, password: string): Promise<void> {
+export type EmailSignInResult = 'signed-in' | 'confirmation-required';
+
+export async function signInWithEmail(email: string, password: string): Promise<EmailSignInResult> {
   const trimmed = email.trim();
   const signIn = await supabase.auth.signInWithPassword({ email: trimmed, password });
-  if (!signIn.error) return;
+  if (!signIn.error) return 'signed-in';
 
   switch (classifyEmailSignInFailure(signIn.error)) {
     case 'confirm-email':
@@ -97,10 +99,11 @@ export async function signInWithEmail(email: string, password: string): Promise<
   if (isObfuscatedExistingSignUpUser(signUp.data.user)) {
     throw new Error(t('auth.emailOrPasswordWrong'));
   }
-  // autoconfirm 关闭的环境下 signUp 不直接给 session，这里兜底提示
+  // autoconfirm 关闭时，注册已成功但尚未建立会话；由界面以成功态提示前往邮箱确认。
   if (!signUp.data.session) {
-    throw new Error(t('auth.confirmEmail'));
+    return 'confirmation-required';
   }
+  return 'signed-in';
 }
 
 /**
