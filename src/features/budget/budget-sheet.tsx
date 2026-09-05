@@ -4,8 +4,20 @@
  * 单 Modal 内在「查看 / 编辑」间切换。
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  findNodeHandle,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -238,6 +250,9 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
   const catsQ = useCategories('expense');
   const hiddenQ = useHiddenCategoryIds();
   const saveM = useSaveBudget();
+  const scrollRef = useRef<ScrollView>(null);
+  const totalInputRef = useRef<TextInput>(null);
+  const categoryInputRefs = useRef<Record<string, TextInput | null>>({});
 
   // 选择器剔除本家庭隐藏的系统分类；但保留「已设过预算」的分类，避免编辑时丢失既有分配。
   const expenseCats = useMemo<Category[]>(() => {
@@ -260,6 +275,18 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
   const catSum = Object.values(catAmounts).reduce((s, v) => s + toCents(v), 0);
   const overAllocated = totalCents > 0 && catSum > totalCents;
   const canSave = totalCents > 0 && !saveM.isPending;
+
+  /**
+   * 分类数量与行高都会随隐藏分类、长名称和动态字号变化，不能用索引估算滚动位置。
+   * 使用 ScrollView 的原生定位能力，把实际获得焦点的金额框滚到键盘上方。
+   */
+  const revealFocusedAmount = (input: TextInput | null) => {
+    const nodeHandle = findNodeHandle(input);
+    if (nodeHandle === null) return;
+    requestAnimationFrame(() => {
+      scrollRef.current?.getScrollResponder().scrollResponderScrollNativeHandleToKeyboard(nodeHandle, Space[3], true);
+    });
+  };
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -298,62 +325,78 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
         {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
         <SheetHeader title={t('budget.title')} onBack={onBack} onConfirm={handleSave} confirmDisabled={!canSave} />
 
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('budget.monthTotal')}</Text>
-          <TextInput
-            style={[styles.bigAmount, { backgroundColor: palette.card, color: palette.textPrimary }]}
-            placeholder="0.00"
-            placeholderTextColor={palette.textTertiary}
-            value={total}
-            onChangeText={(v) => setTotal(sanitizeAmountInput(v))}
-            keyboardType="decimal-pad"
-            autoFocus
-          />
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView
+            ref={scrollRef}
+            style={styles.flex}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+          >
+            <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('budget.monthTotal')}</Text>
+            <TextInput
+              style={[styles.bigAmount, { backgroundColor: palette.card, color: palette.textPrimary }]}
+              placeholder="0.00"
+              placeholderTextColor={palette.textTertiary}
+              value={total}
+              onChangeText={(v) => setTotal(sanitizeAmountInput(v))}
+              ref={totalInputRef}
+              onFocus={() => revealFocusedAmount(totalInputRef.current)}
+              keyboardType="decimal-pad"
+              autoFocus
+            />
 
-          <View style={[styles.switchRow, { backgroundColor: palette.card }]}>
-            <Text style={{ color: palette.textPrimary, fontSize: 15 }}>{t('budget.alert80')}</Text>
-            <Switch value={alertEnabled} onValueChange={setAlertEnabled} />
-          </View>
+            <View style={[styles.switchRow, { backgroundColor: palette.card }]}>
+              <Text style={{ color: palette.textPrimary, fontSize: 15 }}>{t('budget.alert80')}</Text>
+              <Switch value={alertEnabled} onValueChange={setAlertEnabled} />
+            </View>
 
-          <View style={styles.groupTitleRow}>
-            <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('budget.byCategoryOptional')}</Text>
-            {overAllocated ? (
-              <Text style={{ color: palette.warning, fontSize: 12 }}>{t('budget.overShort')}</Text>
-            ) : null}
-          </View>
-          <View style={[styles.card, { backgroundColor: palette.card }]}>
-            {expenseCats.map((c, i) => (
-              <View key={c.id}>
-                {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
-                <View style={styles.catEditRow}>
-                  <View
-                    style={[
-                      styles.catDot,
-                      { backgroundColor: catColors[categoryColorKey(c.name, 'expense', c.color_key)] },
-                    ]}
-                  >
-                    <SymbolView
-                      name={(c.icon ?? 'circle.fill') as SymbolViewProps['name']}
-                      tintColor="#FFFFFF"
-                      size={14}
+            <View style={styles.groupTitleRow}>
+              <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>
+                {t('budget.byCategoryOptional')}
+              </Text>
+              {overAllocated ? (
+                <Text style={{ color: palette.warning, fontSize: 12 }}>{t('budget.overShort')}</Text>
+              ) : null}
+            </View>
+            <View style={[styles.card, { backgroundColor: palette.card }]}>
+              {expenseCats.map((c, i) => (
+                <View key={c.id}>
+                  {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
+                  <View style={styles.catEditRow}>
+                    <View
+                      style={[
+                        styles.catDot,
+                        { backgroundColor: catColors[categoryColorKey(c.name, 'expense', c.color_key)] },
+                      ]}
+                    >
+                      <SymbolView
+                        name={(c.icon ?? 'circle.fill') as SymbolViewProps['name']}
+                        tintColor="#FFFFFF"
+                        size={14}
+                      />
+                    </View>
+                    <Text style={{ color: palette.textPrimary, fontSize: 15, flex: 1 }}>
+                      {displayCategoryName(c.name, c.is_system)}
+                    </Text>
+                    <TextInput
+                      style={[styles.catInput, { color: palette.textPrimary, backgroundColor: palette.base }]}
+                      placeholder={t('budget.unlimited')}
+                      placeholderTextColor={palette.textTertiary}
+                      value={catAmounts[c.id] ?? ''}
+                      onChangeText={(v) => setCatAmounts((prev) => ({ ...prev, [c.id]: sanitizeAmountInput(v) }))}
+                      ref={(input) => {
+                        categoryInputRefs.current[c.id] = input;
+                      }}
+                      onFocus={() => revealFocusedAmount(categoryInputRefs.current[c.id])}
+                      keyboardType="decimal-pad"
                     />
                   </View>
-                  <Text style={{ color: palette.textPrimary, fontSize: 15, flex: 1 }}>
-                    {displayCategoryName(c.name, c.is_system)}
-                  </Text>
-                  <TextInput
-                    style={[styles.catInput, { color: palette.textPrimary, backgroundColor: palette.base }]}
-                    placeholder={t('budget.unlimited')}
-                    placeholderTextColor={palette.textTertiary}
-                    value={catAmounts[c.id] ?? ''}
-                    onChangeText={(v) => setCatAmounts((prev) => ({ ...prev, [c.id]: sanitizeAmountInput(v) }))}
-                    keyboardType="decimal-pad"
-                  />
                 </View>
-              </View>
-            ))}
-          </View>
-        </ScrollView>
+              ))}
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
   );
