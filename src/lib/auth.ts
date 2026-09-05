@@ -22,6 +22,30 @@ function isAuthStorageKey(key: string): boolean {
 }
 
 /**
+ * 推送令牌注销只用于避免退出后继续收到推送，不能无限阻塞用户退出。
+ * 请求一旦已发出仍会自行完成；超时后优先清本机会话，下一次登录注册也会重新归属该令牌。
+ */
+const PUSH_TOKEN_UNREGISTER_GRACE_MS = 1_200;
+
+async function unregisterCurrentDeviceWithinGracePeriod(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(finish, PUSH_TOKEN_UNREGISTER_GRACE_MS);
+
+    // 令牌注销本身就是 best-effort；超时后的请求不应形成未处理拒绝。
+    void unregisterCurrentDevice()
+      .catch(() => {})
+      .finally(finish);
+  });
+}
+
+/**
  * 清掉本机会话。服务端会话已删或账号已封禁时，默认 `signOut({ scope: 'global' })`
  * 会先请求 `/logout`；若返回非 401/403/404（例如 banned 用户 400），GoTrue 不会走
  * `_removeSession`，AsyncStorage 里的 JWT 会留下「已注销用户」僵尸会话。
@@ -285,10 +309,10 @@ export async function updatePassword(newPassword: string): Promise<void> {
 }
 
 export async function signOut(): Promise<void> {
-  // 先注销本设备推送令牌（此时 session 仍有效；未注册过则内部直接返回）。
-  await unregisterCurrentDevice();
-  const { error } = await supabase.auth.signOut();
-  if (error) await clearLocalSession();
+  // 先给本设备推送令牌一次短暂的注销机会（此时 session 仍有效），但不让网络慢阻塞退出。
+  await unregisterCurrentDeviceWithinGracePeriod();
+  // 「退出登录」仅退出当前设备；不等待全局 /logout，避免网络异常留下可见的退出延迟。
+  await clearLocalSession();
 }
 
 /**

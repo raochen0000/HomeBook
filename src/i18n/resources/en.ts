@@ -586,6 +586,7 @@ const en = {
     feedback: 'Feedback',
     about: 'About HomeBook',
     signOut: 'Sign out',
+    signingOut: 'Signing out…',
     signOutTitle: 'Sign out',
     signOutConfirm: 'Sign out of this account?',
     signOutFailed: 'Couldn’t sign out',

@@ -585,6 +585,7 @@ const zhHans = {
     feedback: '意见反馈',
     about: '关于家账',
     signOut: '退出登录',
+    signingOut: '正在退出…',
     signOutTitle: '退出登录',
     signOutConfirm: '确定要退出当前账号吗？',
     signOutFailed: '退出失败',

@@ -13,6 +13,7 @@ import { HStack, Image, RNHostView, Section, Spacer, Text, VStack } from '@expo/
 import { contentShape, font, foregroundColor, listRowInsets, onTapGesture, shapes } from '@expo/ui/swift-ui/modifiers';
 import { useRouter, type Href } from 'expo-router';
 import { Alert, StyleSheet, View } from 'react-native';
+import { useEffect, useState } from 'react';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -49,25 +50,49 @@ export default function MineScreen() {
   const { data: profile } = useMyProfile();
   const { preference: themePreference, setPreference: setThemePreference } = useThemePreference();
   const { locale, setLocale } = useLocalePreference();
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
 
   const avatarFiles = useAvatarFiles(profile ? [{ id: profile.id, avatar_url: profile.avatar_url }] : []);
   const avatarUri = profile ? (avatarFiles.get(profile.id) ?? null) : null;
 
-  const onSignOut = () => {
-    Alert.alert(t('settings.signOutTitle'), t('settings.signOutConfirm'), [
-      { text: t('common.cancel'), style: 'cancel' },
+  useEffect(() => {
+    if (!signOutConfirmOpen || signingOut) return;
+    Alert.alert(
+      t('settings.signOutTitle'),
+      t('settings.signOutConfirm'),
+      [
+        {
+          text: t('common.cancel'),
+          style: 'cancel',
+          onPress: () => {
+            setSignOutConfirmOpen(false);
+          },
+        },
+        {
+          text: t('settings.signOut'),
+          style: 'destructive',
+          onPress: () => {
+            setSignOutConfirmOpen(false);
+            setSigningOut(true);
+            void signOut().catch((e: unknown) => {
+              setSigningOut(false);
+              Alert.alert(t('settings.signOutFailed'), e instanceof Error ? e.message : String(e), alertOk());
+            });
+          },
+        },
+      ],
       {
-        text: t('settings.signOut'),
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await signOut();
-          } catch (e) {
-            Alert.alert(t('settings.signOutFailed'), (e as Error).message ?? String(e), alertOk());
-          }
+        onDismiss: () => {
+          setSignOutConfirmOpen(false);
         },
       },
-    ]);
+    );
+  }, [signOutConfirmOpen, signingOut]);
+
+  const onSignOut = () => {
+    if (signingOut) return;
+    setSignOutConfirmOpen(true);
   };
 
   return (
@@ -176,7 +201,7 @@ export default function MineScreen() {
             <HStack alignment="center" modifiers={[contentShape(shapes.rectangle()), onTapGesture(onSignOut)]}>
               <Spacer />
               <Text modifiers={[font({ size: 17, weight: 'semibold' }), foregroundColor(palette.danger)]}>
-                {t('settings.signOut')}
+                {t(signingOut ? 'settings.signingOut' : 'settings.signOut')}
               </Text>
               <Spacer />
             </HStack>
