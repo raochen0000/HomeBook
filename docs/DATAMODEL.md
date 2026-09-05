@@ -131,6 +131,8 @@ erDiagram
 
 > **派生规则**：`source != normal` 即「储蓄类流水」——计入收支/结余对账，但**排除于分类占比、消费趋势、预算「已用」统计**（对应 PRD 流程 7/8/9 口径）。
 
+> **分析访问边界**：`TRANSACTION` 是唯一事实来源。统计接口在数据库内按调用者当前家庭、家庭时区与完整时间范围聚合；不得把客户端已加载的最近流水当作统计全集。列表型查询按 `(occurred_at, id)` 复合游标分页，聚合型查询只返回总额、分桶、分组与展示所需 Top N。所有分析 RPC 使用 `security invoker`、由 `auth.uid()` 解析当前家庭，并保持底表 RLS 生效。
+
 ### 3.5 CATEGORY（分类）
 
 | 字段        | 类型   | 约束     | 说明                                            |
@@ -199,6 +201,8 @@ erDiagram
 | `alert_enabled` | bool   | default true | 是否启用 80% 预警 |
 
 > 「已用」金额为实时聚合，= 当期 `type=expense AND source=normal AND is_deleted=false` 流水合计（排除储蓄类流水）。
+
+> 预算总额和分类预算执行均使用上述完整账期聚合；分类执行条是按 `category_id` 的服务端分组结果，不得由最近流水列表在客户端累加。
 
 ### 4.4 BUDGET_CATEGORY（分类预算）
 

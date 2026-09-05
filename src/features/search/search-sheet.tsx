@@ -42,11 +42,13 @@ import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import {
   useCategories,
+  fetchTransaction,
   useFamilyMembers,
   useMyFamily,
   useMyProfile,
+  useSearchTransactions,
   useSoftDeleteTransaction,
-  useTransactions,
+  useTransaction,
   type Transaction,
 } from '@/api';
 import { toast } from '@/components/toast';
@@ -60,7 +62,7 @@ import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { clockTime, dayKey, humanDay, signForType } from '@/lib/format';
 import {
   hasAnyQuery,
-  runSearch,
+  resolveAmountRange,
   validateFilters,
   type DatePresetKey,
   type SearchFilters,
@@ -146,7 +148,6 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const { locale } = useLocalePreference();
   const catColors = useCategoryColors();
 
-  const txnsQ = useTransactions();
   const catsQ = useCategories();
   const membersQ = useFamilyMembers();
   const familyQ = useMyFamily();
@@ -171,6 +172,8 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const [detail, setDetail] = useState<{ open: boolean; txn: Transaction | null }>({ open: false, txn: null });
   const [editing, setEditing] = useState<Transaction | null>(null);
   const softDeleteM = useSoftDeleteTransaction();
+  const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
+  const selectedTransactionQ = useTransaction(selectedTransactionId);
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearchKeyword(keyword), KEYWORD_SEARCH_DEBOUNCE_MS);
@@ -216,23 +219,58 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     isSearching,
   });
 
+  const searchInput = useMemo(() => {
+    if (!valid || !hasCurrentQuery) return null;
+    const keywordLower = deferredFilters.keyword.trim().toLowerCase();
+    const keywordCategoryIds = keywordLower
+      ? (catsQ.data ?? [])
+          .filter((category) =>
+            categorySearchNames(category.name, category.is_system).some((name) =>
+              name.toLowerCase().includes(keywordLower),
+            ),
+          )
+          .map((category) => category.id)
+      : [];
+    const keywordRecorderIds = keywordLower
+      ? (membersQ.data ?? [])
+          .filter(
+            (member) =>
+              member.nickname.toLowerCase().includes(keywordLower) ||
+              (member.id === myId && t('common.me').toLowerCase().includes(keywordLower)),
+          )
+          .map((member) => member.id)
+      : [];
+    const { minCents, maxCents } = resolveAmountRange(deferredFilters);
+    const dateText = (date: Date | null) =>
+      date
+        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+        : null;
+    return {
+      keyword: deferredFilters.keyword,
+      keywordCategoryIds,
+      keywordRecorderIds,
+      types: [...deferredFilters.types],
+      categoryIds: [...deferredFilters.categoryIds],
+      recorderIds: [...deferredFilters.recorderIds],
+      datePreset: deferredFilters.datePreset,
+      customFrom: dateText(deferredFilters.customFrom),
+      customTo: dateText(deferredFilters.customTo),
+      amountMin: minCents,
+      amountMax: maxCents,
+    };
+  }, [valid, hasCurrentQuery, deferredFilters, catsQ.data, membersQ.data, myId]);
+  const searchQ = useSearchTransactions(searchInput);
+
   const { groups } = useMemo(() => {
-    const txns = txnsQ.data ?? [];
     const cats = catsQ.data ?? [];
     const members = membersQ.data ?? [];
     const catById = new Map(cats.map((c) => [c.id, c]));
-    const nameById = new Map(members.map((m) => [m.id, m.nickname]));
     const memberById = new Map(members.map((m) => [m.id, m]));
     const myNick = profileQ.data?.nickname;
     const memberFallback = t('common.member');
     const uncategorized = t('common.uncategorized');
 
-    const result = runSearch(txns, deferredFilters, {
-      categoryNamesById: new Map(cats.map((c) => [c.id, categorySearchNames(c.name, c.is_system)])),
-      recorderNameById: nameById,
-      myId,
-      meLabel: t('common.me'),
-    });
+    const rows = searchQ.data?.pages.flatMap((page) => page.rows) ?? [];
 
     const avatarOf = (userId: string): AvatarInfo => {
       const nick = (userId === myId ? myNick : memberById.get(userId)?.nickname) ?? memberFallback;
@@ -240,9 +278,9 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     };
 
     const map = new Map<string, ResultGroup>();
-    for (const txn of result.matched) {
-      const cat = catById.get(txn.category_id);
-      const ttype: 'income' | 'expense' = txn.type === 'income' ? 'income' : 'expense';
+    for (const txn of rows) {
+      const cat = catById.get(txn.categoryId);
+      const ttype = txn.type;
       const isSavings = txn.source !== 'normal';
       // 储蓄类在备注行单独标注，金额不并入合计口径（已在 lib/search.ts 处理）。
       const note = isSavings
@@ -250,44 +288,33 @@ function SearchBody({ onClose }: { onClose: () => void }) {
           ? t('record.savingsNote', { note: txn.note })
           : t('record.savings')
         : txn.note;
-      const editedByOther = !!txn.last_editor_user_id && txn.last_editor_user_id !== txn.recorder_user_id;
+      const editedByOther = !!txn.lastEditorUserId && txn.lastEditorUserId !== txn.recorderUserId;
 
-      const key = dayKey(txn.occurred_at);
+      const key = dayKey(txn.occurredAt);
       const group =
         map.get(key) ??
         (() => {
-          const g: ResultGroup = { key, label: humanDay(txn.occurred_at), totalCents: 0, rows: [] };
+          const g: ResultGroup = { key, label: humanDay(txn.occurredAt), totalCents: 0, rows: [] };
           map.set(key, g);
           return g;
         })();
       group.totalCents += ttype === 'income' ? txn.amount : -txn.amount;
       group.rows.push({
         id: txn.id,
-        title: categoryNameById.get(txn.category_id) ?? uncategorized,
+        title: categoryNameById.get(txn.categoryId) ?? uncategorized,
         note,
         symbol: categorySymbol(cat?.icon ?? null, ttype),
         iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype, cat?.color_key)],
         amountCents: txn.amount,
         sign: signForType(ttype),
         amountColor: ttype === 'income' ? palette.income : palette.expense,
-        timeLabel: clockTime(editedByOther ? txn.updated_at : txn.occurred_at),
-        recorder: avatarOf(txn.recorder_user_id),
-        editor: editedByOther ? avatarOf(txn.last_editor_user_id as string) : null,
+        timeLabel: clockTime(editedByOther ? txn.updatedAt : txn.occurredAt),
+        recorder: avatarOf(txn.recorderUserId),
+        editor: editedByOther ? avatarOf(txn.lastEditorUserId as string) : null,
       });
     }
     return { groups: Array.from(map.values()) };
-  }, [
-    txnsQ.data,
-    catsQ.data,
-    membersQ.data,
-    profileQ.data,
-    deferredFilters,
-    myId,
-    avatarFiles,
-    catColors,
-    palette,
-    categoryNameById,
-  ]);
+  }, [searchQ.data, catsQ.data, membersQ.data, profileQ.data, myId, avatarFiles, catColors, palette, categoryNameById]);
 
   const categories = catsQ.data ?? [];
   const members = membersQ.data ?? [];
@@ -324,39 +351,24 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     });
   };
 
-  const onRowPress = useCallback(
-    (id: string) => {
-      const txn = (txnsQ.data ?? []).find((row) => row.id === id);
-      if (!txn) {
-        toast.error(t('home.missingTxn'));
-        txnsQ.refetch();
-        return;
-      }
-      setDetail({ open: true, txn });
-    },
-    [txnsQ.data, txnsQ.refetch],
-  );
+  const onRowPress = useCallback((id: string) => {
+    setSelectedTransactionId(id);
+    setDetail({ open: true, txn: null });
+  }, []);
 
-  const openEdit = useCallback(
-    (id: string) => {
-      const txn = (txnsQ.data ?? []).find((row) => row.id === id);
-      if (!txn) {
-        toast.error(t('home.missingTxn'));
-        txnsQ.refetch();
-        return;
-      }
-      if (txn.source !== 'normal') {
-        toast.info(t('home.savingsManageHint'));
-        return;
-      }
-      setEditing(txn);
-    },
-    [txnsQ.data, txnsQ.refetch],
-  );
+  const openEdit = useCallback(async (id: string) => {
+    const txn = await fetchTransaction(id);
+    if (!txn) return toast.error(t('home.missingTxn'));
+    if (txn.source !== 'normal') {
+      toast.info(t('home.savingsManageHint'));
+      return;
+    }
+    setEditing(txn);
+  }, []);
 
   const confirmDelete = useCallback(
     (id: string) => {
-      const txn = (txnsQ.data ?? []).find((row) => row.id === id);
+      const txn = searchQ.data?.pages.flatMap((page) => page.rows).find((row) => row.id === id);
       if (txn?.source !== 'normal') {
         toast.info(t('home.savingsManageHint'));
         return;
@@ -373,7 +385,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         },
       ]);
     },
-    [softDeleteM.mutate, txnsQ.data],
+    [softDeleteM, searchQ.data],
   );
 
   const amountSet = amountMinYuan.trim() !== '' || amountMaxYuan.trim() !== '';
@@ -485,7 +497,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
           <InvalidFiltersEmptyState />
         ) : presentation === 'history' ? (
           <HistoryCloud history={history} onPick={setKeyword} />
-        ) : presentation === 'skeleton' ? (
+        ) : presentation === 'skeleton' || searchQ.isLoading ? (
           <SearchResultsSkeleton />
         ) : groups.length === 0 ? (
           <NoResultEmpty filtersActive={filtersActive} onClearFilters={clearFilters} />
@@ -496,6 +508,9 @@ function SearchBody({ onClose }: { onClose: () => void }) {
             onRowPress={onRowPress}
             onEdit={openEdit}
             onDelete={confirmDelete}
+            hasNextPage={searchQ.hasNextPage}
+            isFetchingNextPage={searchQ.isFetchingNextPage}
+            onLoadMore={() => searchQ.fetchNextPage()}
           />
         )}
       </SafeAreaView>
@@ -535,8 +550,11 @@ function SearchBody({ onClose }: { onClose: () => void }) {
 
       <TransactionDetailSheet
         visible={detail.open}
-        transaction={detail.txn}
-        onClose={() => setDetail({ open: false, txn: null })}
+        transaction={selectedTransactionQ.data ?? detail.txn}
+        onClose={() => {
+          setDetail({ open: false, txn: null });
+          setSelectedTransactionId(null);
+        }}
       />
 
       {/* 编辑 / 删除（流程 10）；保存后 RQ 失效 → 结果自动重算 */}
@@ -557,12 +575,18 @@ const SearchResults = memo(function SearchResults({
   onRowPress,
   onEdit,
   onDelete,
+  hasNextPage,
+  isFetchingNextPage,
+  onLoadMore,
 }: {
   groups: ResultGroup[];
   palette: ReturnType<typeof usePalette>;
   onRowPress: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  onLoadMore: () => void;
 }) {
   return (
     <Host style={styles.flex}>
@@ -584,7 +608,14 @@ const SearchResults = memo(function SearchResults({
           <VStack
             modifiers={[listRowInsets({ top: Space[2], bottom: Space[6], leading: Space[4], trailing: Space[4] })]}
           >
-            <EndOfListHint />
+            {hasNextPage ? (
+              <Button
+                label={isFetchingNextPage ? t('common.loading') : t('common.loadMore')}
+                onPress={isFetchingNextPage ? undefined : onLoadMore}
+              />
+            ) : (
+              <EndOfListHint />
+            )}
           </VStack>
         </Section>
       </List>

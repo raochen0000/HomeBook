@@ -81,6 +81,7 @@ function useGoalMutation<TArgs>(fn: (args: TArgs) => Promise<unknown>) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.savingsGoals });
       qc.invalidateQueries({ queryKey: queryKeys.transactions });
+      qc.invalidateQueries({ queryKey: queryKeys.analytics });
       qc.invalidateQueries({ queryKey: ['home_dashboard'] });
     },
   });
@@ -150,6 +151,7 @@ function useSavingsMutation<TArgs>(fn: (args: TArgs) => Promise<unknown>) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.savingsGoals });
       qc.invalidateQueries({ queryKey: queryKeys.transactions });
+      qc.invalidateQueries({ queryKey: queryKeys.analytics });
       qc.invalidateQueries({ queryKey: ['savings_entries'] });
       qc.invalidateQueries({ queryKey: ['home_dashboard'] });
     },

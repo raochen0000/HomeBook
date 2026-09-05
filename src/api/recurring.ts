@@ -115,6 +115,7 @@ export function useGenerateDueRecurring() {
     onSuccess: (n) => {
       if (n > 0) {
         qc.invalidateQueries({ queryKey: queryKeys.transactions });
+        qc.invalidateQueries({ queryKey: queryKeys.analytics });
         qc.invalidateQueries({ queryKey: ['home_dashboard'] });
       }
     },

@@ -12,8 +12,32 @@ export const queryKeys = {
   categories: (type?: 'expense' | 'income') => ['categories', type ?? 'all'] as const,
   hiddenCategories: ['hidden_categories'] as const,
   transactions: ['transactions'] as const,
+  transaction: (id: string) => ['transactions', 'detail', id] as const,
+  hasTransactions: (familyId: string) => ['transactions', 'has-any', familyId] as const,
   savingsGoals: ['savings_goals'] as const,
   savingsEntries: (goalId: string) => ['savings_entries', goalId] as const,
   budget: (period: string) => ['budget', period] as const,
   homeDashboard: (period: string) => ['home_dashboard', period] as const,
+  analytics: ['analytics'] as const,
+  budgetProgress: (period: string) => ['analytics', 'budget-progress', period] as const,
+  monthlySummary: (period: string) => ['analytics', 'monthly-summary', period] as const,
+  familyActivity: ['analytics', 'family-activity'] as const,
+  reportAnalytics: (input: {
+    start: string;
+    end: string;
+    previousStart: string;
+    historyStart: string;
+    memberIds: string[];
+    categoryIds: string[];
+  }) =>
+    [
+      'analytics',
+      'report',
+      input.start,
+      input.end,
+      input.previousStart,
+      input.historyStart,
+      input.memberIds,
+      input.categoryIds,
+    ] as const,
 };

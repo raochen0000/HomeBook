@@ -1107,6 +1107,87 @@ export type Database = {
           transaction_count: number;
         }[];
       };
+      get_budget_progress: {
+        Args: { p_period: string };
+        Returns: { category_usage: Json; used_amount: number }[];
+      };
+      get_family_activity: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          family_streak: number;
+          latest_amount: number | null;
+          latest_category_id: string | null;
+          latest_recorder_user_id: string | null;
+          latest_transaction_id: string | null;
+          month_count: number;
+          month_member_count: number;
+          my_month_count: number;
+          my_streak: number;
+          today_count: number;
+        }[];
+      };
+      get_monthly_summary: {
+        Args: { p_period: string };
+        Returns: {
+          earliest_period: string | null;
+          consumption_expense_amount: number;
+          expense_amount: number;
+          income_amount: number;
+          max_expense_amount: number | null;
+          max_expense_category_id: string | null;
+          max_expense_id: string | null;
+          max_expense_occurred_at: string | null;
+          previous_expense_amount: number;
+          previous_income_amount: number;
+          top_category_amount: number | null;
+          top_category_id: string | null;
+          top_recorder_count: number | null;
+          top_recorder_user_id: string | null;
+          transaction_count: number;
+        }[];
+      };
+      get_report_analytics: {
+        Args: {
+          p_category_ids?: string[];
+          p_end: string;
+          p_history_start: string;
+          p_member_ids?: string[];
+          p_previous_start: string;
+          p_start: string;
+        };
+        Returns: Json;
+      };
+      get_report_category_detail: {
+        Args: {
+          p_category_ids: string[];
+          p_cursor_id?: string | null;
+          p_cursor_occurred_at?: string | null;
+          p_end: string;
+          p_history_start: string;
+          p_page_size?: number;
+          p_start: string;
+        };
+        Returns: Json;
+      };
+      search_transactions: {
+        Args: {
+          p_amount_max?: number | null;
+          p_amount_min?: number | null;
+          p_category_ids?: string[];
+          p_cursor_id?: string | null;
+          p_cursor_occurred_at?: string | null;
+          p_custom_from?: string | null;
+          p_custom_to?: string | null;
+          p_date_preset?: string;
+          p_keyword?: string;
+          p_keyword_category_ids?: string[];
+          p_keyword_recorder_ids?: string[];
+          p_page_size?: number;
+          p_recorder_ids?: string[];
+          p_types?: string[];
+        };
+        Returns: Json;
+      };
       join_family_by_code: {
         Args: { p_code: string };
         Returns: {

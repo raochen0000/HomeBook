@@ -1,5 +1,6 @@
 /** 数据访问层统一出口。页面从 '@/api' import hooks 与函数。 */
 export * from './accounting-prefs';
+export * from './analytics';
 export * from './budgets';
 export * from './categories';
 export * from './dashboard';

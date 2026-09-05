@@ -26,17 +26,17 @@ import {
   useHiddenCategoryIds,
   useMyFamily,
   useMyProfile,
+  useBudgetProgress,
   useSaveBudget,
-  useTransactions,
   type Category,
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
-import { budgetLevel, daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
+import { budgetLevel, daysToMonthEnd } from '@/lib/budget';
 import { categoryColorKey } from '@/lib/category-style';
-import { currentPeriod, formatAmount, monthLabel } from '@/lib/format';
+import { currentPeriodInTimeZone, formatAmount, monthLabel } from '@/lib/format';
 
 const toCents = (raw: string) => Math.round(Number(raw || '0') * 100);
 
@@ -68,15 +68,15 @@ function levelColor(level: 'normal' | 'warning' | 'danger', palette: ReturnType<
 function Body() {
   const palette = useSheetPalette();
   useLocalePreference();
-  const period = currentPeriod();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
+  const period = currentPeriodInTimeZone(familyQ.data?.timezone);
   const budgetQ = useBudget(period);
-  const txnsQ = useTransactions();
+  const progressQ = useBudgetProgress(period);
   const [editing, setEditing] = useState(false);
 
   const isOwner = familyQ.data?.owner_user_id === profileQ.data?.id;
-  const used = useMemo(() => expenseUsedInPeriod(txnsQ.data ?? [], period), [txnsQ.data, period]);
+  const used = progressQ.data ?? { usedAmount: 0, byCategory: new Map<string, number>() };
 
   if (editing) {
     return <Editor period={period} onBack={() => setEditing(false)} />;
@@ -107,7 +107,7 @@ function Body() {
           <BudgetView
             palette={palette}
             total={budget.total_amount}
-            usedTotal={used.total}
+            usedTotal={used.usedAmount}
             usedByCat={used.byCategory}
             categories={cats}
             isOwner={isOwner}

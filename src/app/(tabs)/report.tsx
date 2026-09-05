@@ -22,15 +22,18 @@ import {
   DEFAULT_ACCOUNTING_PREFS,
   useAccountingPrefs,
   useBudget,
+  useCategoryDetail,
   useCategories,
   useFamilyMembers,
+  useMyFamily,
   useMyProfile,
+  useReportAnalytics,
   useSavingsGoals,
-  useTransactions,
+  EMPTY_REPORT_ANALYTICS,
+  type ReportAnalytics,
   type Category,
+  type ReportAnalyticsInput,
   type SavingsGoal,
-  type Transaction,
-  type TxnRange,
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
@@ -42,8 +45,6 @@ import {
   IncomeExpenseCard,
   IncomeStructureCard,
   TopExpensesCard,
-  type IncomeSlice,
-  type MomItem,
   type TopItem,
 } from '@/features/report/advanced';
 import { Donut } from '@/features/report/donut';
@@ -54,13 +55,19 @@ import { displayCategoryName, i18n, INTL_LOCALE, t, useLocalePreference } from '
 import { fromI18nLanguage } from '@/i18n/locale';
 import { daysToMonthEnd } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import { currentPeriod, formatAmount, formatMonthDay, maskAmount, signForNet } from '@/lib/format';
+import {
+  calendarDateInTimeZone,
+  currentPeriod,
+  formatAmount,
+  formatMonthDay,
+  maskAmount,
+  signForNet,
+} from '@/lib/format';
 import {
   balanceRate,
   equalPeriodIncomeExpenseSeries,
   incomeExpenseSeries,
   inRange,
-  isCurrentPeriod,
   periodRange,
   shiftAnchor,
   type Dimension,
@@ -72,6 +79,13 @@ type CatSlice = { id: string; name: string; amount: number; color: string; symbo
 type CategoryDetail = { id: string; name: string; categoryIds?: string[] };
 type DisplayCatSlice = CatSlice & { categoryIds?: string[] };
 type Member = { id: string; name: string; amount: number; count: number };
+type ReportDay = {
+  date: string;
+  incomeAmount: number;
+  expenseAmount: number;
+  incomeNormalAmount: number;
+  expenseNormalAmount: number;
+};
 const EXPENSE_CATEGORY_TOP_COUNT = 5;
 const EXPENSE_CATEGORY_OTHER_ID = '__other__';
 type ReportScope = 'expense' | 'income' | 'balance';
@@ -128,18 +142,6 @@ const INCOME_TARGETS_KEY = 'homebook:report-income-targets:v1';
 
 function arrayToggle(list: string[], id: string): string[] {
   return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
-}
-
-function filterTransactions(txns: Transaction[], filters: ReportFilters): Transaction[] {
-  return txns.filter((txn) => {
-    if (filters.memberIds.length > 0 && !filters.memberIds.includes(txn.recorder_user_id)) return false;
-    if (filters.categoryIds.length > 0 && !filters.categoryIds.includes(txn.category_id)) return false;
-    return true;
-  });
-}
-
-function filterCountInRange(txns: Transaction[], filters: ReportFilters, range: { start: Date; end: Date }): number {
-  return filterTransactions(txns, filters).filter((txn) => inRange(txn.occurred_at, range.start, range.end)).length;
 }
 
 function activeFilterCount(filters: ReportFilters): number {
@@ -265,6 +267,7 @@ export default function ReportScreen() {
   const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 61);
   const catsQ = useCategories();
   const membersQ = useFamilyMembers();
+  const familyQ = useMyFamily();
   const profileQ = useMyProfile();
   const prefsQ = useAccountingPrefs();
   const savingsQ = useSavingsGoals();
@@ -276,17 +279,19 @@ export default function ReportScreen() {
 
   const [dimension, setDimension] = useState<Dimension>('month');
   const [scope, setScope] = useState<ReportScope>('expense');
-  const [anchor, setAnchor] = useState(() => new Date());
+  const todayInFamilyTimeZone = useMemo(() => calendarDateInTimeZone(familyQ.data?.timezone), [familyQ.data?.timezone]);
+  const [anchorOverride, setAnchor] = useState<Date | null>(null);
+  const anchor = anchorOverride ?? todayInFamilyTimeZone;
   const [filters, setFilters] = useState<ReportFilters>(EMPTY_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
   const [incomeTargets, setIncomeTargets] = useState<IncomeTargets>(DEFAULT_INCOME_TARGETS);
   const [incomeTargetOpen, setIncomeTargetOpen] = useState(false);
   const [customStart, setCustomStart] = useState(() => {
-    const d = startOfLocalDay(new Date());
+    const d = startOfLocalDay(todayInFamilyTimeZone);
     d.setDate(d.getDate() - 29);
     return d;
   });
-  const [customEnd, setCustomEnd] = useState(() => startOfLocalDay(new Date()));
+  const [customEnd, setCustomEnd] = useState(() => startOfLocalDay(todayInFamilyTimeZone));
   const [customOpen, setCustomOpen] = useState(false);
   const [detail, setDetail] = useState<CategoryDetail | null>(null);
   const [memberAnalysisOpen, setMemberAnalysisOpen] = useState(false);
@@ -305,17 +310,19 @@ export default function ReportScreen() {
   }, [dimension, anchor, range]);
   const statsYearRange = useMemo(() => periodRange('year', range.start), [range.start]);
   const isCurrent = useMemo(() => {
-    if (dimension !== 'custom') return isCurrentPeriod(dimension, anchor);
-    const today = startOfLocalDay(new Date());
+    if (dimension !== 'custom') {
+      return (
+        periodRange(dimension, anchor).start.getTime() === periodRange(dimension, todayInFamilyTimeZone).start.getTime()
+      );
+    }
+    const today = startOfLocalDay(todayInFamilyTimeZone);
     return range.start.getTime() <= today.getTime() && range.end.getTime() > today.getTime();
-  }, [dimension, anchor, range]);
+  }, [dimension, anchor, range, todayInFamilyTimeZone]);
   const budgetPeriod = useMemo(() => currentPeriod(range.start), [range.start]);
   const budgetQ = useBudget(budgetPeriod);
 
-  // 流水拉取窗：覆盖「锚点期往前 6 期」——「收支对比」最多回看 6 期（incomeExpenseSeries /
-  // equalPeriodIncomeExpenseSeries 的默认 count），是所有卡片里最宽的回看跨度。半开区间 [from, to)
-  // 与前端 inRange 口径一致；切维度 / 翻期时窗口变化，useTransactions 会按 key 自动重取。
-  const fetchRange = useMemo<TxnRange>(() => {
+  // 服务端聚合窗：覆盖「锚点期往前 6 期」及本年统计；只返回有限分组与按日分桶。
+  const analyticsInput = useMemo(() => {
     const HISTORY_PERIODS = 6;
     let from: Date;
     if (dimension === 'custom') {
@@ -325,15 +332,19 @@ export default function ReportScreen() {
       from = periodRange(dimension, shiftAnchor(dimension, anchor, -(HISTORY_PERIODS - 1))).start;
     }
     const statsFrom = statsYearRange.start;
+    const historyStart = new Date(Math.min(from.getTime(), statsFrom.getTime()));
     return {
-      from: new Date(Math.min(from.getTime(), statsFrom.getTime())).toISOString(),
-      to: new Date(Math.max(range.end.getTime(), statsYearRange.end.getTime())).toISOString(),
+      start: localDateKey(range.start),
+      end: localDateKey(range.end),
+      previousStart: localDateKey(prevRange.start),
+      historyStart: localDateKey(historyStart),
+      memberIds: filters.memberIds,
+      categoryIds: filters.categoryIds,
     };
-  }, [dimension, anchor, range, statsYearRange]);
-  const txnsQ = useTransactions(fetchRange);
-  const rawTxns = useMemo(() => txnsQ.data ?? [], [txnsQ.data]);
-  const filteredTxns = useMemo(() => filterTransactions(rawTxns, filters), [rawTxns, filters]);
-  const filteredCount = useMemo(() => filterCountInRange(rawTxns, filters, range), [rawTxns, filters, range]);
+  }, [dimension, anchor, range, prevRange, statsYearRange, filters]);
+  const reportQ = useReportAnalytics(analyticsInput);
+  const reportData = reportQ.data;
+  const filteredCount = reportData?.summary.transactionCount ?? 0;
   const activeFilters = activeFilterCount(filters);
 
   useEffect(() => {
@@ -369,7 +380,7 @@ export default function ReportScreen() {
     passiveIncome,
   } = useMemo(() => {
     void locale;
-    const txns = filteredTxns;
+    const analytics = reportData;
     const cats = catsQ.data ?? [];
     const mem = membersQ.data ?? [];
     const catById = new Map(cats.map((c) => [c.id, c]));
@@ -404,119 +415,77 @@ export default function ReportScreen() {
       );
     };
 
-    let inc = 0;
-    let exp = 0;
-    const catMap = new Map<string, CatSlice>();
-    const memMap = new Map<string, Member>();
-    const incomeMap = new Map<string, IncomeSlice>();
-    const prevCatMap = new Map<string, number>(); // 上期分类消费额（环比基数）
-    const bigExpenses: TopItem[] = [];
-    let passiveInc = 0;
-
-    for (const txn of txns) {
-      const inCur = inRange(txn.occurred_at, range.start, range.end);
-      const inPrev = inRange(txn.occurred_at, prevRange.start, prevRange.end);
-      if (!inCur && !inPrev) continue;
-
-      const isConsumExpense = txn.type === 'expense' && txn.source === 'normal';
-
-      if (inPrev) {
-        if (isConsumExpense) {
-          prevCatMap.set(txn.category_id, (prevCatMap.get(txn.category_id) ?? 0) + txn.amount);
-        }
-        if (!inCur) continue; // 仅用于环比基数 / 累计上期线，不参与本期统计
-      }
-
-      // —— 以下为本期（inCur）——
-      if (txn.type === 'income') inc += txn.amount;
-      else exp += txn.amount;
-
-      // 收入结构：仅 source=normal 收入（排除储蓄取出）
-      if (txn.type === 'income' && txn.source === 'normal') {
-        const d = catDisplay(txn.category_id, 'income');
-        const entry = incomeMap.get(txn.category_id) ?? { id: txn.category_id, ...d, amount: 0 };
-        entry.amount += txn.amount;
-        incomeMap.set(txn.category_id, entry);
-        if (isPassiveIncomeName(catById.get(txn.category_id)?.name ?? '')) passiveInc += txn.amount;
-      }
-
-      // 分类占比 / 成员贡献 / 趋势 / 大额 Top N：仅支出 + 普通流水（排除储蓄类）
-      if (isConsumExpense) {
-        const d = catDisplay(txn.category_id, 'expense');
-        const entry = catMap.get(txn.category_id) ?? { id: txn.category_id, ...d, amount: 0 };
-        entry.amount += txn.amount;
-        catMap.set(txn.category_id, entry);
-
-        const who = memberNameById.get(txn.recorder_user_id) ?? memberFallback;
-        const me = memMap.get(txn.recorder_user_id) ?? {
-          id: txn.recorder_user_id,
-          name: who,
-          amount: 0,
-          count: 0,
-        };
-        me.amount += txn.amount;
-        me.count += 1;
-        memMap.set(txn.recorder_user_id, me);
-
-        bigExpenses.push({
-          id: txn.id,
-          note: txn.note ?? '',
-          category: d.name,
-          color: d.color,
-          symbol: d.symbol,
-          amount: txn.amount,
-          date: formatMonthDay(txn.occurred_at),
-        });
-      }
-    }
-
-    const list = Array.from(catMap.values()).sort((a, b) => b.amount - a.amount);
-
-    // 分类环比：本期分类 + 仅上期出现的分类（本期为 0），按本期金额降序。
-    const momMap = new Map<string, MomItem>();
-    for (const c of list)
-      momMap.set(c.id, {
-        id: c.id,
-        name: c.name,
-        color: c.color,
-        symbol: c.symbol,
-        cur: c.amount,
-        prev: prevCatMap.get(c.id) ?? 0,
-      });
-    for (const [id, prevAmt] of prevCatMap) {
-      if (momMap.has(id)) continue;
-      const d = catDisplay(id, 'expense');
-      momMap.set(id, { id, ...d, cur: 0, prev: prevAmt });
-    }
-    const mom = Array.from(momMap.values()).sort((a, b) => b.cur - a.cur || b.prev - a.prev);
+    const list = (analytics?.expenseCategories ?? []).map(({ categoryId, currentAmount }) => ({
+      id: categoryId,
+      ...catDisplay(categoryId, 'expense'),
+      amount: currentAmount,
+    }));
+    const mom = (analytics?.expenseCategories ?? [])
+      .map(({ categoryId, currentAmount, previousAmount }) => ({
+        id: categoryId,
+        ...catDisplay(categoryId, 'expense'),
+        cur: currentAmount,
+        prev: previousAmount,
+      }))
+      .sort((a, b) => b.cur - a.cur || b.prev - a.prev);
+    const dailyFlows = (analytics?.days ?? []).flatMap((day) => [
+      { occurred_at: `${day.date}T12:00:00.000Z`, type: 'income' as const, amount: day.incomeAmount },
+      { occurred_at: `${day.date}T12:00:00.000Z`, type: 'expense' as const, amount: day.expenseAmount },
+    ]);
+    const incomeSlices = (analytics?.incomeCategories ?? []).map(({ categoryId, amount }) => ({
+      id: categoryId,
+      ...catDisplay(categoryId, 'income'),
+      amount,
+    }));
+    const topItems = (analytics?.topExpenses ?? []).map((item) => ({
+      id: item.id,
+      note: item.note ?? '',
+      category: catDisplay(item.categoryId, 'expense').name,
+      color: catDisplay(item.categoryId, 'expense').color,
+      symbol: catDisplay(item.categoryId, 'expense').symbol,
+      amount: item.amount,
+      date: formatMonthDay(item.occurredAt),
+    }));
+    const memberRows = (analytics?.members ?? []).map((item) => ({
+      id: item.userId,
+      name: memberNameById.get(item.userId) ?? memberFallback,
+      amount: item.expenseNormalAmount,
+      count: item.count,
+    }));
+    const inc = analytics?.summary.incomeAmount ?? 0;
+    const exp = analytics?.summary.expenseAmount ?? 0;
+    const passiveInc = incomeSlices.reduce(
+      (total, item) => total + (isPassiveIncomeName(catById.get(item.id)?.name ?? '') ? item.amount : 0),
+      0,
+    );
 
     return {
       income: inc,
       expense: exp,
       balance: inc - exp,
       byCat: list,
-      expenseTotal: list.reduce((s, x) => s + x.amount, 0),
-      members: Array.from(memMap.values()).sort((a, b) => b.amount - a.amount),
+      expenseTotal: analytics?.summary.expenseNormalAmount ?? 0,
+      members: memberRows,
       balRate: balanceRate(inc, inc - exp),
       // 近 6 期收支（对账口径，含储蓄类）：区间跨度超出本期/上期，传全量流水单独分桶。
       incomeExpense:
         dimension === 'custom'
-          ? equalPeriodIncomeExpenseSeries(range, txns)
-          : incomeExpenseSeries(dimension, range.start, txns),
+          ? equalPeriodIncomeExpenseSeries(range, dailyFlows)
+          : incomeExpenseSeries(dimension, range.start, dailyFlows),
       momItems: mom,
-      topItems: bigExpenses.sort((a, b) => b.amount - a.amount).slice(0, 5),
-      incomeSlices: Array.from(incomeMap.values()).sort((a, b) => b.amount - a.amount),
+      topItems,
+      incomeSlices,
       passiveIncome: passiveInc,
     };
-  }, [filteredTxns, catsQ.data, membersQ.data, profileQ.data, range, prevRange, dimension, catColors, locale]);
+  }, [reportData, catsQ.data, membersQ.data, profileQ.data, range, dimension, catColors, locale]);
 
-  const loading = txnsQ.isLoading || catsQ.isLoading;
+  const loading = reportQ.isLoading || catsQ.isLoading;
   const memberCountMax = Math.max(1, ...members.map((m) => m.count));
   const isMonthlyView = dimension === 'month';
-  const currentMonthRange = useMemo(() => periodRange('month', new Date()), []);
+  const currentMonthRange = useMemo(() => periodRange('month', todayInFamilyTimeZone), [todayInFamilyTimeZone]);
   const selectedMonthIsCurrent = dimension === 'month' && range.start.getTime() === currentMonthRange.start.getTime();
   const monthElapsedDays = selectedMonthIsCurrent
-    ? Math.max(1, Math.floor((startOfLocalDay(new Date()).getTime() - range.start.getTime()) / 86400000) + 1)
+    ? Math.max(1, Math.floor((startOfLocalDay(todayInFamilyTimeZone).getTime() - range.start.getTime()) / 86400000) + 1)
     : null;
   const monthTotalDays =
     dimension === 'month' ? Math.max(1, Math.round((range.end.getTime() - range.start.getTime()) / 86400000)) : 0;
@@ -533,7 +502,7 @@ export default function ReportScreen() {
   const openCardSettings = () => router.push('/settings/report-cards' as Href);
   const shiftPeriod = (delta: number) => {
     if (dimension !== 'custom') {
-      setAnchor((a) => shiftAnchor(dimension, a, delta));
+      setAnchor((a) => shiftAnchor(dimension, a ?? todayInFamilyTimeZone, delta));
       return;
     }
     const days = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
@@ -569,7 +538,7 @@ export default function ReportScreen() {
   const commonStatsCard = (
     <MoreStatsEntryCard
       scope={scope}
-      transactions={filteredTxns}
+      days={reportData?.days ?? []}
       range={statsYearRange}
       palette={palette}
       hidden={privacy}
@@ -866,15 +835,15 @@ export default function ReportScreen() {
         detail={detail}
         range={range}
         dimension={dimension}
-        transactions={filteredTxns}
+        analyticsInput={analyticsInput}
+        totalExpense={expenseTotal}
         hidden={privacy}
         onClose={() => setDetail(null)}
       />
       <MemberAnalysisSheet
         visible={memberAnalysisOpen}
-        range={range}
         dimension={dimension}
-        transactions={filteredTxns}
+        analytics={reportData ?? EMPTY_REPORT_ANALYTICS}
         members={membersQ.data ?? []}
         categories={catsQ.data ?? []}
         hidden={privacy}
@@ -899,7 +868,7 @@ export default function ReportScreen() {
         visible={moreStatsOpen}
         scope={scope}
         range={statsYearRange}
-        transactions={filteredTxns}
+        days={reportData?.days ?? []}
         hidden={privacy}
         onClose={() => setMoreStatsOpen(false)}
       />
@@ -1734,14 +1703,14 @@ function MoreStatsSheet({
   visible,
   scope,
   range,
-  transactions,
+  days,
   hidden,
   onClose,
 }: {
   visible: boolean;
   scope: HeatmapScope;
   range: { start: Date; end: Date };
-  transactions: Transaction[];
+  days: ReportDay[];
   hidden: boolean;
   onClose: () => void;
 }) {
@@ -1752,7 +1721,7 @@ function MoreStatsSheet({
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
           <SheetHeader title={t('report.moreStats')} />
           <ScrollView contentContainerStyle={styles.sheetContent}>
-            <MoreStatsCard scope={scope} transactions={transactions} range={range} palette={palette} hidden={hidden} />
+            <MoreStatsCard scope={scope} days={days} range={range} palette={palette} hidden={hidden} />
           </ScrollView>
         </SafeAreaView>
       </View>
@@ -1762,20 +1731,20 @@ function MoreStatsSheet({
 
 function MoreStatsEntryCard({
   scope,
-  transactions,
+  days,
   range,
   palette,
   hidden,
   onPress,
 }: {
   scope: HeatmapScope;
-  transactions: Transaction[];
+  days: ReportDay[];
   range: { start: Date; end: Date };
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
   onPress: () => void;
 }) {
-  const stats = buildMoreStats(transactions, range, scope);
+  const stats = buildMoreStats(days, range, scope);
   return (
     <Pressable
       style={[styles.card, styles.statsEntryCard, { backgroundColor: palette.card }]}
@@ -1808,23 +1777,25 @@ function MoreStatsEntryCard({
   );
 }
 
-function buildMoreStats(transactions: Transaction[], range: { start: Date; end: Date }, scope: HeatmapScope) {
+function buildMoreStats(days: ReportDay[], range: { start: Date; end: Date }, scope: HeatmapScope) {
   const weekday = new Array<number>(7).fill(0);
   const byDate = new Map<string, number>();
   let weekend = 0;
   let workday = 0;
   let total = 0;
   let rows = 0;
-  for (const txn of transactions) {
-    if (!inRange(txn.occurred_at, range.start, range.end)) continue;
-    let amount = 0;
-    if (scope === 'expense' && txn.type === 'expense' && txn.source === 'normal') amount = txn.amount;
-    if (scope === 'income' && txn.type === 'income' && txn.source === 'normal') amount = txn.amount;
-    if (scope === 'balance') amount = txn.type === 'income' ? txn.amount : -txn.amount;
+  for (const item of days) {
+    const date = new Date(`${item.date}T12:00:00.000Z`);
+    if (!inRange(date.toISOString(), range.start, range.end)) continue;
+    const amount =
+      scope === 'expense'
+        ? item.expenseNormalAmount
+        : scope === 'income'
+          ? item.incomeNormalAmount
+          : item.incomeAmount - item.expenseAmount;
     if (amount === 0) continue;
-    const d = new Date(txn.occurred_at);
-    const day = d.getDay();
-    const key = localDateKey(d);
+    const day = date.getDay();
+    const key = localDateKey(date);
     const heatAmount = scope === 'balance' ? Math.max(0, amount) : amount;
     weekday[day] += amount;
     byDate.set(key, (byDate.get(key) ?? 0) + heatAmount);
@@ -1833,7 +1804,7 @@ function buildMoreStats(transactions: Transaction[], range: { start: Date; end: 
     if (day === 0 || day === 6) weekend += amount;
     else workday += amount;
   }
-  const days = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
+  const rangeDays = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
   return {
     rows,
     weekday,
@@ -1844,7 +1815,7 @@ function buildMoreStats(transactions: Transaction[], range: { start: Date; end: 
     total,
     recordDays: byDate.size,
     dailyAvg: Math.round(total / Math.max(1, byDate.size)),
-    completeness: Math.round((byDate.size / days) * 100),
+    completeness: Math.round((byDate.size / rangeDays) * 100),
   };
 }
 
@@ -1865,19 +1836,19 @@ function buildYearHeatDays(year: number, byDate: Map<string, number>) {
 
 function MoreStatsCard({
   scope,
-  transactions,
+  days,
   range,
   palette,
   hidden,
 }: {
   scope: HeatmapScope;
-  transactions: Transaction[];
+  days: ReportDay[];
   range: { start: Date; end: Date };
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
 }) {
   const [heatmapWidth, setHeatmapWidth] = useState(0);
-  const stats = useMemo(() => buildMoreStats(transactions, range, scope), [transactions, range, scope]);
+  const stats = useMemo(() => buildMoreStats(days, range, scope), [days, range, scope]);
   const max = Math.max(1, ...stats.weekday.map((value) => Math.abs(value)));
   const heatMax = Math.max(1, ...stats.heatDays.map((item) => item?.amount ?? 0));
   const weekdayLabels = WEEKDAY_KEYS.map((key) => t(key));
@@ -3224,71 +3195,50 @@ function CategoryDetailSheet({
   detail,
   range,
   dimension,
-  transactions,
+  analyticsInput,
+  totalExpense,
   hidden,
   onClose,
 }: {
   detail: CategoryDetail | null;
   range: { start: Date; end: Date };
   dimension: Dimension;
-  transactions: Transaction[];
+  analyticsInput: ReportAnalyticsInput;
+  totalExpense: number;
   hidden: boolean;
   onClose: () => void;
 }) {
   const palette = useSheetPalette();
   const { locale } = useLocalePreference();
-  const { rows, periodExpense, totalExpense, noteGroups, trend } = useMemo(() => {
+  const categoryIds = detail?.categoryIds?.length ? detail.categoryIds : detail ? [detail.id] : [];
+  const detailQ = useCategoryDetail(
+    detail
+      ? {
+          start: analyticsInput.start,
+          end: analyticsInput.end,
+          historyStart: analyticsInput.historyStart,
+          categoryIds,
+        }
+      : null,
+  );
+  const firstPage = detailQ.data?.pages[0];
+  const rows = detailQ.data?.pages.flatMap((page) => page.rows) ?? [];
+  const periodExpense = firstPage?.amount ?? 0;
+  const noteGroups = firstPage?.notes ?? [];
+  const trend = useMemo(() => {
     void locale;
-    const empty = {
-      rows: [] as Transaction[],
-      periodExpense: 0,
-      totalExpense: 0,
-      noteGroups: [] as { name: string; amount: number; count: number }[],
-      trend: [] as { label: string; expense: number }[],
-    };
-    if (!detail) return empty;
-
-    const matchIds = new Set(detail.categoryIds?.length ? detail.categoryIds : [detail.id]);
-    const periodRows: Transaction[] = [];
-    let categoryAmount = 0;
-    let allExpense = 0;
-    const groupMap = new Map<string, { name: string; amount: number; count: number }>();
-
-    for (const txn of transactions) {
-      const isConsumExpense = txn.type === 'expense' && txn.source === 'normal';
-      const inPeriod = inRange(txn.occurred_at, range.start, range.end);
-      if (!isConsumExpense || !inPeriod) continue;
-      allExpense += txn.amount;
-      if (!matchIds.has(txn.category_id)) continue;
-
-      categoryAmount += txn.amount;
-      periodRows.push(txn);
-
-      const name = normalizeDetailNote(txn.note);
-      const group = groupMap.get(name) ?? { name, amount: 0, count: 0 };
-      group.amount += txn.amount;
-      group.count += 1;
-      groupMap.set(name, group);
-    }
-
-    const categoryTxns = transactions.filter(
-      (txn) => matchIds.has(txn.category_id) && txn.type === 'expense' && txn.source === 'normal',
-    );
+    const days = firstPage?.days ?? [];
+    const flowRows = days.map((item) => ({
+      occurred_at: `${item.date}T12:00:00.000Z`,
+      type: 'expense' as const,
+      amount: item.amount,
+    }));
     const series =
       dimension === 'custom'
-        ? equalPeriodIncomeExpenseSeries(range, categoryTxns)
-        : incomeExpenseSeries(dimension, range.start, categoryTxns);
-
-    return {
-      rows: periodRows.sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)),
-      periodExpense: categoryAmount,
-      totalExpense: allExpense,
-      noteGroups: Array.from(groupMap.values())
-        .sort((a, b) => b.amount - a.amount || b.count - a.count)
-        .slice(0, 5),
-      trend: series.map((item) => ({ label: item.label, expense: item.expense })),
-    };
-  }, [detail, dimension, range, transactions, locale]);
+        ? equalPeriodIncomeExpenseSeries(range, flowRows)
+        : incomeExpenseSeries(dimension, range.start, flowRows);
+    return series.map((item) => ({ label: item.label, expense: item.expense }));
+  }, [firstPage?.days, dimension, range, locale]);
 
   const share = totalExpense > 0 ? Math.round((periodExpense / totalExpense) * 100) : 0;
   const days = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
@@ -3376,7 +3326,7 @@ function CategoryDetailSheet({
                   {t('report.detailTxns')}
                 </Text>
                 <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>
-                  {t('report.allCount', { count: rows.length })}
+                  {t('report.allCount', { count: firstPage?.count ?? 0 })}
                 </Text>
               </View>
               {rows.length === 0 ? (
@@ -3392,7 +3342,7 @@ function CategoryDetailSheet({
                         {txn.note || t('report.noNote')}
                       </Text>
                       <Text style={[styles.detailDate, { color: palette.textSecondary }]}>
-                        {new Date(txn.occurred_at).toLocaleDateString(intlLocale())}
+                        {new Date(txn.occurredAt).toLocaleDateString(intlLocale())}
                       </Text>
                     </View>
                     <Text style={[styles.detailAmount, { color: palette.expense }]} numberOfLines={1}>
@@ -3401,18 +3351,17 @@ function CategoryDetailSheet({
                   </View>
                 ))
               )}
+              {detailQ.hasNextPage ? (
+                <Pressable style={styles.detailLoadMore} onPress={() => detailQ.fetchNextPage()}>
+                  <Text style={{ color: palette.accent }}>{t('common.loadMore')}</Text>
+                </Pressable>
+              ) : null}
             </View>
           </ScrollView>
         </SafeAreaView>
       </View>
     </PageSheet>
   );
-}
-
-function normalizeDetailNote(note: string | null): string {
-  const text = note?.trim();
-  if (!text) return t('report.noteEmpty');
-  return text.length > 12 ? `${text.slice(0, 12)}…` : text;
 }
 
 function CategoryDetailTrendChart({
@@ -3492,18 +3441,16 @@ function CategoryDetailTrendChart({
 // ── 家庭成员分析：参与度 + 收支贡献 + 支出偏好 ────────────────────────────────
 function MemberAnalysisSheet({
   visible,
-  range,
   dimension,
-  transactions,
+  analytics,
   members,
   categories,
   hidden,
   onClose,
 }: {
   visible: boolean;
-  range: { start: Date; end: Date };
   dimension: Dimension;
-  transactions: Transaction[];
+  analytics: ReportAnalytics;
   members: { id: string; nickname: string }[];
   categories: Category[];
   hidden: boolean;
@@ -3531,41 +3478,30 @@ function MemberAnalysisSheet({
         { id: member.id, name: member.nickname, count: 0, income: 0, expense: 0, categoryMap: new Map() },
       ]),
     );
-    let count = 0;
-    let income = 0;
-    let expense = 0;
-    for (const txn of transactions) {
-      if (!inRange(txn.occurred_at, range.start, range.end)) continue;
-      const row = memberMap.get(txn.recorder_user_id) ?? {
-        id: txn.recorder_user_id,
+    for (const item of analytics.members) {
+      const row = memberMap.get(item.userId) ?? {
+        id: item.userId,
         name: t('common.member'),
         count: 0,
         income: 0,
         expense: 0,
         categoryMap: new Map(),
       };
-      row.count += 1;
-      count += 1;
-      memberMap.set(txn.recorder_user_id, row);
-      if (txn.type === 'income') {
-        row.income += txn.amount;
-        income += txn.amount;
-      } else {
-        row.expense += txn.amount;
-        expense += txn.amount;
-      }
-      if (txn.type === 'expense' && txn.source === 'normal') {
-        const cat = catById.get(txn.category_id);
-        const storedName = cat?.name ?? '未分类';
-        const name = cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized');
-        const entry = row.categoryMap.get(txn.category_id) ?? {
-          name,
-          amount: 0,
-          color: catColors[categoryColorKey(storedName, 'expense', cat?.color_key)],
-        };
-        entry.amount += txn.amount;
-        row.categoryMap.set(txn.category_id, entry);
-      }
+      row.count = item.count;
+      row.income = item.incomeAmount;
+      row.expense = item.expenseAmount;
+      memberMap.set(item.userId, row);
+    }
+    for (const item of analytics.memberCategories) {
+      const row = memberMap.get(item.userId);
+      if (!row) continue;
+      const cat = catById.get(item.categoryId);
+      const storedName = cat?.name ?? '未分类';
+      row.categoryMap.set(item.categoryId, {
+        name: cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized'),
+        amount: item.amount,
+        color: catColors[categoryColorKey(storedName, 'expense', cat?.color_key)],
+      });
     }
     return {
       rows: Array.from(memberMap.values())
@@ -3574,11 +3510,11 @@ function MemberAnalysisSheet({
           return { ...row, topCategory };
         })
         .sort((a, b) => b.count - a.count || b.expense - a.expense),
-      totalCount: count,
-      totalIncome: income,
-      totalExpense: expense,
+      totalCount: analytics.summary.transactionCount,
+      totalIncome: analytics.summary.incomeAmount,
+      totalExpense: analytics.summary.expenseAmount,
     };
-  }, [members, range, transactions, categories, catColors, locale]);
+  }, [members, analytics, categories, catColors, locale]);
 
   const maxCount = Math.max(1, ...rows.map((row) => row.count));
   const maxMoney = Math.max(1, ...rows.flatMap((row) => [row.income, row.expense]));
@@ -4227,4 +4163,5 @@ const styles = StyleSheet.create({
   detailNote: { fontSize: 16 },
   detailDate: { fontSize: 13, marginTop: 2 },
   detailAmount: { width: 96, textAlign: 'right', fontSize: 16, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  detailLoadMore: { alignSelf: 'center', paddingHorizontal: Space[4], paddingVertical: Space[2] },
 });

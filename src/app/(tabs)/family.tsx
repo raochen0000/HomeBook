@@ -15,15 +15,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   useBudget,
+  useBudgetProgress,
   useCategories,
   useCreateFamily,
   useDissolveFamily,
+  useFamilyActivity,
   useLeaveFamily,
   useMemberships,
   useMyFamily,
   useMyProfile,
   useSavingsGoals,
-  useTransactions,
+  useTransaction,
   useUnreadNotifications,
   type FamilyMembership,
   type SavingsGoal,
@@ -48,26 +50,8 @@ import { SavingsSheet } from '@/features/savings/savings-sheet';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
-import { budgetLevel, daysToMonthEnd, expenseUsedInPeriod } from '@/lib/budget';
-import { currentPeriod, formatAmount } from '@/lib/format';
-
-/** 本地「年-月-日」key（用于连续记账判断，须与游标同构造）。 */
-function localDayKey(d: Date): string {
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-}
-
-/** 连续有流水的自然日数；今天未记时从昨天开始，避免当天尚未记账就提前断签。 */
-function consecutiveRecordedDays(recordedDays: Set<string>): number {
-  let streak = 0;
-  const cursor = new Date();
-  cursor.setHours(0, 0, 0, 0);
-  if (!recordedDays.has(localDayKey(cursor))) cursor.setDate(cursor.getDate() - 1);
-  while (recordedDays.has(localDayKey(cursor))) {
-    streak += 1;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return streak;
-}
+import { budgetLevel, daysToMonthEnd } from '@/lib/budget';
+import { currentPeriodInTimeZone, formatAmount } from '@/lib/format';
 
 /** 瓦片角标用的紧凑金额：分 → 「¥1,280」（取整到元，带千分位）。 */
 function formatCny(cents: number): string {
@@ -79,15 +63,17 @@ export default function FamilyScreen() {
   useLocalePreference();
   const insets = useSafeAreaInsets();
   const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 69);
-  const period = currentPeriod();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
+  const period = currentPeriodInTimeZone(familyQ.data?.timezone);
   const membershipsQ = useMemberships();
-  const transactionsQ = useTransactions();
+  const activityQ = useFamilyActivity();
   const categoriesQ = useCategories();
   const budgetQ = useBudget(period);
+  const budgetProgressQ = useBudgetProgress(period);
   const savingsQ = useSavingsGoals();
   const unreadQ = useUnreadNotifications();
+  const latestTransactionQ = useTransaction(activityQ.data?.latest_transaction_id);
   const createFamilyM = useCreateFamily();
   const leaveM = useLeaveFamily();
   const dissolveM = useDissolveFamily();
@@ -115,53 +101,21 @@ export default function FamilyScreen() {
 
   // 家庭头像（avatar_url）与封面（cover_url）的更换入口在「家庭设置」，本页只读展示。
 
-  // ── 家庭活跃度：首页只呈现协作状态；金额贡献、成员比较仍归报表。──
-  const stats = useMemo(() => {
-    const txns = transactionsQ.data ?? [];
-    const todayKey = localDayKey(new Date());
-
-    let monthCount = 0;
-    const byMemberToday = new Map<string, number>();
-    const byMemberMonth = new Map<string, number>();
-    const recordedDays = new Set<string>();
-    const myRecordedDays = new Set<string>();
-    let latestMonthTransaction: Transaction | null = null;
-
-    for (const txn of txns) {
-      const occurred = new Date(txn.occurred_at);
-      recordedDays.add(localDayKey(occurred));
-      if (txn.recorder_user_id === myId) myRecordedDays.add(localDayKey(occurred));
-      if (currentPeriod(occurred) === period) {
-        monthCount += 1;
-        byMemberMonth.set(txn.recorder_user_id, (byMemberMonth.get(txn.recorder_user_id) ?? 0) + 1);
-        if (!latestMonthTransaction || occurred > new Date(latestMonthTransaction.occurred_at)) {
-          latestMonthTransaction = txn;
-        }
-      }
-      if (localDayKey(occurred) === todayKey) {
-        byMemberToday.set(txn.recorder_user_id, (byMemberToday.get(txn.recorder_user_id) ?? 0) + 1);
-      }
-    }
-
-    const todayCount = [...byMemberToday.values()].reduce((sum, count) => sum + count, 0);
-    return {
-      monthCount,
-      streak: consecutiveRecordedDays(recordedDays),
-      myMonthCount: myId ? (byMemberMonth.get(myId) ?? 0) : 0,
-      myStreak: consecutiveRecordedDays(myRecordedDays),
-      byMemberToday,
-      byMemberMonth,
-      todayCount,
-      latestMonthTransaction,
-    };
-  }, [myId, transactionsQ.data, period]);
+  // 家庭活跃度由服务端对完整历史流水聚合，日期边界以家庭时区为准。
+  const activity = activityQ.data;
+  const stats = {
+    monthCount: activity?.month_count ?? 0,
+    streak: activity?.family_streak ?? 0,
+    myMonthCount: activity?.my_month_count ?? 0,
+    myStreak: activity?.my_streak ?? 0,
+    monthParticipantCount: activity?.month_member_count ?? 0,
+    todayCount: activity?.today_count ?? 0,
+    latestMonthTransaction: latestTransactionQ.data ?? null,
+  };
 
   // ── 预算执行（口径同预算页：仅日常支出，排除储蓄流水）──
   const budgetTotal = budgetQ.data?.budget?.total_amount ?? null;
-  const budgetUsed = useMemo(
-    () => expenseUsedInPeriod(transactionsQ.data ?? [], period).total,
-    [transactionsQ.data, period],
-  );
+  const budgetUsed = budgetProgressQ.data?.usedAmount ?? 0;
   const budgetRemaining = budgetTotal == null ? 0 : budgetTotal - budgetUsed;
   const budgetPct = budgetTotal && budgetTotal > 0 ? Math.round((budgetUsed / budgetTotal) * 100) : 0;
   const budgetSub =
@@ -401,7 +355,7 @@ export default function FamilyScreen() {
                 <FamilyCollaborationCard
                   members={members}
                   todayCount={stats.todayCount}
-                  monthParticipantCount={stats.byMemberMonth.size}
+                  monthParticipantCount={stats.monthParticipantCount}
                   myMonthCount={stats.myMonthCount}
                   myStreak={stats.myStreak}
                   latestTransaction={stats.latestMonthTransaction}

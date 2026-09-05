@@ -81,6 +81,32 @@ export function currentPeriod(date = new Date()): string {
   return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
 }
 
+/** YYYY-MM（指定 IANA 时区）；家庭账期卡片不得受设备时区影响。 */
+export function currentPeriodInTimeZone(timeZone: string | null | undefined, date = new Date()): string {
+  if (!timeZone) return currentPeriod(date);
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit' }).formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  return year && month ? `${year}-${month}` : currentPeriod(date);
+}
+
+/** 指定时区的今天，作为纯日历值供日期选择/报表分桶使用（本地正午避免 DST 边界）。 */
+export function calendarDateInTimeZone(timeZone: string | null | undefined, date = new Date()): Date {
+  if (!timeZone) return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const year = Number(parts.find((part) => part.type === 'year')?.value);
+  const month = Number(parts.find((part) => part.type === 'month')?.value);
+  const day = Number(parts.find((part) => part.type === 'day')?.value);
+  return Number.isInteger(year) && Number.isInteger(month) && Number.isInteger(day)
+    ? new Date(year, month - 1, day, 12)
+    : new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12);
+}
+
 /** 上一周期（YYYY-MM）。如 '2026-06' → '2026-05'。 */
 export function previousPeriod(period: string): string {
   const [y, m] = period.split('-').map(Number);

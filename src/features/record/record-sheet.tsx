@@ -31,8 +31,8 @@ import {
   useCategories,
   useCreateTransaction,
   useHiddenCategoryIds,
+  useHasTransactions,
   useMemberships,
-  useTransactions,
   useUpdateTransaction,
   type Category,
   type FamilyMembership,
@@ -104,7 +104,7 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   const membersQ = useMemberships();
   const createM = useCreateTransaction();
   const updateM = useUpdateTransaction();
-  const transactionsQ = useTransactions();
+  const hasTransactionsQ = useHasTransactions(familyId);
   const saving = createM.isPending || updateM.isPending;
 
   // 记账偏好（记账设置 §18.3.1）：默认记账类型 + 记一笔后行为。
@@ -173,8 +173,8 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
 
   const handleSave = async () => {
     if (!canSave || !effectiveCategoryId) return;
-    // 家庭第一笔？仅新建、且流水列表已加载为空时判定（写入前判，避免失效刷新干扰）。
-    const isFirstRecord = !editing && transactionsQ.isSuccess && (transactionsQ.data?.length ?? 0) === 0;
+    // 家庭第一笔？只查询是否存在任意流水，不加载历史列表。
+    const isFirstRecord = !editing && hasTransactionsQ.isSuccess && !hasTransactionsQ.data;
     try {
       if (editing) {
         await updateM.mutateAsync({

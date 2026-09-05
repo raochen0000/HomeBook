@@ -5,17 +5,17 @@
  * 进行中语气、不提供保存图片）；左右翻月（chevron / 横滑）看历史，上月及更早为
  * 「已结算」仪式实例（保留全部字段 + 暖心文案，保存图片发布前补齐）。
  * 口径：总收支结余含储蓄类（对账）；最大单笔 / 最高分类按日常消费（排除储蓄类）。
- * MVP 不依赖服务端快照表 monthly_summaries，全部客户端实时计算。
+ * 使用服务端实时聚合；不依赖 monthly_summaries 快照表，也不从客户端的有限流水缓存累计。
  */
 import { SymbolView } from 'expo-symbols';
 import { useMemo, useState } from 'react';
-import { PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useCategories, useFamilyMembers, useMyProfile, useTransactions, type Transaction } from '@/api';
+import { useCategories, useFamilyMembers, useMonthlySummary, useMyFamily, useMyProfile } from '@/api';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { displayCategoryName, t, useLocalePreference } from '@/i18n';
-import { currentPeriod, formatAmount, formatMonthDay, signForNet } from '@/lib/format';
+import { currentPeriod, currentPeriodInTimeZone, formatAmount, formatMonthDay, signForNet } from '@/lib/format';
 
 const WARM_KEYS_SETTLED = [
   'summary.warmCount',
@@ -50,106 +50,6 @@ function periodLabel(period: string): string {
   return t('dates.yearMonth', { year: y, month: m });
 }
 
-type Summary = {
-  count: number;
-  totalExpense: number;
-  totalIncome: number;
-  balance: number;
-  maxExpense: { amount: number; category: string; date: string } | null;
-  topCategory: { name: string; amount: number; pct: number } | null;
-  topRecorder: { name: string; count: number } | null;
-  momExpense: number | null; // 环比百分比（支出）
-  momIncome: number | null;
-  warm: string;
-};
-
-function computeSummary(
-  txns: Transaction[],
-  period: string,
-  isCurrent: boolean,
-  catName: (id: string) => string,
-  memberName: (id: string) => string,
-): Summary | null {
-  const inMonth = txns.filter((txn) => currentPeriod(new Date(txn.occurred_at)) === period);
-  if (inMonth.length === 0) return null;
-
-  let totalExpense = 0;
-  let totalIncome = 0;
-  const consumByCat = new Map<string, number>();
-  const byRecorder = new Map<string, number>();
-  let consumTotal = 0;
-  let maxExpense: Summary['maxExpense'] = null;
-
-  for (const txn of inMonth) {
-    if (txn.type === 'expense') totalExpense += txn.amount;
-    else totalIncome += txn.amount;
-    byRecorder.set(txn.recorder_user_id, (byRecorder.get(txn.recorder_user_id) ?? 0) + 1);
-
-    // 日常消费（排除储蓄类）用于最大单笔 / 最高分类
-    if (txn.type === 'expense' && txn.source === 'normal') {
-      consumTotal += txn.amount;
-      consumByCat.set(txn.category_id, (consumByCat.get(txn.category_id) ?? 0) + txn.amount);
-      if (!maxExpense || txn.amount > maxExpense.amount) {
-        maxExpense = {
-          amount: txn.amount,
-          category: catName(txn.category_id),
-          date: formatMonthDay(txn.occurred_at),
-        };
-      }
-    }
-  }
-
-  let topCategory: Summary['topCategory'] = null;
-  for (const [id, amt] of consumByCat) {
-    if (!topCategory || amt > topCategory.amount) {
-      topCategory = {
-        name: catName(id),
-        amount: amt,
-        pct: consumTotal > 0 ? Math.round((amt / consumTotal) * 100) : 0,
-      };
-    }
-  }
-
-  let topRecorder: Summary['topRecorder'] = null;
-  for (const [id, cnt] of byRecorder) {
-    if (!topRecorder || cnt > topRecorder.count) topRecorder = { name: memberName(id), count: cnt };
-  }
-
-  // 环比上月：已结算月对比整月；进行中（本月至今）对比「上月同期」（截至相同日序）。
-  const prev = prevPeriod(period);
-  const dayCap = new Date().getDate();
-  let prevExpense = 0;
-  let prevIncome = 0;
-  for (const txn of txns) {
-    const d = new Date(txn.occurred_at);
-    if (currentPeriod(d) !== prev) continue;
-    if (isCurrent && d.getDate() > dayCap) continue;
-    if (txn.type === 'expense') prevExpense += txn.amount;
-    else prevIncome += txn.amount;
-  }
-  const mom = (cur: number, base: number): number | null => (base > 0 ? Math.round(((cur - base) / base) * 100) : null);
-
-  const pool = isCurrent ? WARM_KEYS_PROGRESS : WARM_KEYS_SETTLED;
-  const warm = t(pool[Math.floor(Math.random() * pool.length)], {
-    count: inMonth.length,
-    top: topCategory?.name ?? t('summary.life'),
-    recorder: topRecorder?.name ?? t('summary.youAll'),
-  });
-
-  return {
-    count: inMonth.length,
-    totalExpense,
-    totalIncome,
-    balance: totalIncome - totalExpense,
-    maxExpense,
-    topCategory,
-    topRecorder,
-    momExpense: mom(totalExpense, prevExpense),
-    momIncome: mom(totalIncome, prevIncome),
-    warm,
-  };
-}
-
 export function MonthlySummaryScreen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: () => void }) {
   return <Screen initialPeriod={initialPeriod} onClose={onClose} />;
 }
@@ -157,23 +57,17 @@ export function MonthlySummaryScreen({ initialPeriod, onClose }: { initialPeriod
 function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: () => void }) {
   const palette = usePalette();
   const { locale } = useLocalePreference();
-  const txnsQ = useTransactions();
   const catsQ = useCategories();
+  const familyQ = useMyFamily();
   const membersQ = useFamilyMembers();
   const profileQ = useMyProfile();
 
-  const cur = currentPeriod();
+  const cur = currentPeriodInTimeZone(familyQ.data?.timezone);
   const [period, setPeriod] = useState(initialPeriod && initialPeriod <= cur ? initialPeriod : cur);
+  const summaryQ = useMonthlySummary(period);
 
   // 翻月下界：最早一笔流水所在月（无数据时为本月）。
-  const minPeriod = useMemo(() => {
-    let min = cur;
-    for (const txn of txnsQ.data ?? []) {
-      const p = currentPeriod(new Date(txn.occurred_at));
-      if (p < min) min = p;
-    }
-    return min;
-  }, [txnsQ.data, cur]);
+  const minPeriod = summaryQ.data?.earliest_period ?? cur;
 
   const isCurrent = period === cur;
   const canPrev = period > minPeriod;
@@ -203,17 +97,61 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
     const catById = new Map((catsQ.data ?? []).map((c) => [c.id, c]));
     const memById = new Map((membersQ.data ?? []).map((m) => [m.id, m.nickname]));
     const myId = profileQ.data?.id;
-    return computeSummary(
-      txnsQ.data ?? [],
-      period,
-      isCurrent,
-      (id) => {
-        const cat = catById.get(id);
-        return cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized');
-      },
-      (id) => (id === myId ? t('common.me') : (memById.get(id) ?? t('common.member'))),
-    );
-  }, [txnsQ.data, catsQ.data, membersQ.data, profileQ.data, period, isCurrent, locale]);
+    const data = summaryQ.data;
+    if (!data || data.transaction_count === 0) return null;
+    const topCategory = data.top_category_id
+      ? {
+          name: (() => {
+            const cat = catById.get(data.top_category_id as string);
+            return cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized');
+          })(),
+          amount: data.top_category_amount ?? 0,
+          pct:
+            data.consumption_expense_amount > 0
+              ? Math.round(((data.top_category_amount ?? 0) / data.consumption_expense_amount) * 100)
+              : 0,
+        }
+      : null;
+    const maxExpense = data.max_expense_id
+      ? {
+          amount: data.max_expense_amount ?? 0,
+          category: (() => {
+            const cat = data.max_expense_category_id ? catById.get(data.max_expense_category_id) : undefined;
+            return cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized');
+          })(),
+          date: data.max_expense_occurred_at ? formatMonthDay(data.max_expense_occurred_at) : '',
+        }
+      : null;
+    const topRecorder = data.top_recorder_user_id
+      ? {
+          name:
+            data.top_recorder_user_id === myId
+              ? t('common.me')
+              : (memById.get(data.top_recorder_user_id) ?? t('common.member')),
+          count: data.top_recorder_count ?? 0,
+        }
+      : null;
+    const mom = (value: number, previous: number): number | null =>
+      previous > 0 ? Math.round(((value - previous) / previous) * 100) : null;
+    const pool = isCurrent ? WARM_KEYS_PROGRESS : WARM_KEYS_SETTLED;
+    const warmKey = pool[(Number(period.slice(0, 4)) + Number(period.slice(5))) % pool.length];
+    return {
+      count: data.transaction_count,
+      totalExpense: data.expense_amount,
+      totalIncome: data.income_amount,
+      balance: data.income_amount - data.expense_amount,
+      maxExpense,
+      topCategory,
+      topRecorder,
+      momExpense: mom(data.expense_amount, data.previous_expense_amount),
+      momIncome: mom(data.income_amount, data.previous_income_amount),
+      warm: t(warmKey, {
+        count: data.transaction_count,
+        top: topCategory?.name ?? t('summary.life'),
+        recorder: topRecorder?.name ?? t('summary.youAll'),
+      }),
+    };
+  }, [summaryQ.data, catsQ.data, membersQ.data, profileQ.data, period, isCurrent, locale]);
 
   const title = isCurrent ? `${periodLabel(period)} · ${t('dates.untilToday')}` : periodLabel(period);
   const momText = (v: number | null) =>
@@ -249,7 +187,16 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
           </Pressable>
         </View>
 
-        {!summary ? (
+        {summaryQ.isLoading ? (
+          <View style={styles.center}>
+            <ActivityIndicator color={palette.accent} />
+          </View>
+        ) : summaryQ.isError ? (
+          <View style={styles.center}>
+            <SymbolView name="exclamationmark.triangle" tintColor={palette.textTertiary} size={40} />
+            <Text style={{ color: palette.textSecondary }}>{t('common.loadFailed')}</Text>
+          </View>
+        ) : !summary ? (
           <View style={styles.center} {...pan.panHandlers}>
             <SymbolView name="doc.text" tintColor={palette.textTertiary} size={48} />
             <Text style={{ color: palette.textSecondary }}>
