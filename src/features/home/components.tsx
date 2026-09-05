@@ -448,7 +448,12 @@ function ProgressBar({
   return (
     <ZStack
       alignment="leading"
-      modifiers={[frame({ width: trackW, height: 8 }), background(track), cornerRadius(Radius.full)]}
+      modifiers={[
+        // frame 默认 center；ZStack 只有一个子视图时固有宽=填充宽，必须在 frame 上 leading，否则蓝条居中。
+        frame({ width: trackW, height: 8, alignment: 'leading' }),
+        background(track),
+        cornerRadius(Radius.full),
+      ]}
     >
       <HStack modifiers={[frame({ width: fillW, height: 8 }), background(color), cornerRadius(Radius.full)]}>
         <Spacer />
