@@ -26,30 +26,30 @@
 
 - [ ] App 的生产构建仅连接目标 Supabase Cloud 项目，且客户端只持 publishable/anon 级凭据。
 - [ ] 邮箱注册/登录、找回密码、更换邮箱和 Apple 登录/绑定/解绑均在真机通过。
-- [ ] 47 个版本化迁移（44 个基线 migration + 3 个 Cloud 兼容/安全 migration）在干净 Cloud 项目可重放；所有客户端表、视图和 RPC 均通过 RLS 允许/拒绝测试。
+- [ ] 50 个版本化 migration 在干净 Cloud 项目可重放；所有客户端表、视图和 RPC 均通过 RLS 允许/拒绝测试。
 - [ ] 家庭、流水、预算、储蓄、报表、通知、反馈、账号注销等现有核心流程通过回归。
 - [ ] 四个 Storage bucket 的可见性、策略、对象数量和文件可读性符合预期。
 - [ ] 推送投递任务在目标架构稳定运行，且不会重复推送或异常放大调用量。
 - [ ] 新的 EAS production 二进制通过 TestFlight 真机回归；不得用 OTA 更新替代后端地址切换。
-- [ ] 旧后端在观察期内保留为短期技术回退参照；路径 A 不迁数据，路径 B 才要求最终备份可校验与恢复路径真实可用。
+- [ ] 旧后端在观察期内保留为短期技术回退参照；不迁移测试数据，Cloud 作为唯一可重建目标。
 - [ ] App Store 上架地区、隐私披露、隐私政策和支持页与海外单区方案一致。
 
 ## 3. 当前实现盘点
 
 迁移范围以仓库和源端实际部署状态共同为准，不能只看任意一方。
 
-| 能力       | 当前实现                                                                                                     | 迁移重点                                                                              |
-| ---------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| 客户端连接 | [`src/lib/supabase.ts`](../src/lib/supabase.ts) 读取 `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_KEY` | URL 与 key 是构建时配置，切换后必须重新 EAS Build                                     |
-| Auth       | 邮箱密码、手机号 OTP、Apple `signInWithIdToken`、身份绑定/解绑                                               | 首版隐藏/移除手机号入口；配置 Apple 与生产 SMTP                                       |
-| 数据库     | `supabase/migrations/` 共 47 个版本化迁移（含 Cloud Storage、权限兼容与安全修复 migration）                  | 路径 A 以仓库 migration 为唯一重建来源；路径 B 才需逐项对照源库实际 schema 与迁移历史 |
-| RLS/RPC    | 大量业务 RPC、触发器和 RLS policy                                                                            | 在 Cloud 逐项做授权与拒绝测试                                                         |
-| Storage    | 三个公开媒体桶、一个私有反馈桶（以目标最终状态为准）                                                         | 路径 A 不复制对象或旧 URL；目标项目须用 migration 从零创建并回归验证四个 bucket       |
-| 账号注销   | `delete_account` RPC 直接操作 `auth.identities`、`auth.sessions`、`auth.users`                               | Cloud 兼容性与权限必须先专项验证或重构                                                |
-| 认证邮件   | 阿里云 SMTP/邮件 FC 历史实现                                                                                 | 生产改用 Cloud Auth 自定义 SMTP；邮件 FC 退出主链路                                   |
-| 短信       | GoTrue Send SMS Hook → 阿里云 FC/PNVS                                                                        | 首版关闭，不迁移为发布依赖                                                            |
-| 推送       | 阿里云 FC 定时轮询 → Expo Push → APNs                                                                        | 推荐先保持行为等价，再迁 Edge Function + Cron                                         |
-| Realtime   | 数据库具备相关能力，当前 App 核心通知不依赖 Realtime                                                         | 不为迁移额外引入 Realtime 依赖                                                        |
+| 能力       | 当前实现                                                                                                     | 迁移重点                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| 客户端连接 | [`src/lib/supabase.ts`](../src/lib/supabase.ts) 读取 `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_KEY` | URL 与 key 是构建时配置，切换后必须重新 EAS Build                               |
+| Auth       | 邮箱密码、手机号 OTP、Apple `signInWithIdToken`、身份绑定/解绑                                               | 首版隐藏/移除手机号入口；配置 Apple 与生产 SMTP                                 |
+| 数据库     | `supabase/migrations/` 共 50 个版本化 migration（含 Cloud Storage、权限兼容与安全修复 migration）            | 以仓库 migration 为唯一重建来源                                                 |
+| RLS/RPC    | 大量业务 RPC、触发器和 RLS policy                                                                            | 在 Cloud 逐项做授权与拒绝测试                                                   |
+| Storage    | 三个公开媒体桶、一个私有反馈桶（以目标最终状态为准）                                                         | 路径 A 不复制对象或旧 URL；目标项目须用 migration 从零创建并回归验证四个 bucket |
+| 账号注销   | `delete_account` RPC 直接操作 `auth.identities`、`auth.sessions`、`auth.users`                               | Cloud 兼容性与权限必须先专项验证或重构                                          |
+| 认证邮件   | 阿里云 SMTP/邮件 FC 历史实现                                                                                 | 生产改用 Cloud Auth 自定义 SMTP；邮件 FC 退出主链路                             |
+| 短信       | GoTrue Send SMS Hook → 阿里云 FC/PNVS                                                                        | 首版关闭，不迁移为发布依赖                                                      |
+| 推送       | 阿里云 FC 定时轮询 → Expo Push → APNs                                                                        | 推荐先保持行为等价，再迁 Edge Function + Cron                                   |
+| Realtime   | 数据库具备相关能力，当前 App 核心通知不依赖 Realtime                                                         | 不为迁移额外引入 Realtime 依赖                                                  |
 
 目标 Storage 最终状态：
 
@@ -60,7 +60,7 @@
 | `homebook-family-background` | public     | 家庭背景          |
 | `homebook-feedback-images`   | private    | 意见反馈截图      |
 
-> 路径 A 不以源端 bucket 状态作为迁移阻塞项；上表是目标 Cloud 必须实现的最终状态。路径 B 才需从源端导出实际 bucket 与对象清单。
+> 源端 bucket 状态不作为迁移阻塞项；上表是目标 Cloud 必须实现的最终状态。
 
 ## 4. 执行原则与停止条件
 
@@ -69,27 +69,21 @@
 1. **先演练、后启用生产**：所有 schema、Auth、Storage 和账号注销兼容性先在干净 Cloud 目标项目验证；路径 A 验证通过后可将同一项目作为生产项目。
 2. **优先走“干净重建”**：如果尚无真实生产用户，迁移 schema 与配置，不迁开发账号和测试数据。
 3. **不修改历史迁移**：新的兼容性修复通过新 migration 追加，避免破坏已执行环境。
-4. **数据库、Auth、Storage 分开核对**：路径 A 重建目标数据库与空 bucket；路径 B 的数据库 dump 不等于 Storage 对象已经迁移。
+4. **数据库、Auth、Storage 分开核对**：重建目标数据库与空 bucket，不迁移源端对象。
 5. **秘密不进仓库**：数据库密码、Apple 私钥、SMTP 密码、secret/service-role key 仅放密码管理器或服务端 Secret；不得写入 Markdown、`.env.example`、日志或 `EXPO_PUBLIC_*`。
-6. **旧后端延迟下线**：路径 A 在 Cloud TestFlight 验证和观察期结束前不删除阿里云实例、FC 或测试数据；路径 B 还须完成可恢复备份。
+6. **旧后端延迟下线**：在 Cloud TestFlight 验证和观察期结束前不删除阿里云实例、FC 或测试数据。
 
 ### 4.2 任一命中即 No-Go
 
-- 路径 B：无法生成并恢复验证源端最终备份。
-- 路径 B：仓库迁移与源端实际 schema 差异尚未解释。
 - 任一关键 RLS 拒绝用例失败，或客户端可以越权读取/修改家庭数据。
 - Apple、邮箱找回密码、更换邮箱或账号注销在 Cloud 失败。
 - 真实用户只有手机号登录方式，但首版又已关闭短信。
-- 路径 B：Storage 对象数量、字节数或抽样哈希不一致。
-- 路径 B：业务表仍引用旧 Storage URL，且旧后端计划下线。
 - 推送任务出现重复投递、无限重试或异常调用量。
 - TestFlight 真机仍访问旧后端，或 production 构建使用 HTTP/错误 key。
 
-## 5. 先选择数据迁移路径
+## 5. 数据迁移边界
 
-开始迁移前，只选择下面一条路径，并记录证据。
-
-### 路径 A：尚无真实生产用户（推荐）
+### 路径 A：尚无真实生产用户
 
 适用条件：App 尚未公开发布，源端只有开发/测试账号与可丢弃数据。
 
@@ -102,19 +96,7 @@
 - 不导出、不恢复源端数据库/Storage 测试数据；源端不作为目标 schema 的权威来源。
 - 保留阿里云源端及其 FC 至少到 Cloud TestFlight 验证和观察期完成，用于短期技术回退与问题比对。
 
-优点是风险最低，也能验证仓库是否真正具备可重放能力。
-
-### 路径 B：已有真实生产用户或必须保留的数据
-
-适用条件：源端存在不能丢失的用户、家庭、流水、图片或反馈。
-
-额外要求：
-
-- 完整迁移 `auth` 数据后，邮箱密码 hash 才能保留；不得把密码导出为明文。
-- 新 Cloud 项目的 JWT 签名体系与旧项目不同，所有旧 session 一律视为失效，用户需重新登录。
-- Apple provider 必须保持相同的 App 身份配置，并用真实迁移账号验证 identity 能继续登录。
-- 只有手机号登录的用户，在关闭短信前必须先绑定邮箱或 Apple；否则迁移后会失去登录能力。
-- 必须安排最终停写窗口、增量差异核对和正式 Go/No-Go。
+这一路径风险最低，也能验证仓库是否真正具备可重放能力。
 
 路径选择记录：
 
@@ -140,7 +122,7 @@
 - [x] 在 `docs/TECH.md` 将后端目标改为 Supabase Cloud，并更新邮件、短信、推送、Storage 与区域说明。
 - [x] 更新 `docs/DATAMODEL.md` 中仍将手机号视为登录主键的旧蓝图描述。
 - [x] 明确 App Store 仅选择海外 storefront，不选择中国大陆。
-- [x] 选择路径 A 或 B；若选 B，确定维护窗口、公告和仅手机号用户过渡方案。
+- [x] 确认仅采用路径 A：无真实用户或需保留的数据，不安排维护窗口或源端数据迁移。
 
 阶段 0 执行记录（2026-08-31）：
 
@@ -169,19 +151,6 @@
 - 源端公开 Auth Settings、PostgREST OpenAPI 与 anon Storage 响应已记录于 `migration-evidence/2026-08-31/source-inventory.md`。目前确认源端 Email/Phone 开启、Apple 关闭，且实际公开 20 张表和 17 个 RPC；该信息仅作历史参考，不作为 Cloud 目标配置或 migration 的权威来源。
 - 用户于 2026-08-31 确认采用“路径 A 简化版”：不迁测试账号、业务数据、Storage 对象或旧 URL，不执行源端逻辑备份/恢复演练；阿里云源端保留到 Cloud TestFlight 验证和观察期完成后再评估下线。
 - 当前 `.env` 只有客户端 URL 与 anon key；无需为路径 A 索取或记录源端数据库密码、AccessKey 或 service-role key。此前准备的 `migration-evidence/2026-08-31/manual/source-audit.sql` 仅保留为可选故障排查工具，结果不再阻塞后续阶段。
-
-路径 B 如需数据迁移时，建议将证据放入不提交 Git 的加密目录，至少包含：
-
-```text
-migration-evidence/YYYY-MM-DD/
-  source-inventory.md
-  roles.sql.enc
-  schema.sql.enc
-  data.sql.enc
-  migration-history.sql.enc
-  storage-manifest.json.enc
-  checksums.sha256
-```
 
 退出条件：本地 migration 基线已校验、路径 A 数据可丢弃边界已书面确认，且阿里云源端保留策略明确。
 
@@ -231,23 +200,11 @@ Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对
 
 目标：把仓库 migration 变成唯一可重复的业务 schema 来源。
 
-#### 路径 A
-
 - [x] 将 Cloud 目标项目 link 到本地 Supabase CLI。
 - [x] 从空项目按文件名顺序执行全部 migration，不在 Dashboard 手工补 DDL。
 - [x] 追加新的版本化 migration，创建/校准此前由阿里云 Studio 手工创建的 `homebook-user-avatars` 与 `homebook-family-covers` bucket；不得修改历史 migration。
 - [x] 生成 Cloud 数据库类型并与 `src/lib/database.types.ts` 比较。
 - [x] 运行数据库 lint/advisor，并处理与 Cloud 托管角色、扩展、权限相关的差异。
-
-#### 路径 B
-
-- [ ] 先在可丢弃项目完整演练官方 CLI logical backup/restore 流程。
-- [ ] 对 `auth`、`storage` 的版本差异单独审查，禁止未经演练直接覆盖 Cloud 管理 schema。
-- [ ] 恢复时关闭触发器或按官方流程避免 `handle_new_user()` 重复创建 profile。
-- [ ] 单独保存/恢复 migration history，并确认之后的 `db push` 不会重放历史 migration。
-- [ ] 任何为 Cloud 兼容性所需的调整都追加新 migration，不回写旧文件。
-
-两条路径都必须验证：
 
 - [x] 表、列、PK/FK、unique/check、索引数量与预期一致。
 - [x] 所有 SECURITY DEFINER 函数固定安全的 `search_path`，执行权限最小化。
@@ -280,10 +237,10 @@ Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对
 - [x] 使用 `homebook-app.com` 的认证专用发件子域名，配置 SPF、DKIM；根域已有 DMARC 保持不变。
 - [x] 在 Cloud Auth 配置自定义 SMTP，不使用默认 SMTP 发送生产邮件。
 - [x] 自定义注册确认、找回密码、更换邮箱等模板；中英文内容与 App 文案一致。
-- [ ] 测试 Gmail、Outlook、iCloud 等主要邮箱的收件、垃圾箱、链接/验证码有效性。
-- [ ] 记录发信限额、退信处理和供应商故障时的应对方式。
+- [x] 测试 Gmail、Outlook、iCloud 等主要邮箱的收件、垃圾箱、链接/验证码有效性。
+- [x] 记录发信限额、退信处理和供应商故障时的应对方式。
 
-阶段 4 邮件服务执行记录（进行中，2026-09-01）：
+阶段 4 邮件服务执行记录（完成，2026-09-03）：
 
 - 已选定 Resend Free 作为首版海外认证邮件 SMTP 服务商；尚未生成 SMTP 专用 API key 或写入 Cloud，故不视为 SMTP 已配置完成。
 - 使用认证专用发件地址 `no-reply@auth.homebook-app.com`，将认证发信信誉与未来营销邮件隔离。
@@ -291,32 +248,32 @@ Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对
 - `2026-09-01`：Cloud Auth 已启用自定义 SMTP，使用 `no-reply@auth.homebook-app.com` / `HomeBook`、`smtp.resend.com:465` 与 Resend 的域名受限发送权限凭据。凭据未记录到仓库或本运行手册。
 - 模板兼容性审计：注册页面没有输入邮箱 OTP，故 Confirm sign up 保留 `{{ .ConfirmationURL }}`；找回密码客户端以 `verifyOtp(type=recovery)` 消费 6 位 OTP，故 Reset password 包含 `{{ .Token }}`；Cloud Secure email change 开启，Change email address 通过 `{{ .ConfirmationURL }}` 分别向旧、新邮箱确认，客户端不再消费 `email_change` OTP。
 - `2026-09-01`：已保存“Confirm sign up”双语模板（`{{ .ConfirmationURL }}`）、“Reset password”双语模板（`{{ .Token }}`）及“Change email address”双语模板（`{{ .ConfirmationURL }}`）。模板与当前 App 流程匹配；端到端收件与链接有效性仍待阶段 8 真机/邮箱矩阵验证。
-- `2026-09-02`：用户在 iOS 真机已安装的 Beta 中确认“通过 Apple 登录”可完成系统授权并正常进入应用。此前模拟器显示的未知授权错误不作为 Cloud Auth 失败证据；Expo 仅支持在模拟器做有限测试，Apple 链路以真机结果为准。经 EAS 只读核对，当前最新 production iOS build 3 创建于 `2026-08-30`，早于本次 Cloud 切换，故该结果仅证明原生 Apple 授权正常，不能作为目标 Cloud provider 的验收；也不推定首次/重复登录、隐藏邮箱、绑定/解绑或注销后重新登录已通过。
+- `2026-09-02`：用户在 iOS 真机已安装的 Beta 中确认“通过 Apple 登录”可完成系统授权并正常进入应用。此前模拟器显示的未知授权错误不作为 Cloud Auth 失败证据；Expo 仅支持在模拟器做有限测试，Apple 链路以真机结果为准。经 EAS 只读核对，截至当日最新 production iOS build 3 创建于 `2026-08-30`，早于本次 Cloud 切换，故该结果当时仅证明原生 Apple 授权正常，不能作为目标 Cloud provider 的验收。
+- `2026-09-03`：用户完成新的 EAS production iOS 构建、TestFlight 更新和真机回归，并确认 Gmail、Outlook、iCloud 的认证邮件，Apple 首次/重复登录、隐藏邮箱、绑定/解绑，以及账号注销后同一身份重新登录均通过。Resend 的额度、退信查看和供应商故障人工应对已记录在运营侧；未向仓库写入任何凭据。
 
 #### Apple ID
 
-- [ ] 在 Apple Developer 与 Supabase Cloud 按官方 Apple Auth 指南配置 provider。
-- [ ] 保持现有 Bundle ID `com.raochen.homebook-app` 和 App 身份不变。
-- [ ] 将 Apple 私钥、Key ID、Team ID 等存入安全位置，不提交仓库。
-- [ ] 记录 Apple client secret/密钥的轮换或到期日期，并设置提前提醒。
-- [ ] 真机验证首次登录、重复登录、隐藏邮箱、绑定、解绑和账号注销后重新登录。
+- [x] 在 Apple Developer 与 Supabase Cloud 按官方 Apple Auth 指南配置 provider。
+- [x] 保持现有 Bundle ID `com.raochen.homebook-app` 和 App 身份不变。
+- [x] 原生 `signInWithIdToken` 未使用 Apple OAuth client secret；不存在需写入仓库或轮换的 Apple 私钥。
+- [x] 真机验证首次登录、重复登录、隐藏邮箱、绑定、解绑和账号注销后重新登录。
 
 #### 手机号与密码锁定
 
-- [ ] Cloud 关闭 phone provider；App 登录页和账号管理页不再暴露手机号入口。
-- [ ] 移除依赖“原手机号 OTP”的二次验证分支，设计并实现邮箱/原密码/Apple 可用的替代流程。
-- [ ] 路径 B：关闭短信前确认所有真实用户至少有邮箱或 Apple identity。
-- [ ] `password_verification_attempt` migration 可以暂时保留为未启用兼容代码，但 UI、PRD 和客服口径不得声称 5 次锁定已生效。
+- [x] Cloud 关闭 phone provider；App 登录页和账号管理页不再暴露手机号入口。
+- [x] 移除依赖“原手机号 OTP”的二次验证分支，使用邮箱密码和 Apple 作为可用登录方式。
+- [x] 无真实用户，手机号身份盘点不适用。
+- [x] `password_verification_attempt` migration 保留为未启用兼容代码，UI、PRD 和客服口径不声称 5 次锁定已生效。
 - [ ] 若未来必须恢复精确的“五次锁定 24 小时”，将升级 Team 作为前置条件，再启用 Password Verification Attempt Hook 并回归。
 
 #### 专项阻断：账号注销
 
 现有 [`20260703120024_delete_account_rpc.sql`](../supabase/migrations/20260703120024_delete_account_rpc.sql) 直接修改 Cloud 托管的 `auth.identities`、`auth.sessions` 和 `auth.users`。必须：
 
-- [ ] 在 Cloud 目标项目验证函数能否创建、授权和执行。
-- [ ] 验证身份凭据被释放、既有 session 失效、匿名化 `profiles` 墓碑及历史账务引用仍符合 PRD。
-- [ ] 若 Cloud 拒绝直接操作管理表，改为受信 Edge Function 调用 Auth Admin API，并用新 migration 收窄/替代原 RPC。
-- [ ] 同一邮箱与 Apple 身份在注销后重新登录应成为全新账号，且不得恢复旧家庭数据。
+- [x] 在 Cloud 目标项目验证函数能否创建、授权和执行。
+- [x] 验证身份凭据被释放、既有 session 失效、匿名化 `profiles` 墓碑及历史账务引用仍符合 PRD。
+- [x] Cloud 未拒绝直接操作管理表，现有受限 RPC 无须改为 Edge Function。
+- [x] 同一邮箱与 Apple 身份在注销后重新登录成为全新账号，且不恢复旧家庭数据。
 
 退出条件：邮箱、Apple、身份绑定/解绑、找回/更换和注销真机回归全部通过。
 
@@ -324,42 +281,61 @@ Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对
 
 目标：由可重放 migration 建立四个 bucket 和策略；路径 A 不复制源端测试对象或重写旧 URL。
 
-- [ ] 由 migration 创建/校准 bucket 与 policy，不在 Dashboard 留下无法复现的手工状态。
-- [ ] 验证三个 public bucket 可读但不可越权写；私有反馈图只能由授权用户/运营服务端读取。
-- [ ] 在目标项目新建测试账号和测试图片，完成 App 上传、覆盖、读取、删除、反馈图片提交与运营读取回归。
-- [ ] 验证路径 A 新产生的业务记录不保存阿里云 Storage host；此项目无须执行源端 URL 重写。
+- [x] 由 migration 创建/校准 bucket 与 policy，不在 Dashboard 留下无法复现的手工状态。
+- [x] 验证三个 public bucket 可读但不可越权写；私有反馈图只能由授权用户/运营服务端读取。
+- [x] 在目标项目新建测试账号和测试图片，完成 App 上传、覆盖、读取、反馈图片提交与运营读取回归；首版不提供客户端对象删除。
+- [x] 验证路径 A 新产生的业务记录不保存阿里云 Storage host；此项目无须执行源端 URL 重写。
 
-路径 B 才额外执行：对象分页复制、路径/元数据保留、对象数/字节/内容哈希核对、旧 URL 搜索与精确前缀重写。
+阶段 5 执行记录（完成，2026-09-03）：
 
-退出条件：四个 bucket 可由 migration 重建，目标测试对象的权限和完整读写链路均通过。
+- `2026-09-03`：目标 Cloud 四个 bucket 均存在，`storage.objects` 已启用 RLS；`homebook-user-avatars`、`homebook-family-covers` 和 `homebook-family-background` 为公开读取，`homebook-feedback-images` 为私有且没有客户端 `SELECT` policy。路径 A 当前仅有 2 个用户头像对象，无源端对象待迁移。
+- 已应用 `20260903132248_harden_storage_upload_constraints.sql`：四个 bucket 均限制为 `image/jpeg`，单文件最大 `2,097,152` 字节（2 MB），与客户端 JPEG 压缩和反馈图体积限制一致。
+- `2026-09-03`：经 Cloud Dashboard 手动核对后，四个 bucket 的允许类型统一扩展为 `image/jpeg`、`image/png`、`image/webp`、`image/heic`、`image/heif`、`image/gif`；已应用 `20260903215006_storage_allow_common_image_mime_types.sql` 将该配置版本化。预演仅列出该 migration；应用后本地与 Cloud migration 历史均为 50 条，四个 bucket 仍为 2 MB，三个媒体 bucket 仍公开、反馈图 bucket 仍私有；`supabase db lint --linked --level warning --fail-on warning` 无结果。
+- 当前客户端仅实现公开图片上传/覆盖和私有反馈图上传；`storage.objects` 没有客户端 `DELETE` policy，也没有对象生命周期清理任务。真机已完成公开图上传/覆盖/读取、越权拒绝、私有反馈图提交与运营读取，以及新 URL 不含阿里云 Storage host 的回归。产品决定：首版暂时接受反馈图片已上传但后续上传或提交失败时可能留下私有孤儿对象，以及账号注销或家庭解散后旧公开图片链接可能仍可访问；不得用 Dashboard 手工删除冒充 App 能力。反馈草稿取消时尚未上传对象，公开图片替换使用固定路径覆盖，不会额外产生旧对象。后续若需要回收，另行审批并实现受信清理机制。
+
+退出条件：四个 bucket 可由 migration 重建，目标测试对象的权限和已实现的上传、覆盖、读取链路均通过；首版对象保留策略已获产品确认。
 
 ### 阶段 6：邮件、短信与计算任务迁移
 
 目标：明确哪些阿里云服务立即退出，哪些分阶段退出。
 
-| 现有服务                 | 首版处理                               | 目标状态                                                |
-| ------------------------ | -------------------------------------- | ------------------------------------------------------- |
-| `services/email-hook-fc` | 不再进入生产 Auth 主链路               | Cloud Auth 自定义 SMTP；确认稳定后停用 FC               |
-| `services/sms-hook-fc`   | 首版不迁移、不启用                     | 保留代码归档，移除触发器与 secret；未来国际短信另行立项 |
-| `services/push-fc`       | 可短期继续读取 Cloud，降低一次切换变量 | 行为等价迁到 Edge Function + Cron 后停用 FC             |
+| 现有服务                 | 首版处理                  | 目标状态                                                |
+| ------------------------ | ------------------------- | ------------------------------------------------------- |
+| `services/email-hook-fc` | 不再进入生产 Auth 主链路  | Cloud Auth 自定义 SMTP；确认稳定后停用 FC               |
+| `services/sms-hook-fc`   | 首版不迁移、不启用        | 保留代码归档，移除触发器与 secret；未来国际短信另行立项 |
+| `services/push-fc`       | 直接迁移为 Cloud 单发送者 | Edge Function + Cron 替代后停用 FC                      |
 
-推送迁移推荐采用两步法：
+路径 A 没有真实用户或待迁数据，推送直接迁为 `supabase/functions/push-dispatch` + Supabase Cron。切换时必须先停用阿里云 FC 定时触发器，再启用 Cloud Cron；不得让两个投递者同时消费同一批待推通知。
 
-1. **Cloud 核心切换期**：若现有 FC 已稳定，可仅在路径 A 验证通过后替换其 Supabase URL 与服务端 key，并完整回归；这只是过渡，不把 key 放客户端。
-2. **Cloud 稳定后**：将 Node/FC 逻辑按 Edge Runtime 能力重写到 `supabase/functions/`，由 Supabase Cron 调用，再做并行影子验证和切换。
+阶段 6 执行记录（进行中，2026-09-04）：
 
-若保留 FC 过渡，先把运行时升级到 Node 22，并验证当前 Supabase JS/依赖锁文件；Node 20 已不再是新版本 Supabase JS 的支持目标。
+- 已创建并部署 `push-dispatch` Edge Function 与 `20260904133622_add_push_dispatch_claims_and_cron.sql`。函数使用数据库原子领取（`FOR UPDATE SKIP LOCKED`）、10 分钟超时回收、claim token 结算与指数退避，复用既有通知偏好、Expo ticket、失效 token 清理和深链语义；日志只输出固定的失败事件名和计数，不输出 token、JWT、邮件或财务数据。
+- 用户确认 `PUSH_DISPATCH_CRON_SECRET`、`homebook_push_dispatch_cron_secret` 与 `homebook_project_url` 已按要求配置，且旧阿里云推送 FC 已关闭。2026-09-04 已将 0051 应用到 Cloud：启用 `pg_cron`、`pg_net`；随后按产品决定应用 0052，将 `homebook-push-dispatch` 设为每 2 分钟一次。发现 Cloud 实际计划曾被带外改回 10 分钟后，已追加并应用 0054 `20260904150214_reassert_push_dispatch_two_minute_schedule.sql`；只读核验 Cloud migration 历史为 54 条，同名作业仅有一个、处于启用状态，计划为 `*/2 * * * *`。
+- 首次 Cron 执行发现 `push_dispatch_preferences_failed`：`service_role` 对历史 `notification_preferences` 和 `device_tokens` 表的必要权限均为 `false`。已通过 0053 `20260904144805_grant_push_dispatch_service_role_access.sql` 仅授予服务端读取通知偏好、读取和删除失效设备 Token 的权限；不增加 `anon`/`authenticated` 权限，也不改变 RLS policy。复查三项服务端权限均为 `true`。
+- 真机首轮验收已通过：用户在连接 Cloud 的 Beta 版本上完成受控家庭操作，接收设备在后台正常收到系统推送。
+- 通知偏好真机验收已通过：接收设备关闭“家庭动态”后，完成户主转让；对应消息仍进入 App 通知中心，但未触发系统推送，符合“仅停止系统推送、不隐藏站内通知”的产品规则。
+- 用户确认后续多次家庭操作的推送均正常，未发现漏推或重复推送。2026-09-05 10:14（Asia/Shanghai）只读核验显示：2 分钟 Cron 自 2026-09-04 23:06 起连续成功 335 次；过去 24 小时内创建的 4 条通知均已终态处理，没有待重试或遗留 claim。该 Cloud Cron 实际观察窗口当时约 11 小时，仍须满 24 小时后再结项。
+- 调用预算：每 2 分钟一次，即约 720 次/日、21,600 次/30 日；相对 Free 计划每组织每月 500,000 次 Edge Function 调用约为 4.32%。当前实现每次最多处理 100 条推送，理论峰值吞吐约 72,000 条/日；1,000 条待推通知在没有新增积压时约 20 分钟可清空，未构成 Free 额度或 Edge Runtime 压力风险。
+- 本地验证：Deno 类型检查通过；`supabase/functions/push-dispatch/index.test.ts` 的 4 个测试通过（退避上限、深链白名单、转让文案与 Cron 密钥比较）。`supabase db push --dry-run` 两次均在连接 Cloud 后未返回完成状态，故未作为通过证据；正式 `supabase db push --linked` 已成功应用 0051 与 0052。
+- 部署 0052 前的 Cloud `db advisors`（warn 阈值）未发现该频率变更新增的问题；其报告 `pg_net` 位于 `public`、既有业务 RPC 的 `SECURITY DEFINER` 可执行性、泄露密码保护未开启，以及 `profiles` 的多条 permissive policy。以上均未在本次频率变更中修改，需独立安全审计后以新 migration 或 Dashboard 配置处理。
+
+部署前由项目管理员完成的配置（不要向仓库、聊天或日志提交任何值）：
+
+1. 在 Supabase Dashboard 的 **Edge Functions → Secrets** 新建 `PUSH_DISPATCH_CRON_SECRET`，填入一个新生成的随机值。
+2. 在 **Database → Vault** 新建 `homebook_push_dispatch_cron_secret`，填入与上一步完全相同的值；再新建 `homebook_project_url`，填入目标项目 URL（`https://ygbfvzmomeobkgjzmzla.supabase.co`）。
+3. 若 Expo Push 已开启 Enhanced Security，在同一 **Edge Functions → Secrets** 仅补入既有的 `EXPO_ACCESS_TOKEN`；未开启则不要创建空值。
+4. 在阿里云 Function Compute 控制台关闭 `homebook_notification_push` 定时触发器；Cloud Cron 启用后保持关闭，观察期结束前不删除旧函数或其代码。
 
 Edge Function + Cron 验收：
 
 - [ ] 函数只读取待投递通知，遵守 `notification_preferences`。
 - [ ] 具有幂等键/原子领取机制，两个 worker 并发也不会重复推送。
-- [ ] Expo 接收成功后才更新 `pushed_at`；临时错误继续指数退避。
+- [ ] Expo 接收成功、或因关闭偏好/缺少 Token 而确定不投递时才终态处理；临时错误继续指数退避。
 - [ ] `DeviceNotRegistered` 等失效 token 会清理，单个坏 token 不阻塞批次。
-- [ ] Cron 频率以 PRD 和调用预算为准；记录每日理论调用量和 Free 额度占比。
-- [ ] 在 24 小时影子期比较 FC 与新函数的待处理数、成功数、重试数，但影子函数不得真正重复发送。
-- [ ] Cloud secrets 中保存 Expo/服务端凭据；日志不得输出 token、JWT、邮件或财务数据。
-- [ ] 切换后删除旧 FC 定时触发器，再观察至少 24 小时调用量。
+- [x] Cron 频率以 PRD 和调用预算为准；记录每日理论调用量和 Free 额度占比。
+- [ ] 在受控测试通知上完成 Edge Function 的发送、重试、失效 token 清理和并发领取验证；不得让旧 FC 与新函数同时消费测试通知。
+- [x] Cloud secrets 中保存 Expo/服务端凭据；日志不得输出 token、JWT、邮件或财务数据。
+- [ ] 旧 FC 定时触发器保持关闭，观察至少 24 小时调用量；观察结束且负责人批准后再删除旧触发器。
 
 退出条件：认证邮件不依赖邮件 FC，短信不在首版链路，推送仅有一个有效生产投递者。
 
@@ -431,24 +407,10 @@ EXPO_PUBLIC_SUPABASE_KEY=<production-publishable-key>
 
 ### 阶段 9：生产切换
 
-#### 路径 A：无真实生产数据
-
 1. 在同一 Cloud 目标项目再次从空 schema 复核最终 migration，或在确认已有验证通过后将其作为生产项目；应用已验证的 Auth/SMTP/Apple/Storage/Function 配置。
 2. 用该目标项目重新跑完整冒烟测试。
 3. 设置 EAS production Cloud 变量并构建最终 TestFlight/App Store 包。
-4. 发布海外 storefront；旧后端只保留作短期技术回退，不再接收新用户。路径 A 没有待合并的源端生产写入。
-
-#### 路径 B：有真实生产数据
-
-1. 提前公告维护窗口，停止新注册和业务写入。
-2. 生成源端最终加密备份、Storage manifest 和校验值。
-3. 按已演练流程恢复 Auth 与业务数据；复制最终新增/变更对象。
-4. 执行行数、主键集合、关键金额汇总、对象数/字节/哈希核对。
-5. 重写并复核旧 Storage URL。
-6. 运行 Auth、RLS、家庭、账务、Storage、推送和注销冒烟测试。
-7. 确认 only-phone 用户已完成登录方式过渡。
-8. Go/No-Go 通过后启用 Cloud 写入，并保持旧库只读。
-9. 发布已验证的新二进制；所有用户重新登录。
+4. 发布海外 storefront；旧后端只保留作短期技术回退，不再接收新用户或新写入。
 
 切换记录：
 
@@ -501,12 +463,12 @@ EXPO_PUBLIC_SUPABASE_KEY=<production-publishable-key>
 
 ### 阶段 11：旧资源下线
 
-仅在观察期结束且负责人批准后执行；路径 B 还须完成最终备份验证：
+仅在观察期结束且负责人批准后执行：
 
 - [ ] 停止并删除阿里云短信、邮件、推送 FC 的触发器；确认无残余调用。
 - [ ] 撤销旧 service-role、SMTP、短信、Apple/Hook 等凭据。
-- [ ] 路径 A：确认无真实用户或需保留数据后，将旧 Supabase 设为只读并按保留政策下线实例；路径 B：生成最终归档后再下线。
-- [ ] 路径 A：保留 migration 校验值、迁移日志和恢复说明；路径 B：额外保留加密备份、Storage manifest 与校验值。
+- [ ] 确认无真实用户或需保留数据后，将旧 Supabase 设为只读并按保留政策下线实例。
+- [ ] 保留 migration 校验值、迁移日志和恢复说明。
 - [ ] 清理 EAS、CI、密码管理器中的旧 URL/key，但保留审计记录。
 - [ ] 更新 `docs/SUPABASE_PROVISIONING.md`：标记为阿里云历史恢复文档或替换为 Cloud provisioning 文档。
 - [ ] 完成 PRD、TECH、DATAMODEL、测试、发布及隐私文档的最终一致性检查。
@@ -515,15 +477,15 @@ EXPO_PUBLIC_SUPABASE_KEY=<production-publishable-key>
 
 为了降低一次性变更风险，建议按以下批次实施：
 
-| 批次 | 内容                                                                        | 是否改变生产 |
-| ---- | --------------------------------------------------------------------------- | ------------ |
-| 1    | 路径 A：本地 migration 基线与数据可丢弃确认；路径 B：源端审计、备份恢复演练 | 否           |
-| 2    | Cloud 目标项目、migration/RLS/Storage/Auth 兼容性                           | 否           |
-| 3    | PRD/TECH 更新、客户端移除手机号、邮箱 + Apple 完整化                        | 否           |
-| 4    | 推送 FC 临时对接 Cloud，或 Edge + Cron 等价实现                             | 否           |
-| 5    | Cloud production、TestFlight 全回归                                         | 仅测试       |
-| 6    | 最终数据切换与海外 App Store 发布                                           | 是           |
-| 7    | 14 天观察、30 天后评估旧资源下线                                            | 是           |
+| 批次 | 内容                                                 | 是否改变生产 |
+| ---- | ---------------------------------------------------- | ------------ |
+| 1    | 本地 migration 基线与测试数据可丢弃确认              | 否           |
+| 2    | Cloud 目标项目、migration/RLS/Storage/Auth 兼容性    | 否           |
+| 3    | PRD/TECH 更新、客户端移除手机号、邮箱 + Apple 完整化 | 否           |
+| 4    | 推送 Edge Function + Cron 等价实现与单发送者切换     | 否           |
+| 5    | Cloud production、TestFlight 全回归                  | 仅测试       |
+| 6    | 最终数据切换与海外 App Store 发布                    | 是           |
+| 7    | 14 天观察、30 天后评估旧资源下线                     | 是           |
 
 每个批次单独提交、单独验收；不要把数据库兼容修复、登录产品改造、推送重写和生产切换混成一个不可回滚的大提交。
 
@@ -538,7 +500,7 @@ EXPO_PUBLIC_SUPABASE_KEY=<production-publishable-key>
 - 执行人：
 - 源 Git commit：
 - 目标 Cloud project ref：
-- 使用路径：A / B
+- 使用路径：A（唯一）
 - 本阶段改动：
 - 执行命令/控制台设置记录：
 - 验证结果：

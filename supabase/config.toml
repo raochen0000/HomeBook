@@ -16,3 +16,8 @@ major_version = 15
 [auth.hook.password_verification_attempt]
 enabled = true
 uri = "pg-functions://postgres/public/password_verification_attempt"
+
+[functions.push-dispatch]
+verify_jwt = false
+import_map = "./functions/push-dispatch/deno.json"
+entrypoint = "./functions/push-dispatch/index.ts"

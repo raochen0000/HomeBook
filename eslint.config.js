@@ -61,6 +61,8 @@ module.exports = defineConfig([
       'metro.config.js',
       // 阿里云 FC 短信 Hook 是独立的 Node(CommonJS)服务，不归 Expo/RN lint 管
       'services/**',
+      // Supabase Edge Functions 使用 Deno import map，不适用 Expo/RN 的模块解析规则
+      'supabase/functions/**',
     ],
   },
 ]);
