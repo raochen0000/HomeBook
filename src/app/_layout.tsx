@@ -12,6 +12,7 @@ import { usePushRegistration } from '@/features/notifications/use-push-registrat
 import { useRecurringCatchup } from '@/features/record/use-recurring-catchup';
 import { SearchProvider } from '@/features/search/search-provider';
 import { ThemePreferenceProvider } from '@/features/settings/theme-preference';
+import { FamilyLiveSyncHost } from '@/features/sync/use-family-live-sync';
 import { localePathRef, LocalePreferenceProvider, pendingLocaleRestoreRef, useLocalePreference } from '@/i18n';
 import { useSession } from '@/lib/auth';
 import { devAutoSignIn } from '@/lib/dev-auth';
@@ -123,7 +124,8 @@ function AppShell() {
         </Stack>
         <RestoreLocaleRoute />
       </SearchProvider>
-      {/* 已登录：关键通知兜底（被移除/解散/转让，流程 13）。 */}
+      {/* 已登录：家庭协作同步（Realtime 门铃 + 回前台重拉）与关键通知兜底。 */}
+      {session ? <FamilyLiveSyncHost /> : null}
       {session ? <NotificationGate /> : null}
       {/* 已登录时的全局轻提示；未登录由 login 路由自己挂 ToastHost。 */}
       {session ? <ToastHost /> : null}

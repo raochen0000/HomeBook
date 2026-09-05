@@ -267,6 +267,32 @@ export type Database = {
           },
         ];
       };
+      family_data_revisions: {
+        Row: {
+          family_id: string;
+          revision: number;
+          updated_at: string;
+        };
+        Insert: {
+          family_id: string;
+          revision?: number;
+          updated_at?: string;
+        };
+        Update: {
+          family_id?: string;
+          revision?: number;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'family_data_revisions_family_id_fkey';
+            columns: ['family_id'];
+            isOneToOne: true;
+            referencedRelation: 'families';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       family_hidden_categories: {
         Row: {
           category_id: string;

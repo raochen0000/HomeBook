@@ -37,7 +37,6 @@ export function useMyProfile() {
 }
 
 export type FamilyMember = Pick<Profile, 'id' | 'nickname' | 'avatar_url'>;
-const FAMILY_MEMBERS_STALE_TIME = 5 * 60 * 1000;
 
 /** 同家庭成员（含自己）的昵称/头像；RLS（shares_family）只返回同家庭成员。 */
 export async function fetchFamilyMembers(): Promise<FamilyMember[]> {
@@ -50,7 +49,6 @@ export function useFamilyMembers() {
   return useQuery({
     queryKey: queryKeys.familyMembers,
     queryFn: fetchFamilyMembers,
-    staleTime: FAMILY_MEMBERS_STALE_TIME,
   });
 }
 

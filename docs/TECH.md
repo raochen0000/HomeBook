@@ -1,7 +1,7 @@
 # 家账 · 技术选型与开发方案（TECH）
 
-> 文档版本：v0.2.4（**海外首版后端迁移**：目标切换为 Supabase Cloud Free，认证为邮箱密码 + Apple，手机号 OTP 暂停；推送 FC 分阶段迁往 Edge Functions + Cron）
-> 最后更新：2026-08-31
+> 文档版本：v0.2.5（补当前在线协作同步：`family_data_revisions` Realtime 门铃 + 回前台重拉）
+> 最后更新：2026-09-05
 > 关联文档：PRD.md（§23；流程 3/4、§3.5）、DESIGN.md（§5.6）、IA.md、MVP.md、DATAMODEL.md（§3.2、§5.1）、AGENTS.md（AI 编码业务铁律，根目录）
 > 负责人：产品组 / 研发
 > 用途：作为「家账」客户端与后端技术实现的单一事实来源（Single Source of Truth），记录技术选型、后端架构、开发环境、调试流程、里程碑排期与上架盈利路径。后续可基于本文档持续补充。
@@ -148,7 +148,9 @@ git --version
 
 ## 6. 离线优先与同步架构（核心难点）
 
-对应 PRD §2.3、§4.6、§12.5 与 DATAMODEL §6。
+对应 PRD §2.3、§4.6、§12.5 与 DATAMODEL §5.10 / §6。
+
+**当前已落地（在线协作）**：MVP 仍是纯在线（React Query + Supabase）。家庭共享表写入后由触发器递增 `family_data_revisions.revision`；客户端只订这一行和本人 `notifications`，再失效家庭相关 query。App 从后台回前台、Realtime 重连也会重拉。这覆盖「App 一直开着、别人记账/加入」；**不**替代离线队列。WatermelonDB 仍按下列远期方案，不在本阶段引入。
 
 1. **本地为唯一数据源**：所有读取走本地 DB（WatermelonDB），UI 先读本地、立即响应。
 2. **流水创建即绑定 `family_id`**：本地写入时即写死当前家庭 `family_id`，不可变（防串账核心）。
@@ -158,7 +160,7 @@ git --version
    - **删除** → 以软删除字段（`is_deleted`）表达，使其能被 LWW 正常排序，不真删行。
    - **储蓄目标** → `version` 乐观锁（DATAMODEL §4.1），冲突则刷新重试。
 5. **同步范围边界**：离线 LWW 队列**只覆盖普通流水（增/改/删）与分类**；以下操作**必须在线**，不进队列：户主转让/移除成员/解散/加入家庭（带不变式）、储蓄存入/取出（带「取出 ≤ 已存」约束 + 乐观锁）。
-6. **同步引擎选型**：用 **WatermelonDB + 自建同步**（两个 Postgres 函数做 pull/push，经 Supabase RPC），配合 Realtime 触发即时同步。
+6. **同步引擎选型**：远期用 **WatermelonDB + 自建同步**（两个 Postgres 函数做 pull/push，经 Supabase RPC），Realtime 门铃可复用现有 `family_data_revisions`。
    - 当前不引入 PowerSync；先复用现有 RPC 与同步规划，避免在后端迁移时同时替换同步引擎。
 7. **储蓄累计值不可 LWW**：`SAVINGS_GOAL.saved_amount` 是派生值（存入合计 − 取出合计），同步**储蓄事件**（`SAVINGS_ENTRY`）后由服务端重算，禁止把累计值当字段直接 LWW（否则并发存入丢钱）。
 8. **同步态 UI**：离线用 `state/info` 轻提示「已保存，稍后同步」（DESIGN §5.8）。
@@ -192,7 +194,7 @@ git --version
 | 行级安全    | RLS + grants                                   | Data API 暴露与 RLS 分别验收，不能只验证其中一个                     |
 | 服务端逻辑  | Postgres RPC + Edge Functions                  | 事务不变式留在 RPC；外部网络调用放 Edge Function                     |
 | 定时任务    | Supabase Cron → Edge Function                  | 推送投递从 FC 分阶段迁移                                             |
-| 实时        | Supabase Realtime                              | 只为实际订阅表启用 publication                                       |
+| 实时        | Supabase Realtime                              | 已发布 `family_data_revisions` + `notifications`；客户端作缓存门铃 |
 | 对象存储    | Supabase Storage                               | 三个公开媒体桶 + 一个私有反馈桶                                      |
 | 认证邮件    | 第三方 SMTP                                    | 发信费用、额度与投递由 SMTP 服务商承担                               |
 | 短信验证码  | 首版不提供                                     | 阿里云 SMS Hook/FC 不进入生产链路                                    |

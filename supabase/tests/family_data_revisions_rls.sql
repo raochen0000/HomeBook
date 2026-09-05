@@ -1,0 +1,10 @@
+-- 家庭门铃表授权矩阵（最小可行）：成员可读，外人不可读，客户端不能写。
+-- 在已登录的 SQL editor / db query 中按角色核对；不是自动 pgTAP。
+--
+-- 1) 本家庭成员：
+--    select * from public.family_data_revisions;
+--    期望：只返回自己当前家庭一行。
+-- 2) 非成员 / 已退出：
+--    期望：0 行（RLS family_data_revisions_select_member）。
+-- 3) 客户端写：
+--    insert/update/delete 期望失败（无写 policy，且 touch 函数未授予 authenticated）。

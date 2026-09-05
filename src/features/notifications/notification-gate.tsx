@@ -1,6 +1,6 @@
 /**
  * 关键通知兜底（流程 13，P0 子集）：被移除/家庭解散 → 全屏提示；户主转让 → 顶部条幅。
- * 作为根布局的兄弟覆盖层，仅在已登录时渲染；未接 Realtime，靠前台聚焦重新拉取。
+ * 作为根布局的兄弟覆盖层，仅在已登录时渲染。通知行走 Realtime；回前台也会重拉。
  */
 import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, Text, View } from 'react-native';

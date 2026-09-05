@@ -1,7 +1,7 @@
 # 家账 · 数据模型文档（DATAMODEL）
 
-> 文档版本：v0.1.2（海外首版认证模型对齐：USER 拆分为 Supabase Auth 的邮箱/Apple identity 与 `public.profiles`，移除“手机号登录主键”旧蓝图）
-> 最后更新：2026-08-31
+> 文档版本：v0.1.3（补家庭在线协作门铃表 `family_data_revisions`）
+> 最后更新：2026-09-05
 > 关联文档：PRD.md（§18 数据模型；流程 3/4、§3.5）
 > 负责人：产品组 / 后端
 
@@ -54,6 +54,7 @@ erDiagram
     FAMILY ||--o{ SUCCESSION_REQUEST : "继任申请"
     USER ||--o{ NOTIFICATION : "接收"
     FAMILY ||--o{ MONTHLY_SUMMARY : "月度总结"
+    FAMILY ||--|| FAMILY_DATA_REVISION : "协作版本号"
 ```
 
 ---
@@ -381,6 +382,22 @@ erDiagram
 | `created_at`     | timestamp |                                             |                                             |
 
 **RLS**：`RECURRING_TRANSACTION` 家庭成员可 select/insert/update/delete（`private.is_family_member(family_id)`，insert 另校验 `created_by = auth.uid()`）；`RECURRING_RUN` 经所属规则的家庭做只读（写入仅经 RPC，`SECURITY DEFINER` 绕过 RLS）。**RPC `generate_due_recurring_transactions()`**：为调用者当前家庭遍历 `enabled` 规则，plpgsql 计算到期月份，「先占位 run（`on conflict do nothing`）→ 抢到者建流水并回填 `transaction_id`」，返回本次新生成条数。
+
+### 5.10 FAMILY_DATA_REVISION（家庭协作门铃 · 在线同步）
+
+> 当前客户端是 **Supabase + React Query 纯在线**。此表不是离线同步游标，只给仍开着的 App 一个「这户账本变了」的信号。WatermelonDB 仍按 TECH §6 留到远期。
+
+| 字段         | 类型        | 约束                                   | 说明                                      |
+| ------------ | ----------- | -------------------------------------- | ----------------------------------------- |
+| `family_id`  | UUID        | PK, FK→FAMILY, on delete cascade       | 一户一行                                  |
+| `revision`   | bigint      | not null, ≥ 1                          | 共享表写入后 +1；客户端不读数值，只听变更 |
+| `updated_at` | timestamptz | not null                               | 最近一次敲门铃时间                        |
+
+**写入**：仅 `private.touch_family_revision()`（`SECURITY DEFINER`，不授予客户端）。由 `families` / `memberships` / `transactions` / 家庭分类 / 预算 / 储蓄 / 定时规则 / 成员资料等写触发器调用。系统分类（`categories.family_id is null`）不敲门铃。
+
+**读取**：家庭成员 `SELECT`（`private.is_family_member`）。无 INSERT/UPDATE/DELETE policy。
+
+**Realtime**：`supabase_realtime` 发布本表与 `notifications`。客户端订本户 `family_id` 与本人 `notifications`；事件到达后失效家庭相关 React Query。被移出后订不到本表，改靠本人通知 + 回前台重拉。
 
 ---
 
