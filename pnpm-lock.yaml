@@ -104,6 +104,9 @@ importers:
       i18next:
         specifier: ^26.4.0
         version: 26.4.0(typescript@6.0.3)
+      qrcode:
+        specifier: 1.5.4
+        version: 1.5.4
       react:
         specifier: 19.2.3
         version: 19.2.3

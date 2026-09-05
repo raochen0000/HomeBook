@@ -8,8 +8,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { SymbolView } from 'expo-symbols';
 
 import { createInvitation, type Invitation, useMyFamily, useMyProfile } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
@@ -17,7 +17,9 @@ import { SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 import { alertOk, t, useLocalePreference } from '@/i18n';
 
-/** react-native-qrcode-svg 的 ref 暴露 toDataURL（回调返回 base64 PNG，无 data: 前缀）。 */
+import { InvitationQrCode } from './invitation-qr-code';
+
+/** SVG ref 暴露 toDataURL（回调返回 base64 PNG，无 data: 前缀）。 */
 type QRRef = { toDataURL: (cb: (data: string) => void) => void };
 
 export function InviteSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -102,15 +104,16 @@ function InviteBody() {
     setSaving(true);
     qrRef.current.toDataURL(async (data) => {
       try {
-        const perm = await MediaLibrary.requestPermissionsAsync();
+        // 仅保存新生成的图片，不读取用户现有相册内容。
+        const perm = await MediaLibrary.requestPermissionsAsync(true);
         if (!perm.granted) {
           Alert.alert(t('invite.albumPermission'), t('invite.albumPermissionBody'), alertOk());
           return;
         }
         const base64 = data.replace(/\s/g, '');
-        const uri = `${FileSystem.cacheDirectory}invite-${inv.code}.png`;
+        const uri = `${FileSystem.cacheDirectory}HomeBook-邀请二维码-${inv.code}.png`;
         await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
-        await MediaLibrary.saveToLibraryAsync(uri);
+        await MediaLibrary.Asset.create(uri);
         Alert.alert(t('invite.saved'), t('invite.qrSaved'), alertOk());
       } catch (e) {
         Alert.alert(t('account.saveFailed'), (e as Error).message ?? String(e), alertOk());
@@ -144,19 +147,23 @@ function InviteBody() {
               <Text style={[styles.hint, { color: palette.textSecondary }]}>{t('invite.scanHint')}</Text>
 
               <View style={[styles.qrCard, { backgroundColor: '#FFFFFF' }]}>
-                <QRCode
+                <InvitationQrCode
                   value={inv.code}
-                  size={208}
-                  color="#1C1C1E"
-                  backgroundColor="#FFFFFF"
+                  size={176}
+                  logo={require('@/assets/images/app-symbol.png')}
+                  logoSize={30}
+                  logoMargin={4}
+                  logoBorderRadius={8}
                   getRef={(c) => {
-                    qrRef.current = c as unknown as QRRef;
+                    qrRef.current = c;
                   }}
                 />
               </View>
 
               {/* 3+3 分段文字码 */}
-              <Text style={[styles.code, { color: palette.textPrimary }]}>{splitCode(inv.code)}</Text>
+              <Text selectable style={[styles.code, { color: palette.textPrimary }]}>
+                {splitCode(inv.code)}
+              </Text>
 
               {/* 有效期倒计时 */}
               <Text style={[styles.expiry, { color: expired ? palette.danger : palette.textTertiary }]}>
@@ -177,18 +184,31 @@ function InviteBody() {
               {/* 存图 + 刷新 */}
               <View style={styles.secondaryRow}>
                 <Pressable
+                  accessibilityLabel={t('invite.saveQr')}
+                  accessibilityRole="button"
                   onPress={onSave}
                   disabled={expired || saving}
-                  style={[styles.ghostBtn, { borderColor: palette.separator, opacity: expired ? 0.35 : 1 }]}
+                  style={({ pressed }) => [styles.secondaryAction, { opacity: expired ? 0.35 : pressed ? 0.7 : 1 }]}
                 >
-                  {saving ? (
-                    <ActivityIndicator />
-                  ) : (
-                    <Text style={{ color: palette.textPrimary, fontSize: 15 }}>{t('invite.saveQr')}</Text>
-                  )}
+                  <View style={[styles.secondaryIcon, { backgroundColor: palette.cardPill }]}>
+                    {saving ? (
+                      <ActivityIndicator />
+                    ) : (
+                      <SymbolView name="square.and.arrow.down" tintColor={palette.textPrimary} size={21} />
+                    )}
+                  </View>
+                  <Text style={[styles.secondaryLabel, { color: palette.textPrimary }]}>{t('invite.saveQr')}</Text>
                 </Pressable>
-                <Pressable onPress={refresh} style={[styles.ghostBtn, { borderColor: palette.separator }]}>
-                  <Text style={{ color: palette.textPrimary, fontSize: 15 }}>{t('invite.refresh')}</Text>
+                <Pressable
+                  accessibilityLabel={t('invite.refresh')}
+                  accessibilityRole="button"
+                  onPress={refresh}
+                  style={({ pressed }) => [styles.secondaryAction, { opacity: pressed ? 0.7 : 1 }]}
+                >
+                  <View style={[styles.secondaryIcon, { backgroundColor: palette.cardPill }]}>
+                    <SymbolView name="arrow.clockwise" tintColor={palette.textPrimary} size={21} />
+                  </View>
+                  <Text style={[styles.secondaryLabel, { color: palette.textPrimary }]}>{t('invite.refresh')}</Text>
                 </Pressable>
               </View>
             </>
@@ -212,12 +232,18 @@ const styles = StyleSheet.create({
   },
   title: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center' },
   action: { fontSize: 16 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[3], paddingHorizontal: Space[6] },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Space[3],
+    paddingHorizontal: Space[6],
+  },
   familyName: { fontSize: 22, fontWeight: '700', textAlign: 'center' },
   owner: { fontSize: 14, marginTop: -Space[1] },
   hint: { fontSize: 14, textAlign: 'center', marginTop: Space[2] },
-  qrCard: { padding: Space[4], borderRadius: Radius.lg },
-  code: { fontSize: 32, fontWeight: '700', letterSpacing: 6, fontVariant: ['tabular-nums'] },
+  qrCard: { padding: Space[2], borderRadius: Radius.lg, overflow: 'hidden' },
+  code: { fontSize: 30, fontWeight: '700', letterSpacing: 7, fontVariant: ['tabular-nums'] },
   expiry: { fontSize: 13, fontVariant: ['tabular-nums'] },
   error: { fontSize: 14, textAlign: 'center' },
   copyBtn: {
@@ -229,13 +255,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   copyText: { fontSize: 16, fontWeight: '600' },
-  secondaryRow: { flexDirection: 'row', gap: Space[3], alignSelf: 'stretch' },
-  ghostBtn: {
-    flex: 1,
-    height: 46,
-    borderRadius: Radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
+  secondaryRow: { flexDirection: 'row', justifyContent: 'center', gap: Space[10], alignSelf: 'stretch' },
+  secondaryAction: {
     alignItems: 'center',
     justifyContent: 'center',
+    gap: Space[2],
   },
+  secondaryIcon: { width: 46, height: 46, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
+  secondaryLabel: { fontSize: 14, fontWeight: '500' },
 });
