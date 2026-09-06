@@ -4,7 +4,7 @@
  * 用户主表 = `auth.users`（Supabase Auth）+ `public.profiles`（业务字段，由 handle_new_user 触发器自动建行）。
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Session } from '@supabase/supabase-js';
+import type { Session, User } from '@supabase/supabase-js';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
@@ -26,6 +26,11 @@ function isAuthStorageKey(key: string): boolean {
  * 请求一旦已发出仍会自行完成；超时后优先清本机会话，下一次登录注册也会重新归属该令牌。
  */
 const PUSH_TOKEN_UNREGISTER_GRACE_MS = 1_200;
+/**
+ * 账号注销是不可逆的服务端操作：给正常网络足够响应时间，但不能让确认弹层无限停在加载态。
+ * 超时会中止客户端请求；用户可在弹层复位后稍后重试。
+ */
+const DELETE_ACCOUNT_TIMEOUT_MS = 12_000;
 
 async function unregisterCurrentDeviceWithinGracePeriod(): Promise<void> {
   await new Promise<void>((resolve) => {
@@ -228,6 +233,58 @@ export async function isAppleAuthAvailable(): Promise<boolean> {
   return AppleAuthentication.isAvailableAsync();
 }
 
+/** 当前账号是否已经拥有可用的邮箱密码登录方式。 */
+export function hasEmailLogin(user: Pick<User, 'identities'> | null | undefined): boolean {
+  return user?.identities?.some((identity) => identity.provider === 'email') ?? false;
+}
+
+/**
+ * 用当前邮箱密码建立新会话，作为敏感操作的近期重新认证。
+ * 不接受调用方声明“已验证”；密码由 Cloud Auth 校验，且必须回到原账号。
+ */
+export async function reauthenticateWithPassword({
+  expectedUserId,
+  email,
+  password,
+}: {
+  expectedUserId: string;
+  email: string;
+  password: string;
+}): Promise<void> {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  if (data.user?.id !== expectedUserId) {
+    await clearLocalSession();
+    throw new Error(t('auth.reauthAccountMismatch'));
+  }
+}
+
+/**
+ * 重新完成原生 Apple 授权并换取新 Cloud 会话，供仅 Apple 登录的账号执行敏感操作。
+ * 若用户在系统弹窗选了另一 Apple ID，清掉本机会话，避免错误账号继续留在受保护页面。
+ */
+export async function reauthenticateWithApple(expectedUserId: string): Promise<boolean> {
+  let credential: AppleAuthentication.AppleAuthenticationCredential;
+  try {
+    credential = await AppleAuthentication.signInAsync();
+  } catch (e) {
+    if ((e as { code?: string }).code === 'ERR_REQUEST_CANCELED') return false;
+    throw e;
+  }
+  if (!credential.identityToken) throw new Error(t('auth.appleNoToken'));
+
+  const { data, error } = await supabase.auth.signInWithIdToken({
+    provider: 'apple',
+    token: credential.identityToken,
+  });
+  if (error) throw error;
+  if (data.user?.id !== expectedUserId) {
+    await clearLocalSession();
+    throw new Error(t('auth.reauthAccountMismatch'));
+  }
+  return true;
+}
+
 /**
  * Apple ID 登录：取 Apple 身份令牌 → Supabase `signInWithIdToken`（需后端已配置 Apple provider）。
  * 用户取消（ERR_REQUEST_CANCELED）静默返回，不当作错误。
@@ -289,14 +346,20 @@ export async function bindApple(): Promise<boolean> {
   return true;
 }
 
+/** 获取当前账号的登录身份；账号关联变更后不能只读取本地 session 缓存。 */
+export async function getCurrentUserIdentities() {
+  const { data, error } = await supabase.auth.getUserIdentities();
+  if (error) throw error;
+  return data?.identities ?? [];
+}
+
 /**
  * 解绑 Apple：读身份列表找到 apple identity → unlinkIdentity。
  * GoTrue 会拦截「唯一登录方式」的解绑（single_identity_not_deletable），错误原样抛出供 UI 展示。
  */
 export async function unbindApple(): Promise<void> {
-  const { data, error } = await supabase.auth.getUserIdentities();
-  if (error) throw error;
-  const apple = data?.identities?.find((i) => i.provider === 'apple');
+  const identities = await getCurrentUserIdentities();
+  const apple = identities.find((i) => i.provider === 'apple');
   if (!apple) throw new Error(t('auth.appleNotBound'));
   const { error: unlinkError } = await supabase.auth.unlinkIdentity(apple);
   if (unlinkError) throw unlinkError;
@@ -318,13 +381,22 @@ export async function signOut(): Promise<void> {
 /**
  * 账号注销（软注销）：家庭流水等共享数据保留、原家庭成员仍可见，注销者从成员名单消失、登录身份被删除。
  * 服务端在 delete_account RPC 内完成（含匿名化墓碑 + 清空凭据 + 删身份/会话）；成功后清本地 session。
- * 多人家庭户主会被服务端拦下（须先转让/解散），错误原样抛出供 UI 展示。
+ * 多人家庭户主会被服务端拦下（须先转让/解散）；调用方负责按产品文案呈现失败。
  */
 export async function deleteAccount(): Promise<void> {
   // 软注销保留 profiles 墓碑，device_tokens 不会随 FK 级联，故须在删会话前显式注销本设备令牌。
-  await unregisterCurrentDevice();
-  const { error } = await supabase.rpc('delete_account');
-  if (error) throw error;
+  // 推送令牌注销只是清理动作，不能因网络延迟一直阻塞不可逆操作的反馈。
+  await unregisterCurrentDeviceWithinGracePeriod();
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DELETE_ACCOUNT_TIMEOUT_MS);
+  try {
+    const { error } = await supabase.rpc('delete_account').abortSignal(controller.signal);
+    if (error) throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+
   // 服务端已删会话并封禁账号，只能清本地；global signOut 可能失败且不触发 SIGNED_OUT。
   await clearLocalSession();
 }

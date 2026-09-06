@@ -7,14 +7,15 @@
  */
 import { Stack } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { requireSensitiveReauthentication } from '@/features/auth/sensitive-reauth';
 import { t, useLocalePreference } from '@/i18n';
-import { bindApple, unbindApple, useSession } from '@/lib/auth';
+import { bindApple, getCurrentUserIdentities, unbindApple, useSession } from '@/lib/auth';
 
 /**
  * 绑定 / 解绑错误 → 友好文案：
@@ -49,9 +50,38 @@ export default function AppleScreen() {
   useLocalePreference();
   const insets = useSafeAreaInsets();
   const { session } = useSession();
+  const userId = session?.user.id;
+  const [identityState, setIdentityState] = useState(() => ({
+    userId,
+    identities: session?.user.identities ?? [],
+  }));
+  const identities = identityState.userId === userId ? identityState.identities : [];
 
-  const appleIdentity = session?.user.identities?.find((i) => i.provider === 'apple');
+  const refreshIdentities = useCallback(async () => {
+    setIdentityState({ userId, identities: await getCurrentUserIdentities() });
+  }, [userId]);
+
+  // linkIdentity / unlinkIdentity 成功后不会让已存在的 session 快照必然发出更新事件，
+  // 所以以 Auth 返回的身份列表为准；进入页面时也顺便校正旧缓存。
+  useEffect(() => {
+    if (!userId) return;
+
+    let active = true;
+    void getCurrentUserIdentities()
+      .then((next) => {
+        if (active) setIdentityState({ userId, identities: next });
+      })
+      .catch(() => {
+        // 初始状态暂保留 session 快照，避免一次后台刷新失败影响页面可用性。
+      });
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  const appleIdentity = identities.find((i) => i.provider === 'apple');
   const hasApple = !!appleIdentity;
+  const canUnbindApple = identities.some((identity) => identity.provider === 'email');
   const appleEmail = (appleIdentity?.identity_data?.email as string | undefined) ?? null;
   const supported = Platform.OS === 'ios';
 
@@ -62,7 +92,10 @@ export default function AppleScreen() {
     setBusy(true);
     try {
       const ok = await bindApple();
-      if (ok) toast.success(t('account.bindAppleOk'));
+      if (ok) {
+        await refreshIdentities();
+        toast.success(t('account.bindAppleOk'));
+      }
     } catch (err) {
       toast.error(appleErrorText(err));
     } finally {
@@ -71,6 +104,10 @@ export default function AppleScreen() {
   };
 
   const onUnbind = () => {
+    if (!canUnbindApple) {
+      toast.error(t('account.appleOnlyIdentity'));
+      return;
+    }
     Alert.alert(t('account.unbindApple'), t('account.unbindAppleConfirm'), [
       { text: t('common.cancel'), style: 'cancel' },
       {
@@ -79,7 +116,10 @@ export default function AppleScreen() {
         onPress: async () => {
           setBusy(true);
           try {
+            if (!(await requireSensitiveReauthentication(session?.user ? { ...session.user, identities } : undefined)))
+              return;
             await unbindApple();
+            await refreshIdentities();
             toast.success(t('account.unbindAppleOk'));
           } catch (err) {
             toast.error(appleErrorText(err));
@@ -141,8 +181,8 @@ export default function AppleScreen() {
           <>
             <Pressable
               onPress={onUnbind}
-              disabled={busy}
-              style={[styles.unbind, { borderColor: palette.separator, opacity: busy ? 0.6 : 1 }]}
+              disabled={busy || !canUnbindApple}
+              style={[styles.unbind, { borderColor: palette.separator, opacity: busy || !canUnbindApple ? 0.6 : 1 }]}
             >
               {busy ? (
                 <ActivityIndicator color={palette.danger} />
@@ -150,7 +190,9 @@ export default function AppleScreen() {
                 <Text style={[styles.unbindText, { color: palette.danger }]}>{t('account.unbindApple')}</Text>
               )}
             </Pressable>
-            <Text style={[styles.hint, { color: palette.textTertiary }]}>{t('account.unbindAppleHint')}</Text>
+            <Text style={[styles.hint, { color: palette.textTertiary }]}>
+              {canUnbindApple ? t('account.unbindAppleHint') : t('account.appleOnlyIdentity')}
+            </Text>
           </>
         ) : (
           <>
