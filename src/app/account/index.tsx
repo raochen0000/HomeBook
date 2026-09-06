@@ -211,6 +211,7 @@ export default function AccountScreen() {
         slideLabel={t('account.deleteSlide')}
         onConfirm={deleteAccount}
         onClose={() => setDeleteOpen(false)}
+        failureMessage={t('account.deleteFailed')}
       />
     </View>
   );

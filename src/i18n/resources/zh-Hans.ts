@@ -649,6 +649,7 @@ const zhHans = {
     deleteMatch: '请输入「我确认注销」进行确认操作',
     deleteMatchValue: '我确认注销',
     deleteSlide: '滑动以确认注销',
+    deleteFailed: '注销失败，请稍后重试',
     bindEmail: '绑定邮箱',
     rebindEmail: '换绑邮箱',
     confirmRebind: '确认换绑',

@@ -22,6 +22,7 @@ export function DangerConfirmSheet({
   onConfirm,
   onSuccess,
   onClose,
+  failureMessage,
 }: {
   visible: boolean;
   title: string;
@@ -37,6 +38,8 @@ export function DangerConfirmSheet({
   /** 成功后、关闭前的回调（如转让后追问是否退出）。 */
   onSuccess?: () => void;
   onClose: () => void;
+  /** 指定时不展示底层异常，适合面向用户的固定失败文案。 */
+  failureMessage?: string;
 }) {
   const palette = usePalette();
   useLocalePreference();
@@ -70,7 +73,7 @@ export function DangerConfirmSheet({
       reset();
       onClose();
     } catch (e) {
-      setError((e as Error).message ?? String(e));
+      setError(failureMessage ?? (e as Error).message ?? String(e));
       setPending(false);
       setAttempt((a) => a + 1); // 滑块回位
     }

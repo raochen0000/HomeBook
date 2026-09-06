@@ -652,6 +652,7 @@ const en = {
     deleteMatch: 'Type “I confirm deletion” to continue',
     deleteMatchValue: 'I confirm deletion',
     deleteSlide: 'Slide to delete account',
+    deleteFailed: 'Couldn’t delete the account. Please try again later.',
     bindEmail: 'Link email',
     rebindEmail: 'Change email',
     confirmRebind: 'Confirm change',
