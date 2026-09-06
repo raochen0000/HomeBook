@@ -6,23 +6,16 @@
  */
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { ActionSheetIOS, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActionSheetIOS, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import {
-  useLeaveFamily,
-  useMemberships,
-  useMyProfile,
-  useRemoveMember,
-  useTransferOwnership,
-  type FamilyMembership,
-} from '@/api';
+import { useMemberships, useMyProfile, useRemoveMember, useTransferOwnership, type FamilyMembership } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 import { MAX_FAMILY_MEMBERS } from '@/constants/family';
-import { alertOk, t, useLocalePreference } from '@/i18n';
+import { t, useLocalePreference } from '@/i18n';
 
 import { DangerConfirmSheet } from './danger-confirm-sheet';
 
@@ -58,7 +51,6 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
   const membershipsQ = useMemberships();
   const removeM = useRemoveMember();
   const transferM = useTransferOwnership();
-  const leaveM = useLeaveFamily();
 
   const myId = profileQ.data?.id;
   const members = membershipsQ.data ?? [];
@@ -83,25 +75,6 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
         else if (i === 1) setRemoveTarget(m);
       },
     );
-  };
-
-  // 转让成功后追问是否顺便退出（PRD §7.3 AA2）；无论选哪个，转让后本页（户主专属）都应关闭。
-  const askLeaveThenClose = () => {
-    Alert.alert(t('member.transferOk'), t('member.transferOkBody'), [
-      { text: t('member.stay'), style: 'cancel', onPress: onClose },
-      {
-        text: t('family.leave'),
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await leaveM.mutateAsync();
-          } catch (e) {
-            Alert.alert(t('family.leaveFailed'), (e as Error).message ?? String(e), alertOk());
-          }
-          onClose();
-        },
-      },
-    ]);
   };
 
   return (
@@ -194,7 +167,8 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
         onConfirm={async () => {
           if (transferTarget) await transferM.mutateAsync(transferTarget.userId);
         }}
-        onSuccess={askLeaveThenClose}
+        // 转让不改变登录会话或家庭归属；刷新完成后回到家庭页，以普通成员身份继续使用。
+        onSuccess={onClose}
         onClose={() => setTransferTarget(null)}
       />
     </View>
