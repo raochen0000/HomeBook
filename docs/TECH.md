@@ -298,7 +298,7 @@ git --version
 | A   | `dev.a@homebook.test` | `devtest123456` |
 | B   | `dev.b@homebook.test` | `devtest123456` |
 
-**前端**：`src/app/dev.tsx` 是 `__DEV__` 门控的调试台（首页底部「→ Dev 调试台」入口，生产构建重定向回首页）；可一键登录 A/B、`create_family`、记一笔、读概览。复用逻辑在 `src/lib/dev-auth.ts`（`devSignIn` 不存在则自动注册、`ensureFamily`、`addSampleExpense`、`fetchOverview`）。
+**前端**：`src/app/dev.tsx` 是 `__DEV__` 门控的调试台（首页底部「→ Dev 调试台」入口，生产构建重定向回首页）；可一键登录 A/B、`create_family`、记一笔、读概览。复用逻辑在 `src/lib/dev-auth.ts`（`devSignIn` 仅登录已预置账号，不因失败自动注册、`ensureFamily`、`addSampleExpense`、`fetchOverview`）。
 
 **后端 / 接口**：`scripts/dev-token.sh` 从 `.env` 读 URL + anon key，登录拿 `access_token` 并可发起已鉴权请求：
 

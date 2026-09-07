@@ -15,7 +15,6 @@ import { ThemePreferenceProvider } from '@/features/settings/theme-preference';
 import { FamilyLiveSyncHost } from '@/features/sync/use-family-live-sync';
 import { localePathRef, LocalePreferenceProvider, pendingLocaleRestoreRef, useLocalePreference } from '@/i18n';
 import { useSession } from '@/lib/auth';
-import { devAutoSignIn } from '@/lib/dev-auth';
 import { queryClient } from '@/lib/query-client';
 import { supabase } from '@/lib/supabase';
 
@@ -31,11 +30,6 @@ export default function RootLayout() {
       queryClient.invalidateQueries();
     });
     return () => sub.subscription.unsubscribe();
-  }, []);
-
-  // 开发期：启动时自动登录测试账号（仅在无 session 时），免去每次手动登录。
-  useEffect(() => {
-    if (__DEV__) devAutoSignIn();
   }, []);
 
   return (

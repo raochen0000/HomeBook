@@ -94,7 +94,7 @@ export function useSession(): { session: Session | null; loading: boolean } {
  * Supabase 出于防枚举对「无此账号」与「密码错误」不保证可区分，故先试登录、凭据类失败再试注册。
  * 已注册但未确认邮箱会返回稳定的 `email_not_confirmed`，必须直接提示确认而非再次注册。
  */
-export type EmailSignInResult = 'signed-in' | 'confirmation-required';
+export type EmailSignInResult = 'signed-in' | 'sign-up-confirmation-required' | 'resend-confirmation-required';
 
 export async function signInWithEmail(email: string, password: string): Promise<EmailSignInResult> {
   const trimmed = email.trim();
@@ -103,7 +103,7 @@ export async function signInWithEmail(email: string, password: string): Promise<
 
   switch (classifyEmailSignInFailure(signIn.error)) {
     case 'confirm-email':
-      throw new Error(t('auth.emailNotConfirmed'));
+      return 'resend-confirmation-required';
     case 'rate-limited':
       throw new Error(t('auth.tooManyAttempts'));
     case 'stop':
@@ -130,9 +130,18 @@ export async function signInWithEmail(email: string, password: string): Promise<
   }
   // autoconfirm 关闭时，注册已成功但尚未建立会话；由界面以成功态提示前往邮箱确认。
   if (!signUp.data.session) {
-    return 'confirmation-required';
+    return 'sign-up-confirmation-required';
   }
   return 'signed-in';
+}
+
+/** 为已创建但尚未确认邮箱的账号重新发送注册确认链接。 */
+export async function resendSignUpConfirmation(email: string): Promise<void> {
+  const normalized = normalizeEmail(email);
+  if (!normalized) throw new Error(t('auth.invalidEmail'));
+
+  const { error } = await supabase.auth.resend({ type: 'signup', email: normalized });
+  if (error) throw error;
 }
 
 /**

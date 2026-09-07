@@ -212,6 +212,8 @@ const en = {
     signUpFailed: 'Couldn’t create the account. Try again',
     confirmEmail: 'Check your email to confirm, then sign in',
     emailNotConfirmed: 'Confirm your email before signing in',
+    resendConfirmation: 'Resend confirmation email',
+    confirmationResent: 'Confirmation email resent. Check your inbox',
     appleNoToken: 'Apple did not return an identity token',
     appleNotBound: 'No Apple account is linked',
   },

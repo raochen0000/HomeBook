@@ -38,6 +38,7 @@ import { t, useLocalePreference } from '@/i18n';
 import {
   isAppleAuthAvailable,
   normalizeCnPhone,
+  resendSignUpConfirmation,
   sendPhoneOtp,
   signInWithApple,
   signInWithEmail,
@@ -525,9 +526,18 @@ function EmailForm({
   useLocalePreference();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [confirmationRequired, setConfirmationRequired] = useState(false);
+  const [confirmationCooldown, setConfirmationCooldown] = useState(0);
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const canLogin = emailValid && password.length >= 6 && !busy;
+  const canResendConfirmation = emailValid && confirmationCooldown === 0 && !busy;
+
+  useEffect(() => {
+    if (confirmationCooldown === 0) return;
+    const timer = setTimeout(() => setConfirmationCooldown((seconds) => Math.max(0, seconds - 1)), 1_000);
+    return () => clearTimeout(timer);
+  }, [confirmationCooldown]);
 
   const onLogin = async () => {
     if (!ensureAgreed()) return;
@@ -538,8 +548,11 @@ function EmailForm({
     setBusy(true);
     try {
       const result = await signInWithEmail(email, password);
-      if (result === 'confirmation-required') {
-        toast.success(t('auth.confirmEmail'));
+      if (result !== 'signed-in') {
+        setConfirmationRequired(true);
+        toast[result === 'sign-up-confirmation-required' ? 'success' : 'warning'](
+          t(result === 'sign-up-confirmation-required' ? 'auth.confirmEmail' : 'auth.emailNotConfirmed'),
+        );
         return;
       }
       onRememberLogin({ mode: 'email', email });
@@ -549,6 +562,26 @@ function EmailForm({
     } finally {
       setBusy(false);
     }
+  };
+
+  const onResendConfirmation = async () => {
+    if (!canResendConfirmation) return;
+    setBusy(true);
+    try {
+      await resendSignUpConfirmation(email);
+      setConfirmationCooldown(60);
+      toast.success(t('auth.confirmationResent'));
+    } catch (err) {
+      toast.error((err as Error).message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onEmailChange = (value: string) => {
+    setEmail(value);
+    setConfirmationRequired(false);
+    setConfirmationCooldown(0);
   };
 
   return (
@@ -561,7 +594,7 @@ function EmailForm({
           placeholder={t('auth.emailPlaceholder')}
           placeholderTextColor={palette.textTertiary}
           value={email}
-          onChangeText={setEmail}
+          onChangeText={onEmailChange}
           autoCapitalize="none"
           autoComplete="email"
           keyboardType="email-address"
@@ -570,7 +603,7 @@ function EmailForm({
           editable={!busy}
         />
         {email.length > 0 ? (
-          <Pressable hitSlop={8} onPress={() => setEmail('')}>
+          <Pressable hitSlop={8} onPress={() => onEmailChange('')}>
             <SymbolView name="xmark.circle.fill" tintColor={palette.textTertiary} size={16} />
           </Pressable>
         ) : null}
@@ -602,6 +635,30 @@ function EmailForm({
       <LoginOptionsRow palette={palette} rememberMe={rememberMe} setRememberMe={setRememberMe} onForgot={onForgot} />
 
       <PrimaryButton palette={palette} busy={busy} enabled={canLogin} label={t('auth.login')} onPress={onLogin} />
+
+      {confirmationRequired ? (
+        <View style={styles.confirmationRow}>
+          <Text style={[styles.confirmationHint, { color: palette.textSecondary }]}>{t('auth.emailNotConfirmed')}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('auth.resendConfirmation')}
+            disabled={!canResendConfirmation}
+            onPress={onResendConfirmation}
+            style={styles.resendConfirmation}
+          >
+            <Text
+              style={[
+                styles.resendConfirmationText,
+                { color: canResendConfirmation ? palette.textPrimary : palette.textTertiary },
+              ]}
+            >
+              {confirmationCooldown > 0
+                ? t('auth.resendIn', { seconds: confirmationCooldown })
+                : t('auth.resendConfirmation')}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <View style={styles.hintRow}>
         <SymbolView name="checkmark.shield" tintColor={palette.textTertiary} size={13} />
@@ -933,6 +990,16 @@ const styles = StyleSheet.create({
     marginTop: Space[2],
   },
   hint: { flexShrink: 1, fontSize: 12, lineHeight: 16, textAlign: 'center' },
+  confirmationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    columnGap: Space[1],
+  },
+  confirmationHint: { fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  resendConfirmation: { minHeight: 44, justifyContent: 'center', paddingHorizontal: Space[2] },
+  resendConfirmationText: { fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
 
   optionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 24 },
   remember: { flexDirection: 'row', alignItems: 'center', gap: Space[1] },

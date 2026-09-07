@@ -1,9 +1,8 @@
 /**
  * 开发期测试登录工具（仅用于开发/调试，切勿用于生产）。
  *
- * 背景：实例已开启邮箱注册且 `mailer_autoconfirm = true`，注册即自动确认，
- * 无需短信 OTP / 邮件验证，因此可用「邮箱+密码」快速拿到真实 JWT，
- * 在真实 RLS 下调试前/后端接口。
+ * 测试账号必须由 `supabase/dev_seed.sql` 预置；这里仅执行登录，
+ * 不会因为认证失败而注册账号或发送认证邮件。
  */
 import { supabase } from './supabase';
 
@@ -16,7 +15,7 @@ export type TestAccount = {
 /**
  * 预置测试账号：同一个家庭「示例之家」里的 5 名成员（户主 a + 成员 b~e），
  * 便于测试多用户 / 家庭协作场景。数据由 supabase/dev_seed.sql 灌入，密码统一 test123。
- * 注：nickname 仅在账号不存在、走 signUp 兜底时使用；跑过种子后账号已存在，以库里为准。
+ * 跑过种子后账号已存在，以库里为准。
  */
 export const TEST_ACCOUNTS: Record<'a' | 'b' | 'c' | 'd' | 'e', TestAccount> = {
   a: { email: 'dev.a@homebook.test', password: 'test123', nickname: '大伟' },
@@ -26,22 +25,14 @@ export const TEST_ACCOUNTS: Record<'a' | 'b' | 'c' | 'd' | 'e', TestAccount> = {
   e: { email: 'dev.e@homebook.test', password: 'test123', nickname: '老王' },
 };
 
-/** 登录；账号不存在时自动注册（autoconfirm 已开，注册后直接拿到 session）。 */
+/** 登录预置测试账号；认证失败直接抛出，避免开发工具意外触发注册邮件。 */
 export async function devSignIn(acc: TestAccount) {
   const signIn = await supabase.auth.signInWithPassword({
     email: acc.email,
     password: acc.password,
   });
   if (!signIn.error) return signIn.data.user;
-
-  // 多为「账号不存在」→ 尝试注册
-  const signUp = await supabase.auth.signUp({
-    email: acc.email,
-    password: acc.password,
-    options: { data: { nickname: acc.nickname } },
-  });
-  if (signUp.error) throw signUp.error;
-  return signUp.data.user;
+  throw signIn.error;
 }
 
 export async function devSignOut() {

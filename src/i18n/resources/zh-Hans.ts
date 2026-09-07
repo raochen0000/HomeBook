@@ -212,6 +212,8 @@ const zhHans = {
     signUpFailed: '注册失败，请重试',
     confirmEmail: '注册成功，请前往邮箱确认后再登录',
     emailNotConfirmed: '请先前往邮箱完成确认，然后登录',
+    resendConfirmation: '重新发送确认邮件',
+    confirmationResent: '确认邮件已重新发送，请查收邮箱',
     appleNoToken: 'Apple 未返回身份令牌',
     appleNotBound: '未找到已绑定的 Apple 账号',
   },
