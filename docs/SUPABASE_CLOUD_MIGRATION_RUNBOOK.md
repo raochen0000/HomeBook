@@ -163,10 +163,10 @@
 - [ ] Supabase 账户开启 MFA；限制项目管理成员。
 - [x] 开启数据库 SSL enforcement；评估数据库 network restrictions。
 - [x] 核对 Data API 暴露 schema，并确保每个客户端表/RPC 同时具备所需 grants 与 RLS；新 Cloud 项目不能假定 `public` 表自动暴露。
-- [ ] 客户端仅使用 publishable key；服务端才可使用 secret/service-role key。
+- [x] 客户端仅使用 publishable key；服务端才可使用 secret/service-role key。
 - [x] 配置允许的 Site URL 和 redirect URL，只加入实际需要的 `homebook` scheme/域名。
 - [x] 开启邮箱密码与 Apple provider；保持手机号 provider 关闭。
-- [ ] 暂不接入生产 Apple 私钥或生产邮件域名时，使用专门测试凭据。
+- [x] 不适用：已接入正式 Apple 配置与生产 SMTP，无须另设测试凭据。
 
 阶段 2 执行记录（进行中，2026-09-01）：
 
@@ -180,6 +180,8 @@
 - 已核对 Sign In / Providers：Email provider 已开启、Confirm email 已开启、Email OTP 有效期为 `3600` 秒且长度已由默认 `8` 调整为与客户端一致的 `6`；Phone provider 保持关闭，未配置 Twilio。Secure email change 保持开启，但当前客户端仅实现新邮箱的一次 OTP 校验，尚不能完成旧邮箱与新邮箱的双确认；在阶段 7 补齐该流程前不得将“换绑邮箱”视为验收通过。Secure password change 与 Require current password 保持关闭，避免在客户端尚未实现重新认证/旧密码输入时造成不可用。
 - 已启用 Apple provider，Client ID 为原生 iOS Bundle ID `com.raochen.homebook-app`，OAuth secret 留空，且不允许无邮箱身份；Apple Developer provisioning profile 已确认包含 Sign in with Apple capability。已开启 Allow manual linking，以支持客户端现有 `linkIdentity` / `unlinkIdentity` 的 Apple 绑定与解绑。该配置仅覆盖原生 `signInWithIdToken`；首次/重复登录、隐藏邮箱、绑定、解绑和注销后的重新登录仍须在 Cloud 构建真机验证。
 - 已从实际 `src` 调用扫描出 15 张客户端直连表和 17 个客户端 RPC，逐项核对 Cloud 的表级 grant、函数 EXECUTE 权限与 RLS 开启状态。发现 `family_hidden_categories` 有 RLS policy 但缺少 `authenticated` Data API grant；已新建并应用 `20260901045743_grant_family_hidden_categories_data_api_access.sql`，仅授予该角色所需的 SELECT/INSERT/UPDATE/DELETE，`anon` 继续无访问。17 个业务 RPC 均仅对 `authenticated` 可执行；其行级允许/拒绝行为仍须在阶段 3/8 的真实身份矩阵中验证。
+- `2026-09-07`：静态复核确认 `.env` 未受 Git 跟踪，客户端只读取 `EXPO_PUBLIC_SUPABASE_URL` 与 `EXPO_PUBLIC_SUPABASE_KEY`；未发现 `service_role`、secret key、SMTP 密码或 Apple 私钥进入客户端或受跟踪环境文件。该项原未勾选仅为记录滞后，现据此结项。
+- `2026-09-07`：Cloud 已使用正式 Apple 配置与生产 SMTP；“尚未接入生产凭据时使用测试凭据”是条件性措施，不是待办，现标记为不适用。
 
 Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对官方定价：
 
@@ -307,7 +309,7 @@ Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对
 
 路径 A 没有真实用户或待迁数据，推送直接迁为 `supabase/functions/push-dispatch` + Supabase Cron。切换时必须先停用阿里云 FC 定时触发器，再启用 Cloud Cron；不得让两个投递者同时消费同一批待推通知。
 
-阶段 6 执行记录（进行中，2026-09-04）：
+阶段 6 执行记录（完成，2026-09-06）：
 
 - 已创建并部署 `push-dispatch` Edge Function 与 `20260904133622_add_push_dispatch_claims_and_cron.sql`。函数使用数据库原子领取（`FOR UPDATE SKIP LOCKED`）、10 分钟超时回收、claim token 结算与指数退避，复用既有通知偏好、Expo ticket、失效 token 清理和深链语义；日志只输出固定的失败事件名和计数，不输出 token、JWT、邮件或财务数据。
 - 用户确认 `PUSH_DISPATCH_CRON_SECRET`、`homebook_push_dispatch_cron_secret` 与 `homebook_project_url` 已按要求配置，且旧阿里云推送 FC 已关闭。2026-09-04 已将 0051 应用到 Cloud：启用 `pg_cron`、`pg_net`；随后按产品决定应用 0052，将 `homebook-push-dispatch` 设为每 2 分钟一次。发现 Cloud 实际计划曾被带外改回 10 分钟后，已追加并应用 0054 `20260904150214_reassert_push_dispatch_two_minute_schedule.sql`；只读核验 Cloud migration 历史为 54 条，同名作业仅有一个、处于启用状态，计划为 `*/2 * * * *`。
@@ -315,8 +317,9 @@ Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对
 - 真机首轮验收已通过：用户在连接 Cloud 的 Beta 版本上完成受控家庭操作，接收设备在后台正常收到系统推送。
 - 通知偏好真机验收已通过：接收设备关闭“家庭动态”后，完成户主转让；对应消息仍进入 App 通知中心，但未触发系统推送，符合“仅停止系统推送、不隐藏站内通知”的产品规则。
 - 用户确认后续多次家庭操作的推送均正常，未发现漏推或重复推送。2026-09-05 10:14（Asia/Shanghai）只读核验显示：2 分钟 Cron 自 2026-09-04 23:06 起连续成功 335 次；过去 24 小时内创建的 4 条通知均已终态处理，没有待重试或遗留 claim。该 Cloud Cron 实际观察窗口当时约 11 小时，仍须满 24 小时后再结项。
+- 用户确认受控并发领取、重试和失效 Token 清理验收均已完成。2026-09-06 12:32（Asia/Shanghai）最终只读核验：过去 24 小时 Cron 连续成功 720 次，唯一 `homebook-push-dispatch` 作业保持启用、计划为 `*/2 * * * *`；期间创建的 5 条通知均终态处理，无待重试或遗留 claim。旧阿里云推送 FC 保持关闭，资源删除延后至阶段 11 的观察期结束与负责人批准后执行。
 - 调用预算：每 2 分钟一次，即约 720 次/日、21,600 次/30 日；相对 Free 计划每组织每月 500,000 次 Edge Function 调用约为 4.32%。当前实现每次最多处理 100 条推送，理论峰值吞吐约 72,000 条/日；1,000 条待推通知在没有新增积压时约 20 分钟可清空，未构成 Free 额度或 Edge Runtime 压力风险。
-- 本地验证：Deno 类型检查通过；`supabase/functions/push-dispatch/index.test.ts` 的 4 个测试通过（退避上限、深链白名单、转让文案与 Cron 密钥比较）。`supabase db push --dry-run` 两次均在连接 Cloud 后未返回完成状态，故未作为通过证据；正式 `supabase db push --linked` 已成功应用 0051 与 0052。
+- 本地验证：Deno 类型检查通过；`supabase/functions/push-dispatch/index.test.ts` 的 4 个测试通过（退避上限、深链白名单、转让文案与 Cron 密钥比较）。`supabase db push --dry-run` 两次均在连接 Cloud 后未返回完成状态，故未作为通过证据；正式 `supabase db push --linked` 已成功应用 0051 至 0054。
 - 部署 0052 前的 Cloud `db advisors`（warn 阈值）未发现该频率变更新增的问题；其报告 `pg_net` 位于 `public`、既有业务 RPC 的 `SECURITY DEFINER` 可执行性、泄露密码保护未开启，以及 `profiles` 的多条 permissive policy。以上均未在本次频率变更中修改，需独立安全审计后以新 migration 或 Dashboard 配置处理。
 
 部署前由项目管理员完成的配置（不要向仓库、聊天或日志提交任何值）：
@@ -328,14 +331,14 @@ Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对
 
 Edge Function + Cron 验收：
 
-- [ ] 函数只读取待投递通知，遵守 `notification_preferences`。
-- [ ] 具有幂等键/原子领取机制，两个 worker 并发也不会重复推送。
-- [ ] Expo 接收成功、或因关闭偏好/缺少 Token 而确定不投递时才终态处理；临时错误继续指数退避。
-- [ ] `DeviceNotRegistered` 等失效 token 会清理，单个坏 token 不阻塞批次。
+- [x] 函数只读取待投递通知，遵守 `notification_preferences`。
+- [x] 具有幂等键/原子领取机制，两个 worker 并发也不会重复推送。
+- [x] Expo 接收成功、或因关闭偏好/缺少 Token 而确定不投递时才终态处理；临时错误继续指数退避。
+- [x] `DeviceNotRegistered` 等失效 token 会清理，单个坏 token 不阻塞批次。
 - [x] Cron 频率以 PRD 和调用预算为准；记录每日理论调用量和 Free 额度占比。
-- [ ] 在受控测试通知上完成 Edge Function 的发送、重试、失效 token 清理和并发领取验证；不得让旧 FC 与新函数同时消费测试通知。
+- [x] 在受控测试通知上完成 Edge Function 的发送、重试、失效 token 清理和并发领取验证；不得让旧 FC 与新函数同时消费测试通知。
 - [x] Cloud secrets 中保存 Expo/服务端凭据；日志不得输出 token、JWT、邮件或财务数据。
-- [ ] 旧 FC 定时触发器保持关闭，观察至少 24 小时调用量；观察结束且负责人批准后再删除旧触发器。
+- [x] 旧 FC 定时触发器保持关闭，已观察至少 24 小时调用量；资源删除须在阶段 11 经负责人批准后执行。
 
 退出条件：认证邮件不依赖邮件 FC，短信不在首版链路，推送仅有一个有效生产投递者。
 
@@ -347,15 +350,17 @@ Edge Function + Cron 验收：
   - [x] 已按 Supabase Auth 错误码区分“邮箱未确认”；不得将其回退为注册，也不得把防枚举伪用户提示为注册成功。
 - [ ] 账号安全页移除手机号管理入口，重新实现“至少一种登录方式”和敏感操作验证。
   - [x] 已移除手机号管理入口与 `/account/phone` 页面；换绑邮箱改用 Cloud 的旧/新邮箱确认链接，并在回到页面时刷新会话。
-  - [ ] 仍需补齐“至少一种登录方式”与敏感操作的近期重新认证。
-- [ ] 检查通知、反馈、协议/隐私文案中对手机号、阿里云、数据区域的描述。
-- [ ] 更新 `docs/PRD.md`、`docs/TECH.md`、`docs/DATAMODEL.md`、发布和测试文档，使其描述真实实现。
-- [ ] 从目标 Cloud 重新生成 `src/lib/database.types.ts`。
-- [ ] 保持 `src/lib/supabase.ts` 的环境变量边界；`EXPO_PUBLIC_SUPABASE_KEY` 可继续作为变量名，但值只能是目标项目 publishable key。
+  - [x] 客户端已在邮箱换绑、Apple 解绑、改密和注销前重新认证；仅 Apple 账号必须重新完成原生 Apple 授权，且 Apple 为唯一 identity 时按钮不可用。
+  - [ ] `0055` 注销 session 新鲜度校验待新版 TestFlight 二进制就绪后部署并在真机验证；不能先让旧二进制失去注销能力。
+- [x] 检查通知、反馈、协议/隐私文案中对手机号、阿里云、数据区域的描述；当前文案披露 Supabase Cloud 新加坡区域、实际邮件服务商、Apple 与 Expo Push。
+- [x] 更新 `docs/PRD.md`、`docs/TECH.md`、`docs/DATAMODEL.md`、发布和测试文档，使其描述真实实现。
+- [x] 从目标 Cloud 重新生成 `src/lib/database.types.ts`。
+- [x] 保持 `src/lib/supabase.ts` 的环境变量边界；`EXPO_PUBLIC_SUPABASE_KEY` 可继续作为变量名，但值只能是目标项目 publishable key。
 - [x] EAS preview 与 production 均显式绑定到目标 Cloud 的 `production` 环境；当前没有独立 preview 后端。
-- [ ] 不把 secret/service-role key、SMTP 密码或 Apple 私钥写入任何 `EXPO_PUBLIC_*`。
-- [ ] 保持 Bundle ID、scheme、EAS project ID 和 App Store Connect App 不变。
-- [ ] 为旧项目 JWT/session 切换提供一次明确的重新登录体验；不得让旧缓存 session 造成循环或墓碑用户页面。
+- [x] 静态检查未将 secret/service-role key、SMTP 密码或 Apple 私钥写入 `EXPO_PUBLIC_*`、受跟踪文件或日志；EAS 环境仅使用目标 Cloud 的 URL 与 publishable key。
+- [x] 保持 Bundle ID、scheme、EAS project ID 和 App Store Connect App 不变。
+- [x] 为旧项目 JWT/session 切换提供一次明确的重新登录体验；不得让旧缓存 session 造成循环或墓碑用户页面。
+  - [x] 当前 Cloud project ref 的 session 键被显式固定为 `sb-<project-ref>-auth-token`；首启仅删除其他项目及遗留 GoTrue 键，保留新项目会话。旧项目 session 不能迁移或复用，用户会落至正常登录页重新认证；回归用例覆盖当前 session 保留与旧 session 清理。
 
 生产变量目标：
 

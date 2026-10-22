@@ -187,20 +187,20 @@ git --version
 
 ### 7.2 能力映射
 
-| 能力        | 首版实现                                       | 迁移说明                                                             |
-| ----------- | ---------------------------------------------- | -------------------------------------------------------------------- |
-| 数据库      | Supabase Cloud Postgres                        | 45 个版本化 migration（含 Cloud Storage 兼容 migration）从空项目重放 |
-| 鉴权        | Supabase Auth：邮箱密码 + Apple                | 生产邮件走自定义 SMTP；phone provider 关闭                           |
-| 行级安全    | RLS + grants                                   | Data API 暴露与 RLS 分别验收，不能只验证其中一个                     |
-| 服务端逻辑  | Postgres RPC + Edge Functions                  | 事务不变式留在 RPC；外部网络调用放 Edge Function                     |
-| 定时任务    | Supabase Cron → Edge Function                  | 推送投递从 FC 分阶段迁移                                             |
-| 实时        | Supabase Realtime                              | 已发布 `family_data_revisions` + `notifications`；客户端作缓存门铃 |
-| 对象存储    | Supabase Storage                               | 三个公开媒体桶 + 一个私有反馈桶                                      |
-| 认证邮件    | 第三方 SMTP                                    | 发信费用、额度与投递由 SMTP 服务商承担                               |
-| 短信验证码  | 首版不提供                                     | 阿里云 SMS Hook/FC 不进入生产链路                                    |
-| 推送        | `notifications` + Expo Push → APNs             | App 内通知始终兜底；系统推送可关闭                                   |
-| 备份 / 恢复 | 自维护加密逻辑备份；达到恢复目标要求后升级套餐 | Free 不依赖 Dashboard 可下载备份                                     |
-| 日志 / 监控 | Cloud 日志 + 客户端/外部错误监控               | Free 日志保留短，关键错误需另行留存                                  |
+| 能力        | 首版实现                                       | 迁移说明                                                                                |
+| ----------- | ---------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 数据库      | Supabase Cloud Postgres                        | 55 个版本化 migration（含 Cloud Storage、推送调度与近期认证兼容 migration）从空项目重放 |
+| 鉴权        | Supabase Auth：邮箱密码 + Apple                | 生产邮件走自定义 SMTP；phone provider 关闭                                              |
+| 行级安全    | RLS + grants                                   | Data API 暴露与 RLS 分别验收，不能只验证其中一个                                        |
+| 服务端逻辑  | Postgres RPC + Edge Functions                  | 事务不变式留在 RPC；外部网络调用放 Edge Function                                        |
+| 定时任务    | Supabase Cron → Edge Function                  | 推送投递从 FC 分阶段迁移                                                                |
+| 实时        | Supabase Realtime                              | 已发布 `family_data_revisions` + `notifications`；客户端作缓存门铃                      |
+| 对象存储    | Supabase Storage                               | 三个公开媒体桶 + 一个私有反馈桶                                                         |
+| 认证邮件    | 第三方 SMTP                                    | 发信费用、额度与投递由 SMTP 服务商承担                                                  |
+| 短信验证码  | 首版不提供                                     | 阿里云 SMS Hook/FC 不进入生产链路                                                       |
+| 推送        | `notifications` + Expo Push → APNs             | App 内通知始终兜底；系统推送可关闭                                                      |
+| 备份 / 恢复 | 自维护加密逻辑备份；达到恢复目标要求后升级套餐 | Free 不依赖 Dashboard 可下载备份                                                        |
+| 日志 / 监控 | Cloud 日志 + 客户端/外部错误监控               | Free 日志保留短，关键错误需另行留存                                                     |
 
 ### 7.3 鉴权与认证邮件
 
@@ -209,7 +209,7 @@ git --version
 - **Apple**：iOS 原生 `identityToken` → `signInWithIdToken`；账号绑定使用 manual linking。Apple provider、Bundle ID 与密钥轮换必须在 Cloud 测试项目真机验证。
 - **手机号**：首版关闭 Cloud phone provider，并在客户端移除手机号登录/管理入口。`services/sms-hook-fc` 与现有手机号代码在迁移完成前保留历史参考，但不得进入 production 路径。
 - **密码防爆破**：`…0036_password_login_lockout.sql` 的函数/表可暂时保留为未启用兼容代码。Free/Pro 无法启用 Password Verification Attempt Hook，因此首版只使用 Cloud 基础限流与风控，不声称精确“五次锁定 24 小时”已生效；恢复该规则前先升级 Team 并回归。
-- **敏感操作**：换绑邮箱、解绑 Apple、改密、注销前要求近期重新认证；邮箱使用当前密码或邮箱 OTP，仅 Apple 账号重新完成 Apple 授权。认证新鲜度必须由服务端验证。
+- **敏感操作**：换绑邮箱、解绑 Apple、改密、注销前要求近期重新认证；邮箱密码账号使用当前密码，仅 Apple 账号重新完成 Apple 授权。Cloud Auth 负责凭据校验和新会话签发；`delete_account` 在服务端限制当前 session 创建时间不超过 10 分钟。换绑邮箱与改密还分别依赖 Cloud 的 Secure email/password change。
 - **风控**：认证邮件遵守 Cloud rate limit 与 SMTP 供应商额度；邀请码仍为 6 位大写字母数字、24h 有效，`preview_family_by_code` 必须限频防枚举。
 - **密钥边界**：客户端只持 publishable key；secret/service-role key 绝不进入客户端、仓库、日志或 `EXPO_PUBLIC_*`。
 
@@ -227,12 +227,11 @@ git --version
 
 ### 7.5 推送通道（第一版 iOS）
 
-- **当前实现**：客户端获取 Expo Push Token；阿里云 FC 定时轮询待投递通知并调用 Expo Push，由 Expo 转交 APNs。
-- **迁移目标**：Cloud 核心切换期可暂时让 FC 读取 Cloud；稳定后将等价逻辑改写为 Edge Function 并由 Cron 调用，再停用 FC。现有 Node/FC 代码不能原样当作 Edge Function 部署。
-- **运行时要求**：若过渡期继续运行 FC，升级到供应商与 Supabase JS 当前支持的 Node 22，并重新验证锁文件和行为；Node 20 不再作为新版本 Supabase JS 的支持目标。
+- **当前实现**：客户端获取 Expo Push Token；Cloud `push-dispatch` Edge Function 由 Supabase Cron 每 2 分钟调用，向 Expo Push API 投递，再由 Expo 转交 APNs。
+- **并发与重试**：函数用数据库原子 claim 防止重叠调度重复投递；一轮最多处理 100 条消息。Expo 接受或按个人偏好跳过后写终态；临时失败按 1 分钟至 1 小时退避，`DeviceNotRegistered` 会删除失效令牌。
 - **范围**：第一版只保障 iOS。Android 厂商渠道、通知渠道配置及适配均不在本期范围。
-- **可靠性**：授权后立即登记 token（含当前界面 `locale`），前台恢复、token 轮换与切语言会同步；FC 按令牌 `locale` 选中/英模板，仅在 Expo 接受后写 `pushed_at`，临时失败按 1 分钟至 1 小时退避重试。推送点按（含冷启动）仅跳转 App 内白名单路由。
-- **上线验收**：发布前验证 Apple Push Key、Bundle ID、Expo 项目、FC 环境变量和真机端到端到达；未完成验收前，不将远程推送视为已上线能力。
+- **可靠性**：授权后立即登记 token（含当前界面 `locale`），前台恢复、token 轮换与切语言会同步；Edge Function 按令牌 `locale` 选中/英模板。推送点按（含冷启动）仅跳转 App 内白名单路由。
+- **上线验收**：发布前验证 Apple Push Key、Bundle ID、Expo 项目、Cloud Function secret/Cron 和真机端到端到达；未完成验收前，不将远程推送视为已上线能力。
 
 ### 7.6 合规（需专业确认，非法律意见）
 

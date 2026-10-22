@@ -255,7 +255,9 @@ erDiagram
 | `payload`              | json      | null                | 事件附加数据                                                                                 |
 | `pushed_at`            | timestamp | null                | Expo 已接受系统推送或该消息被明确跳过后的终态时间；不代表手机已展示                          |
 | `push_attempts`        | smallint  | not null, default 0 | Expo/API 临时失败次数（迁移 0042）                                                           |
-| `push_next_attempt_at` | timestamp | null                | 下次允许 FC 重试的时间；指数退避最长 1 小时（迁移 0042）                                     |
+| `push_claim_token`     | UUID      | null                | Edge Function 原子领取批次的 claim；终态或释放后清空                                         |
+| `push_claimed_at`      | timestamp | null                | Edge Function 领取时间；用于回收超时 claim                                                   |
+| `push_next_attempt_at` | timestamp | null                | 下次允许 Edge Function 重试的时间；指数退避最长 1 小时                                       |
 
 > 第一版通知中心只查询最新 100 条 `in_app` 消息；用户阅读或确认后，客户端物理删除该消息。没有已读状态、分页、归档或保留策略。
 > 事件去重键保存在仅服务端可访问的 `private.notification_event_keys`：预算每账期的 80% / 超支各一次，月度总结每家庭每月一次；它不保存用户可见消息内容。
@@ -326,7 +328,7 @@ erDiagram
 | `user_id`                   | UUID      | FK→USER, not null, on delete cascade  | 当前登录者（注销随账号级联删除）                 |
 | `platform`                  | text      | `ios` / `android`                     | 设备平台                                         |
 | `provider`                  | text      | `expo` / `apns`，default `expo`       | 令牌类型（Expo 推送服务 / 直连 APNs）            |
-| `locale`                    | text      | not null, default `zh`, in(`zh`,`en`) | 该设备界面语言；`push-fc` 按此选中/英模板        |
+| `locale`                    | text      | not null, default `zh`, in(`zh`,`en`) | 该设备界面语言；`push-dispatch` 按此选中/英模板  |
 | `created_at` / `updated_at` | timestamp |                                       |                                                  |
 
 **RLS**：仅 `select` 本人策略（`user_id = auth.uid()`，便于客户端自查）；写（注册/注销）只走上述两个 RPC，投递读走 `service_role`。
@@ -387,11 +389,11 @@ erDiagram
 
 > 当前客户端是 **Supabase + React Query 纯在线**。此表不是离线同步游标，只给仍开着的 App 一个「这户账本变了」的信号。WatermelonDB 仍按 TECH §6 留到远期。
 
-| 字段         | 类型        | 约束                                   | 说明                                      |
-| ------------ | ----------- | -------------------------------------- | ----------------------------------------- |
-| `family_id`  | UUID        | PK, FK→FAMILY, on delete cascade       | 一户一行                                  |
-| `revision`   | bigint      | not null, ≥ 1                          | 共享表写入后 +1；客户端不读数值，只听变更 |
-| `updated_at` | timestamptz | not null                               | 最近一次敲门铃时间                        |
+| 字段         | 类型        | 约束                             | 说明                                      |
+| ------------ | ----------- | -------------------------------- | ----------------------------------------- |
+| `family_id`  | UUID        | PK, FK→FAMILY, on delete cascade | 一户一行                                  |
+| `revision`   | bigint      | not null, ≥ 1                    | 共享表写入后 +1；客户端不读数值，只听变更 |
+| `updated_at` | timestamptz | not null                         | 最近一次敲门铃时间                        |
 
 **写入**：仅 `private.touch_family_revision()`（`SECURITY DEFINER`，不授予客户端）。由 `families` / `memberships` / `transactions` / 家庭分类 / 预算 / 储蓄 / 定时规则 / 成员资料等写触发器调用。系统分类（`categories.family_id is null`）不敲门铃。
 
