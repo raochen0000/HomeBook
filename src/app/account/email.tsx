@@ -28,14 +28,6 @@ import { t, useLocalePreference } from '@/i18n';
 import { bindEmail, normalizeEmail, useSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 
-/** 邮箱脱敏为「r***@gmail.com」（与账号页一致）。 */
-function maskEmail(email?: string | null): string {
-  if (!email) return '';
-  const [name, domain] = email.split('@');
-  if (!domain) return t('common.bound');
-  return `${name.slice(0, 1)}***@${domain}`;
-}
-
 /**
  * 绑定 / 验证错误 → 友好文案：
  * - 邮箱已被占用（email_exists）→ 明确提示换邮箱；
@@ -121,7 +113,7 @@ export default function EmailScreen() {
           {hasEmail ? (
             <View style={[styles.currentCard, { backgroundColor: palette.card }]}>
               <Text style={[styles.currentLabel, { color: palette.textSecondary }]}>{t('account.currentEmail')}</Text>
-              <Text style={[styles.currentValue, { color: palette.textPrimary }]}>{maskEmail(currentEmail)}</Text>
+              <Text style={[styles.currentValue, { color: palette.textPrimary }]}>{currentEmail}</Text>
             </View>
           ) : null}
 
@@ -196,8 +188,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: Space[2],
   },
-  currentLabel: { fontSize: 15 },
-  currentValue: { fontSize: 17, fontWeight: '600' },
+  currentLabel: { fontSize: 15, flexShrink: 0 },
+  currentValue: { flexShrink: 1, marginLeft: Space[3], fontSize: 17, fontWeight: '600', textAlign: 'right' },
 
   sectionTitle: { fontSize: 15, fontWeight: '600', marginTop: Space[1], marginBottom: Space[1] },
 
@@ -223,7 +215,7 @@ const styles = StyleSheet.create({
 
   hintRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'center',
     gap: Space[1],
     marginTop: Space[2],
