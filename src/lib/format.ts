@@ -126,6 +126,9 @@ export function formatPercent(pct: number): string {
   return `${pct > 0 ? '+' : ''}${pct}%`;
 }
 
+/** 问候语切换的整点：凌晨、早晨、中午、下午、晚上。 */
+const GREETING_BOUNDARY_HOURS = [0, 6, 12, 14, 18] as const;
+
 /** 按小时取问候语（顶栏副标题前半句）。 */
 export function greetingForHour(date = new Date()): string {
   const h = date.getHours();
@@ -134,6 +137,25 @@ export function greetingForHour(date = new Date()): string {
   if (h < 14) return t('dates.greetingNoon');
   if (h < 18) return t('dates.greetingAfternoon');
   return t('dates.greetingEvening');
+}
+
+/** 下一个问候语切换时刻。正好卡在整点上时取再下一个，避免定时器立刻重入。 */
+export function nextGreetingBoundary(from = new Date()): Date {
+  const next = new Date(from);
+  next.setSeconds(0, 0);
+  const later = GREETING_BOUNDARY_HOURS.find((boundary) => boundary > from.getHours());
+  if (later == null) {
+    next.setDate(next.getDate() + 1);
+    next.setHours(0, 0, 0, 0);
+    return next;
+  }
+  next.setHours(later, 0, 0, 0);
+  return next;
+}
+
+/** 距离下一次问候语切换的毫秒数，至少 1 秒。 */
+export function msUntilNextGreeting(from = new Date()): number {
+  return Math.max(1000, nextGreetingBoundary(from).getTime() - from.getTime());
 }
 
 /** 人性化月份标题：今年省略年份（如「6月」），往年带年（如「2025年6月」）。 */

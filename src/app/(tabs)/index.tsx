@@ -29,7 +29,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Link, useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, AppState, Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -72,7 +72,16 @@ import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { useSession } from '@/lib/auth';
 import { daysToMonthEnd } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import { clockTime, currentPeriod, dayKey, greetingForHour, humanDay, previousPeriod, signForType } from '@/lib/format';
+import {
+  clockTime,
+  currentPeriod,
+  dayKey,
+  greetingForHour,
+  humanDay,
+  msUntilNextGreeting,
+  previousPeriod,
+  signForType,
+} from '@/lib/format';
 
 type Group = { key: string; label: string; totalCents: number; rows: RowData[] };
 
@@ -173,6 +182,19 @@ export default function HomeScreen() {
   const { locale } = useLocalePreference();
   const catColors = useCategoryColors();
   const insets = useSafeAreaInsets();
+  // 问候语按当前时刻计算。从后台回到前台，或跨过清晨 / 中午 / 下午 / 晚上的切换点时刷新。
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const refresh = () => setNow(new Date());
+    const appSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refresh();
+    });
+    const timer = setTimeout(refresh, msUntilNextGreeting(now));
+    return () => {
+      appSub.remove();
+      clearTimeout(timer);
+    };
+  }, [now]);
   const { scrollGeometry, headerHeight, headerStyle, onHeaderLayout } = useManualCollapsibleHeader(
     insets.top + 84,
     insets.top,
@@ -553,8 +575,8 @@ export default function HomeScreen() {
               <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('tabs.home')}</ThemedText>
               <ThemedText style={[styles.subtitle, { color: palette.textSecondary }]} numberOfLines={2}>
                 {profileQ.data?.nickname
-                  ? t('home.greetingWithName', { greeting: greetingForHour(), name: profileQ.data.nickname })
-                  : t('home.greetingSolo', { greeting: greetingForHour() })}
+                  ? t('home.greetingWithName', { greeting: greetingForHour(now), name: profileQ.data.nickname })
+                  : t('home.greetingSolo', { greeting: greetingForHour(now) })}
               </ThemedText>
             </View>
             <HeaderSearchButton style={styles.searchBtn} />
