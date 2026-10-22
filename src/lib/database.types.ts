@@ -582,6 +582,8 @@ export type Database = {
           id: string;
           payload: Json | null;
           push_attempts: number;
+          push_claim_token: string | null;
+          push_claimed_at: string | null;
           push_next_attempt_at: string | null;
           pushed_at: string | null;
           type: string;
@@ -594,6 +596,8 @@ export type Database = {
           id?: string;
           payload?: Json | null;
           push_attempts?: number;
+          push_claim_token?: string | null;
+          push_claimed_at?: string | null;
           push_next_attempt_at?: string | null;
           pushed_at?: string | null;
           type: string;
@@ -606,6 +610,8 @@ export type Database = {
           id?: string;
           payload?: Json | null;
           push_attempts?: number;
+          push_claim_token?: string | null;
+          push_claimed_at?: string | null;
           push_next_attempt_at?: string | null;
           pushed_at?: string | null;
           type?: string;
@@ -1071,6 +1077,16 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      claim_due_push_notifications: {
+        Args: { p_claim_token: string; p_limit?: number };
+        Returns: {
+          id: string;
+          payload: Json;
+          push_attempts: number;
+          type: string;
+          user_id: string;
+        }[];
+      };
       consume_verification_delivery_quota: {
         Args: { p_channel: string; p_user_id: string };
         Returns: boolean;
@@ -1119,6 +1135,15 @@ export type Database = {
       delete_savings_goal: { Args: { p_goal_id: string }; Returns: undefined };
       dissolve_family: { Args: never; Returns: undefined };
       emit_monthly_summary_notifications: { Args: never; Returns: number };
+      finalize_push_notifications: {
+        Args: {
+          p_claim_token: string;
+          p_next_attempt_at?: string;
+          p_notification_ids: string[];
+          p_outcome: string;
+        };
+        Returns: number;
+      };
       generate_due_recurring_transactions: { Args: never; Returns: number };
       get_home_dashboard: {
         Args: { p_period: string };
