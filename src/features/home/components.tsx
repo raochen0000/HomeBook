@@ -15,6 +15,7 @@ import {
   frame,
   lineLimit,
   listRowInsets,
+  multilineTextAlignment,
   onTapGesture,
   opacity,
   padding,
@@ -723,11 +724,12 @@ export function InsightBanner({
     >
       <HStack spacing={Space[3]} alignment="center" modifiers={contentMods}>
         <Image systemName="calendar" size={28} color={palette.textSecondary} />
-        <VStack alignment="leading" spacing={2} modifiers={[frame({ maxWidth: 9999 })]}>
+        <VStack alignment="leading" spacing={2} modifiers={[frame({ maxWidth: 9999, alignment: 'leading' })]}>
           <Text
             modifiers={[
               font({ size: 15, weight: 'medium' }),
               foregroundColor(palette.textPrimary),
+              multilineTextAlignment('leading'),
               lineLimit(2),
               truncationMode('tail'),
             ]}
@@ -738,6 +740,7 @@ export function InsightBanner({
             modifiers={[
               font({ size: 11 }),
               foregroundColor(palette.textSecondary),
+              multilineTextAlignment('leading'),
               lineLimit(2),
               truncationMode('tail'),
             ]}
