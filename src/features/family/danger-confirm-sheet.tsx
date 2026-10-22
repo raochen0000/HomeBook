@@ -3,9 +3,11 @@
  * 用于：移除成员（输入对方昵称）、转让户主（输入对方昵称）、解散家庭（输入家庭名）。
  *
  * 透明 fade Modal（非 pageSheet），可叠在页面或另一个 Modal（如转让面板）之上。
- * onConfirm 抛错则就地提示并重置滑块（改 key 强制重挂）；成功则触发 onSuccess 后关闭。
+ * onConfirm 抛错则就地提示并重置滑块（改 key 强制重挂）。
+ * 成功则先关掉本层；等它从呈现栈退出后，再触发 onSuccess。
+ * 不能在关掉本层的同一帧里关掉外层 pageSheet，否则 iOS 会把外层停在空白容器上，下滑也无法关闭。
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { SlideToConfirm } from '@/components/ui/slide-to-confirm';
@@ -35,7 +37,7 @@ export function DangerConfirmSheet({
   slideLabel: string;
   /** 执行实际动作；抛错即视为失败。 */
   onConfirm: () => Promise<void>;
-  /** 成功后、关闭前的回调（如转让后追问是否退出）。 */
+  /** 本层确认框完全关闭后的回调（如转让成功后关闭外层成员管理页）。 */
   onSuccess?: () => void;
   onClose: () => void;
   /** 指定时不展示底层异常，适合面向用户的固定失败文案。 */
@@ -47,6 +49,7 @@ export function DangerConfirmSheet({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0); // 改变即重挂滑块以复位
+  const succeededRef = useRef(false);
 
   const matched = input.trim().toLowerCase() === matchValue.trim().toLowerCase();
 
@@ -63,16 +66,26 @@ export function DangerConfirmSheet({
     onClose();
   };
 
+  const finishSuccess = () => {
+    if (!succeededRef.current) return;
+    succeededRef.current = false;
+    reset();
+    onSuccess?.();
+  };
+
   const handleConfirm = async () => {
     if (!matched || pending) return;
     setPending(true);
     setError(null);
     try {
       await onConfirm();
-      onSuccess?.();
-      reset();
+      // 先保持 pending，避免退场过程中再次滑动提交。
+      succeededRef.current = true;
       onClose();
+      // Android 的 Modal 没有 onDismiss，等这次关闭先提交后再通知外层。
+      if (Platform.OS !== 'ios') setTimeout(finishSuccess, 0);
     } catch (e) {
+      succeededRef.current = false;
       setError(failureMessage ?? (e as Error).message ?? String(e));
       setPending(false);
       setAttempt((a) => a + 1); // 滑块回位
@@ -80,7 +93,16 @@ export function DangerConfirmSheet({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={handleClose}
+      onDismiss={() => {
+        // 跳出 UIKit 的 dismiss completion，再让外层 pageSheet 开始关闭。
+        setTimeout(finishSuccess, 0);
+      }}
+    >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.scrim, { backgroundColor: 'rgba(0,0,0,0.45)' }]}

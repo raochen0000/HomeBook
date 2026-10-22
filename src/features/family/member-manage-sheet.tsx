@@ -167,7 +167,7 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
         onConfirm={async () => {
           if (transferTarget) await transferM.mutateAsync(transferTarget.userId);
         }}
-        // 转让不改变登录会话或家庭归属；刷新完成后回到家庭页，以普通成员身份继续使用。
+        // 确认框退出后再关本页，回到家庭页并刷新为普通成员。同步关掉两层 Modal 会让 pageSheet 卡住。
         onSuccess={onClose}
         onClose={() => setTransferTarget(null)}
       />
