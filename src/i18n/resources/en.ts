@@ -46,6 +46,7 @@ const en = {
     notConnected: 'Not connected',
     unbind: 'Unlink',
     loadFailed: 'Couldn’t load',
+    imageTooLarge: 'This photo is still over 2 MB after compression',
     loadingMore: 'Loading more…',
     loadMore: 'Load more…',
     noMore: 'You’re all caught up',

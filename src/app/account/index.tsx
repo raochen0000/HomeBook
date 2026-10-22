@@ -23,6 +23,7 @@ import { Stack, useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Alert, View } from 'react-native';
 
+import { ImageTooLargeError } from '@/adapters/storage';
 import { useMyProfile, useUpdateMyAvatar, useUpdateMyNickname } from '@/api';
 import { UserAvatar } from '@/components/user-avatar';
 import { Space, usePalette } from '@/constants/design';
@@ -105,7 +106,12 @@ export default function AccountScreen() {
   const onChangeAvatar = () => {
     if (!profile?.id || updateAvatar.isPending) return;
     updateAvatar.mutate(profile.id, {
-      onError: (e) => Alert.alert(t('account.avatarFailed'), (e as Error).message ?? String(e), alertOk()),
+      onError: (e) =>
+        Alert.alert(
+          t('account.avatarFailed'),
+          e instanceof ImageTooLargeError ? t('common.imageTooLarge') : ((e as Error).message ?? String(e)),
+          alertOk(),
+        ),
     });
   };
 

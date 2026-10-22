@@ -46,6 +46,7 @@ const zhHans = {
     notConnected: '未连接',
     unbind: '解绑',
     loadFailed: '暂时无法加载',
+    imageTooLarge: '图片过大，压缩后仍超过 2MB',
     loadingMore: '正在加载更多…',
     loadMore: '继续加载…',
     noMore: '暂无更多数据',

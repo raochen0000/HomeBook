@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import { ImageTooLargeError } from '@/adapters/storage';
 import {
   defaultFamilyCoverCrop,
   type Family,
@@ -35,6 +36,11 @@ import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 import { alertOk, t, useLocalePreference } from '@/i18n';
+
+function uploadFailureDetail(error: unknown): string {
+  if (error instanceof ImageTooLargeError) return t('common.imageTooLarge');
+  return (error as Error).message ?? String(error);
+}
 
 const NAME_MIN = 2;
 const NAME_MAX = 12;
@@ -104,7 +110,7 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
       const url = await uploadAvatarM.mutateAsync(family.id);
       if (url) setAvatarUrl(url);
     } catch (error) {
-      Alert.alert(t('family.avatarFail'), (error as Error).message ?? String(error), alertOk());
+      Alert.alert(t('family.avatarFail'), uploadFailureDetail(error), alertOk());
     }
   };
 
@@ -125,7 +131,7 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
       if (url) setCoverUrl(url);
       setCoverDraft(null);
     } catch (error) {
-      Alert.alert(t('family.coverFail'), (error as Error).message ?? String(error), alertOk());
+      Alert.alert(t('family.coverFail'), uploadFailureDetail(error), alertOk());
     }
   };
 

@@ -25,7 +25,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { pickFeedbackImages, PermissionDeniedError, type PickedImage } from '@/adapters/storage';
+import { ImageTooLargeError, PermissionDeniedError, pickFeedbackImages, type PickedImage } from '@/adapters/storage';
 import {
   FEEDBACK_CONTENT_MAX,
   FEEDBACK_CONTENT_MIN,
@@ -45,6 +45,7 @@ const GRID_GAP = Space[2];
 
 /** 提交失败 → 友好文案（网络异常单独提示；RPC 抛出的校验/防刷 message 直接透传）。 */
 function submitErrorText(err: unknown): string {
+  if (err instanceof ImageTooLargeError) return t('common.imageTooLarge');
   const e = err as { message?: string; name?: string };
   const msg = (e?.message ?? '').toLowerCase();
   if (
