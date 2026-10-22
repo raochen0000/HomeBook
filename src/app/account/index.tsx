@@ -19,8 +19,8 @@ import {
   padding,
   shapes,
 } from '@expo/ui/swift-ui/modifiers';
-import { Stack, useRouter, type Href } from 'expo-router';
-import { useState } from 'react';
+import { Stack, useFocusEffect, useRouter, type Href } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Alert, View } from 'react-native';
 
 import { useMyProfile, useUpdateMyAvatar, useUpdateMyNickname } from '@/api';
@@ -31,7 +31,13 @@ import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { Row, SettingsList } from '@/features/settings/native-list';
 import { alertOk, t, useLocalePreference } from '@/i18n';
-import { deleteAccount, useSession } from '@/lib/auth';
+import { deleteAccount, getCurrentUserIdentities, useSession } from '@/lib/auth';
+import {
+  loginIdentitiesForAccount,
+  peekLoginIdentities,
+  subscribeLoginIdentities,
+  type LoginIdentitySnapshot,
+} from '@/lib/login-identity-cache';
 import { NICKNAME_MAX_LENGTH, NICKNAME_MIN_LENGTH, validateNickname } from '@/lib/profile';
 
 /** 邮箱脱敏为 r***@gmail.com。 */
@@ -61,7 +67,40 @@ export default function AccountScreen() {
   const avatarUri = profile ? (avatarFiles.get(profile.id) ?? null) : null;
 
   const user = session?.user;
-  const hasApple = user?.identities?.some((i) => i.provider === 'apple') ?? false;
+  const userId = user?.id;
+  // 管理页绑定 / 解绑后，本页仍留在栈里，session.user.identities 往往还是进去之前的那份。
+  // 重新聚焦时先用管理页刚读到的身份，再向 Auth 复核，让 Apple 行跟着最新结果变。
+  const [identitySnapshot, setIdentitySnapshot] = useState<LoginIdentitySnapshot | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return undefined;
+      let active = true;
+      const apply = (identities: LoginIdentitySnapshot['identities']) => {
+        if (active) setIdentitySnapshot({ userId, identities });
+      };
+      const cached = peekLoginIdentities(userId);
+      if (cached) apply(cached);
+      const unsubscribe = subscribeLoginIdentities(() => {
+        const latest = peekLoginIdentities(userId);
+        if (latest) apply(latest);
+      });
+      void getCurrentUserIdentities()
+        .then((identities) => {
+          const latest = peekLoginIdentities(userId);
+          apply(latest ?? identities);
+        })
+        .catch(() => {
+          // 复核失败时保留进入页面前的状态，避免一次网络错误把「已连接」打成「未连接」。
+        });
+      return () => {
+        active = false;
+        unsubscribe();
+      };
+    }, [userId]),
+  );
+  const hasApple = loginIdentitiesForAccount(userId, user?.identities, identitySnapshot).some(
+    (identity) => identity.provider === 'apple',
+  );
 
   const onChangeAvatar = () => {
     if (!profile?.id || updateAvatar.isPending) return;

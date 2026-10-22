@@ -13,6 +13,7 @@ import { unregisterCurrentDevice } from '@/api/device-tokens';
 import { t } from '@/i18n/instance';
 
 import { classifyEmailSignInFailure, isObfuscatedExistingSignUpUser } from './email-auth-flow';
+import { beginLoginIdentityRead, rememberLoginIdentities } from './login-identity-cache';
 import { normalizeDefaultNickname } from './profile';
 import { findObsoleteAuthStorageKeys, isSupabaseAuthStorageKey } from './auth-storage';
 import { supabase, supabaseAuthStorageKey } from './supabase';
@@ -365,11 +366,24 @@ export async function bindApple(): Promise<boolean> {
   return true;
 }
 
-/** 获取当前账号的登录身份；账号关联变更后不能只读取本地 session 缓存。 */
+/**
+ * 获取当前账号的登录身份。
+ * 账号关联变更后不能只读本地 session：`unlinkIdentity` 不更新已缓存用户，
+ * `linkIdentity` 带回的 session 也不保证带上最新 identities。
+ * 结果写入身份缓存，供仍挂在导航栈上的账号页在返回时刷新 Apple 状态。
+ */
 export async function getCurrentUserIdentities() {
+  const seq = beginLoginIdentityRead();
   const { data, error } = await supabase.auth.getUserIdentities();
   if (error) throw error;
-  return data?.identities ?? [];
+  const identities = data?.identities ?? [];
+  let userId = identities.find((identity) => identity.user_id)?.user_id;
+  if (!userId) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    userId = sessionData.session?.user.id;
+  }
+  rememberLoginIdentities(seq, userId, identities);
+  return identities;
 }
 
 /**
