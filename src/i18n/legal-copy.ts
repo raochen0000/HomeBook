@@ -45,7 +45,7 @@ const ZH: Record<LegalKind, LegalSection[]> = {
     },
     {
       h: '一、我们收集的信息',
-      p: '为提供账号和家庭记账服务，我们可能处理手机号、邮箱、登录凭据、昵称、头像、家庭名称和封面、家庭成员关系、邀请码、收入和支出金额、分类、备注、发生时间、预算、储蓄目标、定期记账规则、报表统计、通知记录，以及你主动提交的反馈内容和图片。',
+      p: '为提供账号和家庭记账服务，我们可能处理邮箱、登录凭据、昵称、头像、家庭名称和封面、家庭成员关系、邀请码、收入和支出金额、分类、备注、发生时间、预算、储蓄目标、定期记账规则、报表统计、通知记录，以及你主动提交的反馈内容和图片。',
     },
     {
       h: '二、设备与权限信息',
@@ -57,7 +57,7 @@ const ZH: Record<LegalKind, LegalSection[]> = {
     },
     {
       h: '四、信息共享与第三方服务',
-      p: '家庭账本信息会在对应家庭成员的权限范围内共享。为提供服务器、数据库、短信、邮件、对象存储、登录或推送服务，我们可能委托阿里云、Apple、Expo Push Service 或其他实际启用的服务商处理必要信息，并要求其仅在约定目的和范围内处理。除法律法规要求、保护用户和服务安全或经你授权外，我们不会向无关第三方提供你的个人信息。',
+      p: '家庭账本信息会在对应家庭成员的权限范围内共享。为提供服务器、数据库、对象存储和登录服务，我们使用 Supabase Cloud；为认证邮件、Apple 登录和系统推送，我们还可能使用实际启用的邮件服务商、Apple 和 Expo Push Service。上述服务商仅为提供相应服务处理必要信息。除法律法规要求、保护用户和服务安全或经你授权外，我们不会向无关第三方提供你的个人信息。',
     },
     {
       h: '五、图片存储与访问',
@@ -65,11 +65,11 @@ const ZH: Record<LegalKind, LegalSection[]> = {
     },
     {
       h: '六、信息保存与安全',
-      p: '核心业务数据部署在中华人民共和国境内。我们仅在实现服务目的所必需的期限内保存个人信息，法律法规另有规定或处理争议、安全事件所必需的除外。我们会采取访问控制、身份验证、权限隔离、传输加密、备份和安全管理等措施保护信息，但任何网络服务都无法保证绝对安全。',
+      p: '核心业务数据部署在 Supabase Cloud 的新加坡区域。我们仅在实现服务目的所必需的期限内保存个人信息，法律法规另有规定或处理争议、安全事件所必需的除外。我们会采取访问控制、身份验证、权限隔离、传输加密、备份和安全管理等措施保护信息，但任何网络服务都无法保证绝对安全。',
     },
     {
       h: '七、账号注销与数据删除',
-      p: '你可以在应用内发起账号注销。注销后，手机号、邮箱、密码、第三方登录身份和设备推送令牌将被解绑或删除，个人头像等资料将被删除。你在家庭中的历史流水可能继续保留在原家庭中；与个人身份有关的信息将被匿名化为非个人化标识。注销操作可能无法恢复。',
+      p: '你可以在应用内发起账号注销。注销后，邮箱、密码、Apple 等第三方登录身份和设备推送令牌将被解绑或删除，个人头像等资料将被删除。你在家庭中的历史流水可能继续保留在原家庭中；与个人身份有关的信息将被匿名化为非个人化标识。注销操作可能无法恢复。',
     },
     {
       h: '八、你的权利',
@@ -124,7 +124,7 @@ const EN: Record<LegalKind, LegalSection[]> = {
     },
     {
       h: '1. Information we collect',
-      p: 'To provide accounts and household bookkeeping we may process phone number, email, sign-in credentials, nickname, avatar, household name and cover, membership, invite codes, amounts, categories, notes, times, budgets, savings goals, recurring rules, reports, notifications, and feedback you submit (including images).',
+      p: 'To provide accounts and household bookkeeping we may process email, sign-in credentials, nickname, avatar, household name and cover, membership, invite codes, amounts, categories, notes, times, budgets, savings goals, recurring rules, reports, notifications, and feedback you submit (including images).',
     },
     {
       h: '2. Device and permissions',
@@ -136,7 +136,7 @@ const EN: Record<LegalKind, LegalSection[]> = {
     },
     {
       h: '4. Sharing and processors',
-      p: 'Household ledger data is shared with members of that household within their permissions. We may use Alibaba Cloud, Apple, Expo Push Service, or other enabled processors for hosting, SMS, email, storage, sign-in, or push, only for those purposes. We do not give your information to unrelated parties except as required by law, to protect users and the service, or with your permission.',
+      p: 'Household ledger data is shared with members of that household within their permissions. We use Supabase Cloud for hosting, database, storage, and sign-in. We may also use our active email provider, Apple, and Expo Push Service for authentication email, Apple sign-in, and push notifications. These processors handle only the information necessary to provide those services. We do not give your information to unrelated parties except as required by law, to protect users and the service, or with your permission.',
     },
     {
       h: '5. Images',
@@ -144,11 +144,11 @@ const EN: Record<LegalKind, LegalSection[]> = {
     },
     {
       h: '6. Retention and security',
-      p: 'Core business data is hosted in the People’s Republic of China. We keep personal information only as long as needed to provide the service, unless law or a dispute or security incident requires longer. We use access control, authentication, isolation, encryption in transit, backups, and operational security. No online service is perfectly secure.',
+      p: 'Core business data is hosted in the Singapore region of Supabase Cloud. We keep personal information only as long as needed to provide the service, unless law or a dispute or security incident requires longer. We use access control, authentication, isolation, encryption in transit, backups, and operational security. No online service is perfectly secure.',
     },
     {
       h: '7. Account deletion',
-      p: 'You can delete your account in the app. We then unlink or delete phone, email, password, third-party sign-in, and device push tokens, and remove personal profile photos. Your historical household entries may remain for other members; identity-related fields are anonymized. Deletion may be irreversible.',
+      p: 'You can delete your account in the app. We then unlink or delete email, password, third-party sign-in such as Apple, and device push tokens, and remove personal profile photos. Your historical household entries may remain for other members; identity-related fields are anonymized. Deletion may be irreversible.',
     },
     {
       h: '8. Your rights',
