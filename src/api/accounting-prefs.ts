@@ -4,7 +4,7 @@
  * 客户端直读 + 整行 upsert（onConflict = user_id）；行不存在（老用户 / 从未改过）→ 回落默认。
  *
  * 收纳「仅影响本人视角」的偏好：默认记账类型、记一笔后行为、金额隐私、报表卡片显隐 / 排序。
- * 报表卡片的排序 / 隐藏语义见 @/lib/report-cards（注册表 + resolveCardLayout）。
+ * 报表卡片的排序 / 隐藏语义见 @/lib/report-cards（按支出 / 收入 / 结余分页）。
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 

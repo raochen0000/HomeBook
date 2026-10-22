@@ -1,11 +1,11 @@
 /**
  * 报表数据卡片注册表（PRD §18 自定义能力）——报表卡片显隐 / 排序的单一真源。
  *
- * 用户偏好只存两个数组（accounting_preferences.report_card_order / report_card_hidden）；
- * 真正的「有哪些卡、默认序、哪张锁定」由本表定义。resolveCardLayout 把用户偏好与本表合并：
- *   - 用户排序里的已知卡按其序在前；本表新增（用户没存过）的卡按注册序补在末尾、默认可见；
- *   - 锁定卡（locked，如「收支概览」）永不隐藏；
- * 这样将来加卡不必迁移旧数据，老用户自动在末尾看到新卡。
+ * 支出、收入、结余各有一份顺序和显隐。偏好仍落在
+ * accounting_preferences.report_card_order / report_card_hidden，元素为 `页:卡片id`
+ * （如 `expense:budget`）。某一页没有任何该前缀项时用默认序；无前缀旧值忽略，不迁移。
+ * 锁定卡（收支概览）在每一页置顶且不可隐藏。将来给某一页加卡时，已存过该页顺序的用户
+ * 会在该页末尾看到新卡，默认可见。
  */
 
 import { t } from '@/i18n/instance';
@@ -28,15 +28,19 @@ export type ReportCardId =
   | 'savings_goals'
   | 'more_stats';
 
+export type ReportScope = 'expense' | 'income' | 'balance';
+
+export const CARD_SCOPES: ReportScope[] = ['expense', 'income', 'balance'];
+
 export type ReportCardMeta = {
   id: ReportCardId;
   /** SF Symbol 名（管理页图标）。 */
   icon: string;
-  /** 锁定卡：强制常驻置顶、不可隐藏、不可拖动（仅「收支概览」）。 */
+  /** 锁定卡：每一页强制置顶、不可隐藏、不可拖动（仅「收支概览」）。 */
   locked?: boolean;
 };
 
-/** 默认顺序 = 报表页现渲染序。标题走 `reportCardTitle`，不在此写死中文。 */
+/** 卡片元数据。各页有哪些卡、默认顺序见 `DEFAULT_SCOPE_CARD_ORDER`。 */
 export const REPORT_CARDS: ReportCardMeta[] = [
   { id: 'overview', icon: 'square.split.2x2.fill', locked: true },
   { id: 'budget', icon: 'target' },
@@ -50,20 +54,54 @@ export const REPORT_CARDS: ReportCardMeta[] = [
   { id: 'member', icon: 'person.2.fill' },
   { id: 'top_expenses', icon: 'flame.fill' },
   { id: 'income_structure', icon: 'arrow.down.circle.fill' },
-  { id: 'balance_waterfall', icon: 'waterfall' },
+  { id: 'balance_waterfall', icon: 'chart.bar.xaxis.descending' },
   { id: 'savings_rate', icon: 'percent' },
   { id: 'savings_goals', icon: 'scope' },
   { id: 'more_stats', icon: 'chart.xyaxis.line' },
 ];
 
-/** 全局至少展示的卡片数（含锁定卡）。 */
-export const MIN_VISIBLE_CARDS = 3;
+/**
+ * 各报表页的默认顺序，也是该页允许出现的卡片集合。
+ * 存钱目标只属于结余页。
+ */
+export const DEFAULT_SCOPE_CARD_ORDER: Record<ReportScope, ReportCardId[]> = {
+  expense: [
+    'overview',
+    'budget',
+    'expense_trend',
+    'expense_category',
+    'category_mom',
+    'member',
+    'more_stats',
+    'top_expenses',
+    'insights',
+  ],
+  income: ['overview', 'income_trend', 'income_structure', 'income_target', 'more_stats', 'insights'],
+  balance: [
+    'overview',
+    'income_expense',
+    'balance_waterfall',
+    'savings_rate',
+    'savings_goals',
+    'more_stats',
+    'insights',
+  ],
+};
 
-/** 卡片总数（记账设置页展示「已展示 N/总数」用）。 */
-export const TOTAL_CARDS = REPORT_CARDS.length;
+export type ScopeCardLayout = {
+  /** 该页完整顺序，含隐藏卡；锁定卡在最前。 */
+  order: ReportCardId[];
+  hidden: ReportCardId[];
+  visible: ReportCardId[];
+};
 
 const CARD_BY_ID = new Map(REPORT_CARDS.map((c) => [c.id, c]));
 const LOCKED_IDS = new Set(REPORT_CARDS.filter((c) => c.locked).map((c) => c.id));
+const SCOPE_CARD_SET: Record<ReportScope, Set<ReportCardId>> = {
+  expense: new Set(DEFAULT_SCOPE_CARD_ORDER.expense),
+  income: new Set(DEFAULT_SCOPE_CARD_ORDER.income),
+  balance: new Set(DEFAULT_SCOPE_CARD_ORDER.balance),
+};
 
 const CARD_TITLE_KEY: Record<ReportCardId, string> = {
   overview: 'report.overview',
@@ -96,44 +134,93 @@ export function isKnownCard(id: string): id is ReportCardId {
   return CARD_BY_ID.has(id as ReportCardId);
 }
 
-/**
- * 合并用户偏好与注册表，得到最终的「可见序」与「隐藏序」。
- * @param order  用户排序（卡 id 序，可含未知 / 缺失，容错）
- * @param hidden 用户隐藏集合
- */
-export function resolveCardLayout(
-  order: string[],
-  hidden: string[],
-): { visible: ReportCardId[]; hidden: ReportCardId[] } {
-  // 1) 规整排序：先取用户序里的已知卡（去重），再把注册表中用户没排过的卡按注册序补末尾。
-  const ordered: ReportCardId[] = [];
-  const seen = new Set<ReportCardId>();
-  for (const raw of order) {
-    if (isKnownCard(raw) && !seen.has(raw)) {
-      ordered.push(raw);
-      seen.add(raw);
-    }
-  }
-  for (const c of REPORT_CARDS) {
-    if (!seen.has(c.id)) {
-      ordered.push(c.id);
-      seen.add(c.id);
-    }
-  }
-
-  // 2) 显隐：锁定卡永不隐藏；且锁定卡固定置顶（与报表页 / 管理页不可拖语义一致）。
-  const hiddenSet = new Set(hidden);
-  const unlocked: ReportCardId[] = [];
-  const locked: ReportCardId[] = [];
-  const hiddenOut: ReportCardId[] = [];
-  for (const id of ordered) {
-    if (LOCKED_IDS.has(id)) locked.push(id);
-    else if (hiddenSet.has(id)) hiddenOut.push(id);
-    else unlocked.push(id);
-  }
-  return { visible: [...locked, ...unlocked], hidden: hiddenOut };
-}
-
 export function isLockedCard(id: string): boolean {
   return LOCKED_IDS.has(id as ReportCardId);
+}
+
+export function scopeCardKey(scope: ReportScope, id: ReportCardId): string {
+  return `${scope}:${id}`;
+}
+
+/** 用顺序和隐藏集生成一份规范化布局：隐藏卡按顺序排列，锁定卡不会被隐藏。 */
+export function buildScopeCardLayout(order: readonly ReportCardId[], hidden: readonly ReportCardId[]): ScopeCardLayout {
+  const hiddenSet = new Set(hidden.filter((id) => !isLockedCard(id)));
+  return {
+    order: [...order],
+    hidden: order.filter((id) => hiddenSet.has(id)),
+    visible: order.filter((id) => !hiddenSet.has(id)),
+  };
+}
+
+/**
+ * 解析某一页的卡片布局。
+ * @param order  用户排序（`页:卡片id`，可含其他页、未知项或无前缀旧值）
+ * @param hidden 用户隐藏集合（格式同 order）
+ */
+export function resolveScopeCardLayout(
+  scope: ReportScope,
+  order: readonly string[],
+  hidden: readonly string[],
+): ScopeCardLayout {
+  const allowed = SCOPE_CARD_SET[scope];
+  const prefix = `${scope}:`;
+  const seen = new Set<ReportCardId>();
+  const stored: ReportCardId[] = [];
+  let hasScopeOrder = false;
+
+  for (const raw of order) {
+    if (!raw.startsWith(prefix)) continue;
+    hasScopeOrder = true;
+    const id = raw.slice(prefix.length);
+    if (!isKnownCard(id) || !allowed.has(id) || seen.has(id)) continue;
+    stored.push(id);
+    seen.add(id);
+  }
+
+  const base = hasScopeOrder ? stored : [...DEFAULT_SCOPE_CARD_ORDER[scope]];
+  if (hasScopeOrder) {
+    for (const id of DEFAULT_SCOPE_CARD_ORDER[scope]) {
+      if (!seen.has(id)) base.push(id);
+    }
+  }
+
+  const normalized = [...base.filter(isLockedCard), ...base.filter((id) => !isLockedCard(id))];
+  const hiddenIds: ReportCardId[] = [];
+  for (const raw of hidden) {
+    if (!raw.startsWith(prefix)) continue;
+    const id = raw.slice(prefix.length);
+    if (!isKnownCard(id) || !allowed.has(id) || isLockedCard(id)) continue;
+    hiddenIds.push(id);
+  }
+  return buildScopeCardLayout(normalized, hiddenIds);
+}
+
+export function resolveAllScopeCardLayouts(
+  order: readonly string[],
+  hidden: readonly string[],
+): Record<ReportScope, ScopeCardLayout> {
+  return {
+    expense: resolveScopeCardLayout('expense', order, hidden),
+    income: resolveScopeCardLayout('income', order, hidden),
+    balance: resolveScopeCardLayout('balance', order, hidden),
+  };
+}
+
+/** 把三页布局写回两个 text[]。隐藏项按该页顺序写出，锁定卡不进入隐藏集。 */
+export function encodeScopeCardLayouts(layouts: Record<ReportScope, Pick<ScopeCardLayout, 'order' | 'hidden'>>): {
+  report_card_order: string[];
+  report_card_hidden: string[];
+} {
+  const report_card_order: string[] = [];
+  const report_card_hidden: string[] = [];
+  for (const scope of CARD_SCOPES) {
+    const allowed = SCOPE_CARD_SET[scope];
+    const hiddenSet = new Set(layouts[scope].hidden);
+    for (const id of layouts[scope].order) {
+      if (!allowed.has(id)) continue;
+      report_card_order.push(scopeCardKey(scope, id));
+      if (hiddenSet.has(id) && !isLockedCard(id)) report_card_hidden.push(scopeCardKey(scope, id));
+    }
+  }
+  return { report_card_order, report_card_hidden };
 }

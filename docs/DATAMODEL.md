@@ -337,18 +337,18 @@ erDiagram
 
 > 每用户一行的**个人级**记账偏好（仅影响本人视角，不涉及全家共享数据）。客户端直读 + 整行 `upsert`（`onConflict = user_id`），RLS 仅本人可读写；行不存在（老用户 / 从未改过）→ 客户端回落默认。收纳：默认记账类型、记一笔后行为、金额隐私、报表卡片显隐 / 排序。
 
-| 字段                         | 类型      | 约束                                            | 说明                                                       |
-| ---------------------------- | --------- | ----------------------------------------------- | ---------------------------------------------------------- |
-| `user_id`                    | UUID      | PK, FK→USER, on delete cascade                  | 归属用户（注销随账号级联删除）                             |
-| `default_txn_type`           | text      | not null, default `expense`, in(expense,income) | 打开记账面板默认选中类型                                   |
-| `after_record_behavior`      | text      | not null, default `close`, in(close,continue)   | 记一笔后：保存即关 / 继续记下一笔                          |
-| `amount_privacy`             | bool      | not null, default false                         | 开启后首页 / 报表金额显示 `****`（防窥屏）                 |
-| `report_card_order`          | text[]    | not null, default `{}`                          | 报表卡片用户排序（卡 id 全序；空 = 用默认序）              |
-| `report_card_hidden`         | text[]    | not null, default `{}`                          | 报表隐藏卡片 id 集合（「收支概览」锁定卡恒不入）           |
-| `show_monthly_summary_entry` | bool      | not null, default true                          | 首页「上月总结来啦」月度总结入口横幅显隐（迁移 0030 增列） |
-| `created_at` / `updated_at`  | timestamp |                                                 |                                                            |
+| 字段                         | 类型      | 约束                                            | 说明                                                                                         |
+| ---------------------------- | --------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `user_id`                    | UUID      | PK, FK→USER, on delete cascade                  | 归属用户（注销随账号级联删除）                                                               |
+| `default_txn_type`           | text      | not null, default `expense`, in(expense,income) | 打开记账面板默认选中类型                                                                     |
+| `after_record_behavior`      | text      | not null, default `close`, in(close,continue)   | 记一笔后：保存即关 / 继续记下一笔                                                            |
+| `amount_privacy`             | bool      | not null, default false                         | 开启后首页 / 报表金额显示 `****`（防窥屏）                                                   |
+| `report_card_order`          | text[]    | not null, default `{}`                          | 按页排序。元素为 `expense:budget` 这类 `页:卡片id`。某页没有该前缀时用默认序；无前缀旧值忽略 |
+| `report_card_hidden`         | text[]    | not null, default `{}`                          | 按页隐藏，元素格式同上。`overview` 写入也会被忽略。各页互不影响                              |
+| `show_monthly_summary_entry` | bool      | not null, default true                          | 首页「上月总结来啦」月度总结入口横幅显隐（迁移 0030 增列）                                   |
+| `created_at` / `updated_at`  | timestamp |                                                 |                                                                                              |
 
-**RLS**：`select` / `insert` / `update` 三条本人策略（`user_id = auth.uid()`）；无 delete（随账号级联）。卡片显隐 / 排序的合并语义（未知卡兜底、锁定卡、至少展示 3 张）由客户端 `@/lib/report-cards resolveCardLayout` 负责。
+**RLS**：`select` / `insert` / `update` 三条本人策略（`user_id = auth.uid()`）；无 delete（随账号级联）。卡片显隐 / 排序的合并语义（按页前缀、未知卡兜底、锁定卡置顶、新卡补在该页末尾）由客户端 `@/lib/report-cards` 的 `resolveScopeCardLayout` 负责。无前缀的历史测试值直接忽略，不迁移。
 
 ### 5.9 RECURRING_TRANSACTION / RECURRING_RUN（定时收支 · PRD §18 自定义能力）
 

@@ -20,7 +20,6 @@ import {
 import { t } from '@/i18n';
 import { usePalette } from '@/constants/design';
 import { InfoCaption, MenuRow, Row, SettingsList, ToggleRow } from '@/features/settings/native-list';
-import { resolveCardLayout, TOTAL_CARDS } from '@/lib/report-cards';
 
 export default function RecordSettingsScreen() {
   const palette = usePalette();
@@ -31,8 +30,6 @@ export default function RecordSettingsScreen() {
 
   // 加载中 / 行不存在时回落默认；乐观更新让控件即时响应。
   const prefs = data ?? DEFAULT_ACCOUNTING_PREFS;
-
-  const { visible } = resolveCardLayout(prefs.report_card_order, prefs.report_card_hidden);
   const ruleCount = rulesQ.data?.length ?? 0;
 
   return (
@@ -83,7 +80,6 @@ export default function RecordSettingsScreen() {
           <Row
             icon="rectangle.grid.1x2.fill"
             label={t('settings.reportCards')}
-            value={t('settings.shownCards', { visible: visible.length, total: TOTAL_CARDS })}
             onPress={() => router.push('/settings/report-cards' as Href)}
           />
           <Row

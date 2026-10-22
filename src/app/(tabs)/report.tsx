@@ -72,7 +72,7 @@ import {
   shiftAnchor,
   type Dimension,
 } from '@/lib/report';
-import { resolveCardLayout, type ReportCardId } from '@/lib/report-cards';
+import { resolveScopeCardLayout, type ReportCardId, type ReportScope } from '@/lib/report-cards';
 
 type CatSlice = { id: string; name: string; amount: number; color: string; symbol: string };
 /** 分类下钻：单类用 id；「其它」聚合用 categoryIds。 */
@@ -88,7 +88,6 @@ type ReportDay = {
 };
 const EXPENSE_CATEGORY_TOP_COUNT = 5;
 const EXPENSE_CATEGORY_OTHER_ID = '__other__';
-type ReportScope = 'expense' | 'income' | 'balance';
 type ReportFilters = { memberIds: string[]; categoryIds: string[] };
 type IncomeTargets = { annual: number; custom: number; activeRatio: number };
 type FinancialInsight = { title: string; body: string; action: string; tone: 'ok' | 'warn' | 'danger' };
@@ -168,45 +167,6 @@ function renderOrderedCards(nodes: Partial<Record<ReportCardId, ReactNode>>, ord
   return order.map((id) => (nodes[id] ? <View key={id}>{nodes[id]}</View> : null)).filter(Boolean);
 }
 
-/**
- * 首次进入报表时按 PRD 的视角推荐顺序呈现；用户在「报表卡片」页手动排序后，
- * 则完整尊重个人顺序。这样不会把同一数据在顶部重复解释，也保留自定义能力。
- */
-const DEFAULT_SCOPE_CARD_ORDER: Record<ReportScope, ReportCardId[]> = {
-  expense: [
-    'overview',
-    'budget',
-    'expense_trend',
-    'expense_category',
-    'category_mom',
-    'member',
-    'savings_goals',
-    'more_stats',
-    'insights',
-    'top_expenses',
-  ],
-  income: ['overview', 'income_trend', 'income_structure', 'income_target', 'more_stats', 'insights'],
-  balance: [
-    'overview',
-    'income_expense',
-    'balance_waterfall',
-    'savings_rate',
-    'savings_goals',
-    'more_stats',
-    'insights',
-  ],
-};
-
-function recommendedCardOrder(scope: ReportScope, visible: ReportCardId[], hasCustomOrder: boolean): ReportCardId[] {
-  const source = hasCustomOrder ? visible : DEFAULT_SCOPE_CARD_ORDER[scope];
-  const scoped = source.filter((id) => visible.includes(id));
-  const withMissing = [...scoped, ...visible.filter((id) => !scoped.includes(id))];
-  const overview = withMissing.includes('overview') ? ['overview' as const] : [];
-  const middle = withMissing.filter((id) => id !== 'overview' && id !== 'insights');
-  const insights = withMissing.includes('insights') ? ['insights' as const] : [];
-  return [...overview, ...middle, ...insights];
-}
-
 function startOfLocalDay(date: Date): Date {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -275,7 +235,6 @@ export default function ReportScreen() {
   // 卡片显隐 / 排序 + 金额隐私（记账设置，个人级偏好）；行不存在回落默认。
   const prefs = prefsQ.data ?? DEFAULT_ACCOUNTING_PREFS;
   const privacy = prefs.amount_privacy;
-  const cardLayout = resolveCardLayout(prefs.report_card_order, prefs.report_card_hidden);
 
   const [dimension, setDimension] = useState<Dimension>('month');
   const [scope, setScope] = useState<ReportScope>('expense');
@@ -496,9 +455,9 @@ export default function ReportScreen() {
   const activeIncome = Math.max(0, income - passiveIncome);
   const periodText = periodName(dimension);
   const customToolbarEnd = dimension === 'custom' ? addDays(range.end, -1) : range.start;
-  const visibleCards = cardLayout.visible;
-  const hiddenCards = cardLayout.hidden;
-  const cardOrder = recommendedCardOrder(scope, visibleCards, prefs.report_card_order.length > 0);
+  const scopeLayout = resolveScopeCardLayout(scope, prefs.report_card_order, prefs.report_card_hidden);
+  const cardOrder = scopeLayout.visible;
+  const hiddenCards = scopeLayout.hidden;
   const openCardSettings = () => router.push('/settings/report-cards' as Href);
   const shiftPeriod = (delta: number) => {
     if (dimension !== 'custom') {
@@ -610,19 +569,6 @@ export default function ReportScreen() {
         onOpen={() => setMemberAnalysisOpen(true)}
       />
     ),
-    ...(isMonthlyView
-      ? {
-          savings_goals: (
-            <SavingsGoalsCard
-              goals={savingsQ.data ?? []}
-              loading={savingsQ.isLoading}
-              palette={palette}
-              hidden={privacy}
-              onOpen={() => setSavingsOpen(true)}
-            />
-          ),
-        }
-      : {}),
     more_stats: commonStatsCard,
   };
 
