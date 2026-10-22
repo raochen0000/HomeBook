@@ -506,6 +506,7 @@ export function PulseCard({
   onToggleHidden,
   onPress,
   onSetBudget,
+  showBudgetPrompt = true,
   contentInsets = { horizontal: Space[4], vertical: Space[4] },
   pageHorizontalInset = Space[4],
 }: {
@@ -521,6 +522,8 @@ export function PulseCard({
   onToggleHidden: () => void;
   onPress: () => void;
   onSetBudget: () => void;
+  /** 本月还没有记账时先不引导设置预算。 */
+  showBudgetPrompt?: boolean;
   /** Hero 内容相对卡片边缘的内边距。 */
   contentInsets?: ContentInsets;
   /** Hero 卡片相对页面边缘的距离，用于计算进度条宽度。 */
@@ -597,22 +600,24 @@ export function PulseCard({
             />
           </VStack>
         </HStack>
-        {/* 设置预算引导：户主可点跳设置；普通成员只读 */}
-        <HStack
-          alignment="center"
-          spacing={Space[1]}
-          modifiers={[
-            padding({ top: Space[2] }),
-            ...(isOwner ? [contentShape(shapes.rectangle()), onTapGesture(() => onSetBudget())] : []),
-          ]}
-        >
-          <Image systemName={isOwner ? 'plus.circle' : 'lock'} size={13} color={palette.textTertiary} />
-          <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>
-            {isOwner ? t('home.setBudgetCta') : t('home.waitOwnerBudget')}
-          </Text>
-          <Spacer />
-          {isOwner ? <Image systemName="chevron.right" size={11} color={palette.textTertiary} /> : null}
-        </HStack>
+        {/* 设置预算引导：本月已有记账但未设预算时才出现。户主可点；普通成员只读。 */}
+        {showBudgetPrompt ? (
+          <HStack
+            alignment="center"
+            spacing={Space[1]}
+            modifiers={[
+              padding({ top: Space[2] }),
+              ...(isOwner ? [contentShape(shapes.rectangle()), onTapGesture(() => onSetBudget())] : []),
+            ]}
+          >
+            <Image systemName={isOwner ? 'plus.circle' : 'lock'} size={13} color={palette.textTertiary} />
+            <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textTertiary)]}>
+              {isOwner ? t('home.setBudgetCta') : t('home.waitOwnerBudget')}
+            </Text>
+            <Spacer />
+            {isOwner ? <Image systemName="chevron.right" size={11} color={palette.textTertiary} /> : null}
+          </HStack>
+        ) : null}
       </VStack>
     );
   }

@@ -2,7 +2,7 @@
  * 首页（Tab 1）：本月概览卡 + 月度总结条 + 按日分组流水列表。
  * 内容主体用 @expo/ui/swift-ui 原生渲染；外层脚手架（标题栏 / FAB / 状态页）用 RN。
  */
-import { Button, Host, Image, List, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
+import { Button, Host, List, Section, Spacer, VStack } from '@expo/ui/swift-ui';
 import {
   accessibilityHint,
   accessibilityLabel,
@@ -21,6 +21,7 @@ import {
   listSectionSpacing,
   listStyle,
   onAppear,
+  scrollDisabled,
   shadow,
   shapes,
 } from '@expo/ui/swift-ui/modifiers';
@@ -48,7 +49,7 @@ import {
 } from '@/api';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
-import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
+import { Radius, Space, TabBarInset, useCategoryColors, usePalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import {
   DayGroup,
@@ -59,7 +60,7 @@ import {
   type AvatarInfo,
   type RowData,
 } from '@/features/home/components';
-import { toPulseCardData } from '@/features/home/home-dashboard';
+import { resolveHomeOverview } from '@/features/home/home-dashboard';
 import { flattenHomeTransactionPages } from '@/features/home/home-data';
 import { TransactionDetailSheet } from '@/features/home/transaction-detail-sheet';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
@@ -89,6 +90,9 @@ const HOME_CONTENT_INSETS = {
   dayHeaderHorizontal: Space[6],
   transactionRow: { vertical: Space[1] },
 } as const;
+
+/** 零值脉搏卡约占高度，含分组列表行的上下留白。空状态高度按它从剩余视口里扣掉。 */
+const EMPTY_HERO_RESERVE = 196;
 
 /**
  * iOS 走 SwiftUI 原生 Button：系统负责按压态、触控与 VoiceOver 语义；Android / Web 保留 RN 回退。
@@ -173,7 +177,6 @@ export default function HomeScreen() {
     insets.top + 84,
     insets.top,
   );
-
   const { session } = useSession();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
@@ -192,7 +195,12 @@ export default function HomeScreen() {
   const saveAccountingPrefs = useSaveAccountingPrefs();
 
   // 脉搏卡只消费完整账期的服务端概览；不再依赖首页流水首屏页。
-  const pulseData = dashboardQ.data ? toPulseCardData(dashboardQ.data) : null;
+  // 无家庭时 RPC 成功但无行，data 为 null；这是空态，不能继续显示「加载中」。
+  const overview = resolveHomeOverview({
+    isPending: dashboardQ.isPending,
+    isError: dashboardQ.isError,
+    data: dashboardQ.data,
+  });
 
   // 月初「上月总结来啦」轻提醒（前 7 天，且上月有记账）。
   const prevMonthHasData = (previousDashboardQ.data?.transaction_count ?? 0) > 0;
@@ -387,6 +395,7 @@ export default function HomeScreen() {
     new Date().getDate() >= 25 &&
     (dashboardQ.data?.transaction_count ?? 0) > 0 &&
     !countBannerDismissed;
+  const showEmptyLedger = !!session && !transactionsQ.isLoading && groups.length === 0;
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
@@ -406,6 +415,7 @@ export default function HomeScreen() {
                 listStyle('insetGrouped'),
                 listSectionSpacing(Space[3]),
                 ...(scrollGeometry ? [scrollGeometry] : []),
+                ...(showEmptyLedger ? [scrollDisabled(true)] : []),
               ]}
             >
               {/* 顶部 Hero/横幅走 insetGrouped 原生单行 Section，由系统 row 背景负责圆角。 */}
@@ -422,21 +432,22 @@ export default function HomeScreen() {
                 }
                 modifiers={[listRowBackground(palette.card), listRowSeparator('hidden')]}
               >
-                {pulseData ? (
+                {overview.status === 'ready' || overview.status === 'empty' ? (
                   <PulseCard
-                    {...pulseData}
+                    {...overview.pulse}
                     daysLeft={daysToMonthEnd()}
                     hidden={amountsHidden}
                     onToggleHidden={toggleAmounts}
                     onPress={() => openSummary(period)}
                     onSetBudget={() => setBudgetOpen(true)}
+                    showBudgetPrompt={overview.status === 'ready'}
                     contentInsets={HOME_CONTENT_INSETS.hero}
                     pageHorizontalInset={HOME_CONTENT_INSETS.dayHeaderHorizontal}
                   />
                 ) : (
                   <PulseCardSkeleton
                     contentInsets={HOME_CONTENT_INSETS.hero}
-                    message={dashboardQ.isError ? t('common.loadFailed') : t('common.loading')}
+                    message={overview.status === 'error' ? t('common.loadFailed') : t('common.loading')}
                   />
                 )}
               </Section>
@@ -473,22 +484,7 @@ export default function HomeScreen() {
                     <EndOfListHint text={t('home.loadingTxns')} />
                   </VStack>
                 </Section>
-              ) : groups.length === 0 ? (
-                <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
-                  <VStack
-                    alignment="center"
-                    spacing={Space[2]}
-                    modifiers={[
-                      listRowInsets({ top: Space[6], bottom: Space[6], leading: Space[4], trailing: Space[4] }),
-                    ]}
-                  >
-                    <Image systemName="tray" size={48} color={palette.textTertiary} />
-                    <Text modifiers={[font({ size: 15 }), foregroundStyle(palette.textSecondary)]}>
-                      {t('home.emptyList')}
-                    </Text>
-                  </VStack>
-                </Section>
-              ) : (
+              ) : groups.length === 0 ? null : (
                 groups.map((g) => (
                   <DayGroup
                     key={g.key}
@@ -503,34 +499,49 @@ export default function HomeScreen() {
                   />
                 ))
               )}
-              {/* 末尾「没有更多了」提示 + 底部留白 */}
-              <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
-                <VStack
-                  modifiers={[
-                    listRowInsets({ top: Space[2], bottom: Space[6], leading: Space[4], trailing: Space[4] }),
-                    ...(transactionsQ.hasNextPage
-                      ? [
-                          onAppear(() => {
-                            if (!transactionsQ.isFetchingNextPage) transactionsQ.fetchNextPage();
-                          }),
-                        ]
-                      : []),
-                  ]}
-                >
-                  <EndOfListHint
-                    text={
-                      transactionsQ.isFetchingNextPage
-                        ? t('common.loadingMore')
-                        : transactionsQ.hasNextPage
-                          ? t('common.loadMore')
-                          : t('common.noMore')
-                    }
-                  />
-                </VStack>
-              </Section>
+              {/* 还有下一页时才占一行：触发继续加载，并显示「正在加载 / 加载更多」。到底后不再展示「暂无更多数据」。 */}
+              {groups.length > 0 && (transactionsQ.hasNextPage || transactionsQ.isFetchingNextPage) ? (
+                <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
+                  <VStack
+                    modifiers={[
+                      listRowInsets({ top: Space[2], bottom: Space[6], leading: Space[4], trailing: Space[4] }),
+                      ...(transactionsQ.hasNextPage
+                        ? [
+                            onAppear(() => {
+                              if (!transactionsQ.isFetchingNextPage) transactionsQ.fetchNextPage();
+                            }),
+                          ]
+                        : []),
+                    ]}
+                  >
+                    <EndOfListHint
+                      text={transactionsQ.isFetchingNextPage ? t('common.loadingMore') : t('common.loadMore')}
+                    />
+                  </VStack>
+                </Section>
+              ) : null}
             </List>
           </Host>
         )}
+
+        {showEmptyLedger ? (
+          <View
+            pointerEvents="none"
+            accessible
+            accessibilityLabel={`${t('home.emptyTitle')}，${t('home.emptyHint')}`}
+            style={[styles.emptyLedger, { top: headerHeight + EMPTY_HERO_RESERVE, bottom: TabBarInset }]}
+          >
+            <SymbolView name="tray" tintColor={palette.textTertiary} size={56} />
+            <View style={styles.emptyCopy}>
+              <ThemedText style={[styles.emptyTitle, { color: palette.textPrimary }]}>
+                {t('home.emptyTitle')}
+              </ThemedText>
+              <ThemedText style={[styles.emptyHint, { color: palette.textSecondary }]}>
+                {t('home.emptyHint')}
+              </ThemedText>
+            </View>
+          </View>
+        ) : null}
 
         {/* 顶栏：绝对覆盖层，随滚动上移淡出，越接近顶部越显现（IA §2） */}
         <View style={[styles.headerClip, { height: headerHeight }]} pointerEvents="box-none">
@@ -613,6 +624,19 @@ const styles = StyleSheet.create({
   title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
   subtitle: { fontSize: 14, lineHeight: 18 },
   searchBtn: { paddingTop: Space[2] },
+  emptyLedger: {
+    position: 'absolute',
+    left: Space[6],
+    right: Space[6],
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Space[3],
+    // 在卡片与 Tab Bar 的正中位置上再上移一截，避免贴着底部加号。
+    transform: [{ translateY: -Space[12] }],
+  },
+  emptyCopy: { alignItems: 'center', gap: Space[1] },
+  emptyTitle: { fontSize: 17, lineHeight: 22, fontWeight: '600', textAlign: 'center' },
+  emptyHint: { fontSize: 15, lineHeight: 20, textAlign: 'center' },
   fabHost: {
     position: 'absolute',
     right: Space[4],
