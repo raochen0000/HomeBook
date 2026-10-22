@@ -19,7 +19,13 @@ begin
 end;
 $cleanup$;
 
--- 先解除 profiles -> families 的外键，再由家庭级联删除账单、预算和成员关系。
+-- 先解除 profiles -> families 的外键。
+--
+-- 家庭实时修订触发器会在共享数据删除时更新 family_data_revisions，
+-- 因此必须在 families 行仍存在时先删除各共享子数据。若直接删除家庭，
+-- 级联删除 transactions/memberships 的 AFTER DELETE 触发器会尝试写回已删除家庭的修订行。
+-- 本次流水量为 100,000 条；在本事务中临时抑制用户触发器，避免为即将整体删除的
+-- 测试家庭重复写入 100,000 次修订号。该设置仅在 commit/rollback 前有效。
 update public.profiles
 set current_family_id = null
 where id in (
@@ -30,6 +36,45 @@ where id in (
   '60000000-0000-0000-0000-000000000005'::uuid,
   '2937b7d2-72cf-4dbd-9d8b-f96a6f007a8e'::uuid
 );
+
+set local session_replication_role = replica;
+
+delete from public.savings_entries
+where goal_id in (
+  select id
+  from public.savings_goals
+  where family_id = 'f6000000-0000-0000-0000-000000000001'::uuid
+);
+
+delete from public.transactions
+where family_id = 'f6000000-0000-0000-0000-000000000001'::uuid;
+
+delete from public.savings_goals
+where family_id = 'f6000000-0000-0000-0000-000000000001'::uuid;
+
+delete from public.budget_categories
+where budget_id in (
+  select id
+  from public.budgets
+  where family_id = 'f6000000-0000-0000-0000-000000000001'::uuid
+);
+
+delete from public.budgets
+where family_id = 'f6000000-0000-0000-0000-000000000001'::uuid;
+
+delete from public.recurring_transactions
+where family_id = 'f6000000-0000-0000-0000-000000000001'::uuid;
+
+delete from public.family_hidden_categories
+where family_id = 'f6000000-0000-0000-0000-000000000001'::uuid;
+
+delete from public.categories
+where family_id = 'f6000000-0000-0000-0000-000000000001'::uuid;
+
+delete from public.memberships
+where family_id = 'f6000000-0000-0000-0000-000000000001'::uuid;
+
+set local session_replication_role = origin;
 
 delete from public.families
 where id = 'f6000000-0000-0000-0000-000000000001'::uuid
