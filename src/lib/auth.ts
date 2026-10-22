@@ -12,10 +12,10 @@ import { Platform } from 'react-native';
 import { unregisterCurrentDevice } from '@/api/device-tokens';
 import { t } from '@/i18n/instance';
 
+import { findObsoleteAuthStorageKeys, isSupabaseAuthStorageKey } from './auth-storage';
 import { classifyEmailSignInFailure, isObfuscatedExistingSignUpUser } from './email-auth-flow';
 import { beginLoginIdentityRead, rememberLoginIdentities } from './login-identity-cache';
 import { normalizeDefaultNickname } from './profile';
-import { findObsoleteAuthStorageKeys, isSupabaseAuthStorageKey } from './auth-storage';
 import { supabase, supabaseAuthStorageKey } from './supabase';
 
 /** GoTrue 持久化会话键（`sb-<ref>-auth-token` 及其 -user / -code-verifier 后缀）。 */
