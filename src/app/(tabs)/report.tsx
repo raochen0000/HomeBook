@@ -20,18 +20,18 @@ import Svg, { Circle, Line, Polyline, Rect, Text as SvgText } from 'react-native
 
 import {
   DEFAULT_ACCOUNTING_PREFS,
+  EMPTY_REPORT_ANALYTICS,
   useAccountingPrefs,
   useBudget,
-  useCategoryDetail,
   useCategories,
+  useCategoryDetail,
   useFamilyMembers,
   useMyFamily,
   useMyProfile,
   useReportAnalytics,
   useSavingsGoals,
-  EMPTY_REPORT_ANALYTICS,
-  type ReportAnalytics,
   type Category,
+  type ReportAnalytics,
   type ReportAnalyticsInput,
   type SavingsGoal,
 } from '@/api';
@@ -3796,7 +3796,8 @@ const styles = StyleSheet.create({
   monthlyOverviewCell: { flex: 1, minWidth: 0, gap: Space[1], paddingHorizontal: Space[3] },
   monthlyOverviewLabel: { fontSize: 13 },
   monthlyOverviewAmount: { fontSize: 18, lineHeight: 24, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  monthlyOverviewAmountPrimary: { fontSize: 24, lineHeight: 30 },
+  // iOS 把超出字号的行高留在字形上方，上移行高差后主数字才和右侧数字共基线。
+  monthlyOverviewAmountPrimary: { fontSize: 24, lineHeight: 30, marginTop: 24 - 30 },
   budgetCard: { gap: Space[3] },
   budgetHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space[3] },
   budgetTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
@@ -3881,7 +3882,14 @@ const styles = StyleSheet.create({
   targetHeroPct: { fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
   targetHeroAmount: { fontSize: 28, lineHeight: 34, fontWeight: '700', fontVariant: ['tabular-nums'] },
   targetHeroMeta: { fontSize: 13, lineHeight: 18, fontVariant: ['tabular-nums'] },
-  incomeTargetEmpty: { minHeight: 96, borderRadius: Radius.md, padding: Space[3], flexDirection: 'row', gap: Space[3] },
+  incomeTargetEmpty: {
+    minHeight: 96,
+    borderRadius: Radius.md,
+    padding: Space[3],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[3],
+  },
   targetEmptyIcon: {
     width: 54,
     height: 54,
@@ -3889,7 +3897,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  targetEmptyTitle: { fontSize: 16, fontWeight: '700', marginBottom: 2 },
+  targetEmptyTitle: { fontSize: 16, lineHeight: 22, fontWeight: '700', marginBottom: 2 },
   targetEmptyText: { fontSize: 13, lineHeight: 18 },
   incomeStructureTrack: {
     height: 10,

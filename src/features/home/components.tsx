@@ -11,6 +11,7 @@ import {
   font,
   foregroundColor,
   frame,
+  labelStyle,
   lineLimit,
   listRowInsets,
   multilineTextAlignment,
@@ -273,13 +274,13 @@ export function DayGroup({
               systemImage="square.and.pencil"
               label={t('common.edit')}
               onPress={() => onEdit?.(row.id)}
-              modifiers={[tint(palette.info)]}
+              modifiers={[tint(palette.info), labelStyle('iconOnly')]}
             />
             <Button
               systemImage="trash"
               label={t('common.delete')}
               onPress={() => onDelete?.(row.id)}
-              modifiers={[tint(palette.danger)]}
+              modifiers={[tint(palette.danger), labelStyle('iconOnly')]}
             />
           </SwipeActions.Actions>
         </SwipeActions>
