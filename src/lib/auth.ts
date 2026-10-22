@@ -14,12 +14,11 @@ import { t } from '@/i18n/instance';
 
 import { classifyEmailSignInFailure, isObfuscatedExistingSignUpUser } from './email-auth-flow';
 import { normalizeDefaultNickname } from './profile';
-import { supabase } from './supabase';
+import { findObsoleteAuthStorageKeys, isSupabaseAuthStorageKey } from './auth-storage';
+import { supabase, supabaseAuthStorageKey } from './supabase';
 
 /** GoTrue 持久化会话键（`sb-<ref>-auth-token` 及其 -user / -code-verifier 后缀）。 */
-function isAuthStorageKey(key: string): boolean {
-  return key.includes('-auth-token') || key === 'supabase.auth.token';
-}
+const isAuthStorageKey = isSupabaseAuthStorageKey;
 
 /**
  * 推送令牌注销只用于避免退出后继续收到推送，不能无限阻塞用户退出。
@@ -72,16 +71,27 @@ async function clearLocalSession(): Promise<void> {
   if (error) throw error;
 }
 
+/** 新 Cloud 包首次启动时，旧项目的 JWT 只能强制重新登录，绝不尝试迁移或复用。 */
+async function clearObsoleteProjectSessions(): Promise<void> {
+  const obsoleteKeys = findObsoleteAuthStorageKeys(await AsyncStorage.getAllKeys(), supabaseAuthStorageKey);
+  if (obsoleteKeys.length > 0) await AsyncStorage.multiRemove(obsoleteKeys);
+}
+
 /** 订阅当前会话；loading 用于首帧避免登录页闪现。 */
 export function useSession(): { session: Session | null; loading: boolean } {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
+    void clearObsoleteProjectSessions()
+      // 存储清理失败时，当前项目的命名空间仍不会读取旧项目 session；不能卡住登录页。
+      .catch(() => {})
+      .then(() =>
+        supabase.auth.getSession().then(({ data }) => {
+          setSession(data.session);
+          setLoading(false);
+        }),
+      );
     const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
     return () => sub.subscription.unsubscribe();
   }, []);
