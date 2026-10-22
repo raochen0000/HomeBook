@@ -4,9 +4,7 @@
  */
 import { Button, HStack, Image, Section, Spacer, SwipeActions, Text, VStack, ZStack } from '@expo/ui/swift-ui';
 import {
-  aspectRatio,
   background,
-  clipShape,
   contentShape,
   cornerRadius,
   fixedSize,
@@ -19,7 +17,6 @@ import {
   onTapGesture,
   opacity,
   padding,
-  resizable,
   shapes,
   tint,
   truncationMode,
@@ -28,11 +25,11 @@ import {
 import type { ComponentProps } from 'react';
 import { Dimensions } from 'react-native';
 
+import { ListUserAvatar } from '@/components/list-user-avatar';
 import { Radius, Space, Typography, usePalette } from '@/constants/design';
 import { t } from '@/i18n';
 import { budgetLevel, budgetStage } from '@/lib/budget';
 import { amountParts, formatAmount, signForNet } from '@/lib/format';
-import { avatarInitialFromNickname } from '@/lib/profile';
 
 // ── 两段式金额：整数主字号 + 小数降一档（DESIGN §8）────────────────────────────
 export function AmountText({
@@ -84,42 +81,9 @@ export type AvatarInfo = {
   nickname: string;
 };
 
-/** 与 UserAvatar SVG 渐变两端的中点；Expo UI `background` 只接受纯色。 */
-const FALLBACK_AVATAR_BG = '#98A9D5';
-
-/**
- * 流水行内头像：只用 SwiftUI（不桥 RNHostView）。
- * pageSheet 会改 List 的 proposed height；RNHostView 按 UIView.bounds 回写，会把行拉满或裁成空白。
- * 修饰符顺序必须是 frame → 填色 → clipShape：clip 写在 background 前面时，底会保持方形。
- */
+/** 流水行内头像。实现见 ListUserAvatar：List 内不能用 RNHostView。 */
 function MemberAvatar({ info, size = 20 }: { info: AvatarInfo; size?: number }) {
-  if (info.uri) {
-    return (
-      <Image
-        uiImage={info.uri}
-        modifiers={[
-          resizable(),
-          aspectRatio({ contentMode: 'fill' }),
-          frame({ width: size, height: size }),
-          clipShape('circle'),
-        ]}
-      />
-    );
-  }
-  return (
-    <ZStack
-      alignment="center"
-      modifiers={[
-        frame({ width: size, height: size }),
-        background(FALLBACK_AVATAR_BG, shapes.circle()),
-        clipShape('circle'),
-      ]}
-    >
-      <Text modifiers={[font({ size: Math.round(size * 0.52), weight: 'bold' }), foregroundColor('#FFFFFF')]}>
-        {avatarInitialFromNickname(info.nickname)}
-      </Text>
-    </ZStack>
-  );
+  return <ListUserAvatar uri={info.uri} nickname={info.nickname} size={size} />;
 }
 
 /** 记录人（+修改者）头像：靠左层叠，记录人压在上层。 */

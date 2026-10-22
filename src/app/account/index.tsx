@@ -6,7 +6,7 @@
  * 头像换图、昵称编辑已可用；登录方式 / 改密 push 到管理小页；账号注销走 delete_account RPC
  * （软注销：家庭流水保留、成员消失、登录身份删除），触发前须输入「注销」二字二次确认。
  */
-import { HStack, Image, Popover, RNHostView, Section, Spacer, Text } from '@expo/ui/swift-ui';
+import { HStack, Image, Popover, Section, Spacer, Text } from '@expo/ui/swift-ui';
 import {
   contentShape,
   fixedSize,
@@ -25,7 +25,7 @@ import { Alert, View } from 'react-native';
 
 import { ImageTooLargeError } from '@/adapters/storage';
 import { useMyProfile, useUpdateMyAvatar, useUpdateMyNickname } from '@/api';
-import { UserAvatar } from '@/components/user-avatar';
+import { ListUserAvatar } from '@/components/list-user-avatar';
 import { Space, usePalette } from '@/constants/design';
 import { requireSensitiveReauthentication } from '@/features/auth/sensitive-reauth';
 import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
@@ -163,13 +163,7 @@ export default function AccountScreen() {
           >
             <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{t('account.avatar')}</Text>
             <Spacer />
-            <RNHostView matchContents>
-              <UserAvatar
-                avatarUrl={avatarUri ?? profile?.avatar_url}
-                nickname={profile?.nickname ?? t('common.user')}
-                size={32}
-              />
-            </RNHostView>
+            <ListUserAvatar uri={avatarUri} nickname={profile?.nickname ?? t('common.user')} size={32} />
             <Image systemName="chevron.right" size={13} color={palette.textTertiary} />
           </HStack>
           <HStack

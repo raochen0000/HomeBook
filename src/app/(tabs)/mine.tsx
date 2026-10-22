@@ -8,24 +8,25 @@
  * - 退出登录 → 二次确认后登出（真实操作）。
  * 折叠头与首页同款：useManualCollapsibleHeader + 原生 List 的 scrollGeometry 修饰符驱动，
  * 头部只作背景与安全区让位（不渲染标题 / 搜索）。
+ * 头像用 SwiftUI 固定尺寸（ListUserAvatar），不经 RNHostView，避免 List 提议高度把这一行拉满。
  */
-import { HStack, Image, RNHostView, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
+import { HStack, Image, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
 import { contentShape, font, foregroundColor, listRowInsets, onTapGesture, shapes } from '@expo/ui/swift-ui/modifiers';
 import { useRouter, type Href } from 'expo-router';
-import { Alert, StyleSheet, View } from 'react-native';
 import { useEffect, useState } from 'react';
+import { Alert, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useMyProfile } from '@/api';
-import { alertOk, t, useLocalePreference } from '@/i18n';
-import { registerPushDevice } from '@/features/notifications/use-push-registration';
-import { UserAvatar } from '@/components/user-avatar';
+import { ListUserAvatar } from '@/components/list-user-avatar';
 import { Space, usePalette } from '@/constants/design';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
+import { registerPushDevice } from '@/features/notifications/use-push-registration';
 import { MenuRow, Row, SettingsList } from '@/features/settings/native-list';
-import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { useThemePreference, type ThemePreference } from '@/features/settings/theme-preference';
+import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-header';
+import { alertOk, t, useLocalePreference } from '@/i18n';
 import { signOut, useSession } from '@/lib/auth';
 
 const APP_VERSION = 'v1.0.0';
@@ -109,13 +110,7 @@ export default function MineScreen() {
               onTapGesture(() => router.push('/account' as Href)),
             ]}
           >
-            <RNHostView matchContents>
-              <UserAvatar
-                avatarUrl={avatarUri ?? profile?.avatar_url}
-                nickname={profile?.nickname ?? t('common.user')}
-                size={60}
-              />
-            </RNHostView>
+            <ListUserAvatar uri={avatarUri} nickname={profile?.nickname ?? t('common.user')} size={60} />
             <VStack alignment="leading" spacing={Space[1]}>
               <Text modifiers={[font({ size: 22, weight: 'semibold' }), foregroundColor(palette.textPrimary)]}>
                 {profile?.nickname ?? t('common.user')}
