@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { singleLineTextInputStyle } from '@/constants/text-input';
+import { requireSensitiveReauthentication } from '@/features/auth/sensitive-reauth';
 import { t, useLocalePreference } from '@/i18n';
 import { bindEmail, normalizeEmail, useSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -96,6 +97,7 @@ export default function EmailScreen() {
     }
     setBusy(true);
     try {
+      if (!(await requireSensitiveReauthentication(session?.user))) return;
       await bindEmail(email);
       toast.success(hasEmail ? t('account.rebindEmailLinkSent') : t('account.bindEmailLinkSent'));
     } catch (err) {

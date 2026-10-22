@@ -26,6 +26,7 @@ import { Alert, View } from 'react-native';
 import { useMyProfile, useUpdateMyAvatar, useUpdateMyNickname } from '@/api';
 import { UserAvatar } from '@/components/user-avatar';
 import { Space, usePalette } from '@/constants/design';
+import { requireSensitiveReauthentication } from '@/features/auth/sensitive-reauth';
 import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { Row, SettingsList } from '@/features/settings/native-list';
@@ -53,6 +54,7 @@ export default function AccountScreen() {
   const [loginInfoOpen, setLoginInfoOpen] = useState(false);
   // 账号注销二次确认：输入「我确认注销」+ 危险红滑块（像滑动关机），替代原 Alert 双按钮。
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [preparingDelete, setPreparingDelete] = useState(false);
 
   // 头像预下载到本地 file://，供原生 Image uiImage 同步读（与首页流水头像同一链路）。
   const avatarFiles = useAvatarFiles(profile ? [{ id: profile.id, avatar_url: profile.avatar_url }] : []);
@@ -91,7 +93,17 @@ export default function AccountScreen() {
 
   // 二次销毁确认：打开危险确认弹层（输入「我确认注销」解锁滑块）。成功后本地会话被清掉，
   // 根布局 Stack.Protected 把本页从栈里摘掉并落到登录页。
-  const onDeleteAccount = () => setDeleteOpen(true);
+  const onDeleteAccount = async () => {
+    if (preparingDelete) return;
+    setPreparingDelete(true);
+    try {
+      if (await requireSensitiveReauthentication(user)) setDeleteOpen(true);
+    } catch (e) {
+      Alert.alert(t('account.deleteAccount'), (e as Error).message ?? String(e), alertOk());
+    } finally {
+      setPreparingDelete(false);
+    }
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.base }}>
@@ -194,9 +206,9 @@ export default function AccountScreen() {
             icon="person.crop.circle.badge.xmark"
             label={t('account.deleteAccount')}
             danger
-            value={t('account.deleteHint')}
+            value={preparingDelete ? t('common.loading') : t('account.deleteHint')}
             valueSize={12}
-            onPress={onDeleteAccount}
+            onPress={() => void onDeleteAccount()}
           />
         </Section>
       </SettingsList>

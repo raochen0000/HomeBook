@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { toast } from '@/components/toast';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { singleLineTextInputStyle } from '@/constants/text-input';
+import { requireSensitiveReauthentication } from '@/features/auth/sensitive-reauth';
 import { t, useLocalePreference } from '@/i18n';
 import { updatePassword, useSession } from '@/lib/auth';
 
@@ -69,11 +70,15 @@ export default function PasswordScreen() {
 
   const lengthOk = pwd.length >= MIN_LEN;
   const matchOk = confirm.length > 0 && pwd === confirm;
-  const canSave = lengthOk && matchOk && !busy;
+  const canSave = hasEmail && lengthOk && matchOk && !busy;
   // 确认框已填且不一致时才提示（避免边输入边报错）。
   const mismatch = confirm.length > 0 && pwd !== confirm;
 
   const onSave = async () => {
+    if (!hasEmail) {
+      toast.error(t('account.passwordHintNoEmail'));
+      return;
+    }
     if (!canSave) {
       if (!lengthOk) toast.error(t('auth.passwordMin'));
       else if (!matchOk) toast.error(t('auth.passwordMismatch'));
@@ -81,6 +86,7 @@ export default function PasswordScreen() {
     }
     setBusy(true);
     try {
+      if (!(await requireSensitiveReauthentication(session?.user))) return;
       await updatePassword(pwd);
       toast.success(t('auth.passwordUpdated'));
       setTimeout(() => router.back(), 700);
