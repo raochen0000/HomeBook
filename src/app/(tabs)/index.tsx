@@ -90,14 +90,14 @@ const RECORD_FAB_ICON_SIZE = 28;
 
 /**
  * 首页内容间距：在这里统一微调 Hero、日期汇总行与流水 Item，避免三处各自维护数值。
- * - hero：卡片内容相对卡片边缘的内边距；会同时影响进度条可用宽度。
+ * - hero：卡片内容相对卡片边缘的水平内边距，与流水 Item 的设计内边距 Space[4] 一致；会同时影响进度条宽度。
  * - dayHeaderHorizontal：如「今天  +¥…」的页面左右边距。
  * - transactionRow：流水 Item 内容相对分组卡片边缘的内边距。
  */
 const HOME_CONTENT_INSETS = {
-  hero: { horizontal: Space[1] },
+  hero: { horizontal: Space[4] },
   dayHeaderHorizontal: Space[6],
-  transactionRow: { vertical: Space[1] },
+  transactionRow: { horizontal: Space[4], vertical: Space[1] },
 } as const;
 
 /** 零值脉搏卡约占高度，含分组列表行的上下留白。空状态高度按它从剩余视口里扣掉。 */
