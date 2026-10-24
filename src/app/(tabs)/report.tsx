@@ -63,6 +63,7 @@ import {
   maskAmount,
   signForNet,
 } from '@/lib/format';
+import { memberDisplayName } from '@/lib/member-name';
 import {
   balanceRate,
   equalPeriodIncomeExpenseSeries,
@@ -227,6 +228,13 @@ export default function ReportScreen() {
   const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 61);
   const catsQ = useCategories();
   const membersQ = useFamilyMembers();
+  const ledgerMembers = useMemo(() => {
+    void locale;
+    return (membersQ.data ?? []).map((member) => ({
+      id: member.id,
+      nickname: memberDisplayName(member.nickname, member.departed),
+    }));
+  }, [membersQ.data, locale]);
   const familyQ = useMyFamily();
   const profileQ = useMyProfile();
   const prefsQ = useAccountingPrefs();
@@ -347,7 +355,9 @@ export default function ReportScreen() {
     const uncategorized = t('common.uncategorized');
     const otherIncome = t('categories.otherIncome');
     const memberFallback = t('common.member');
-    const memberNameById = new Map(mem.map((member) => [member.id, member.nickname]));
+    const memberNameById = new Map(
+      mem.map((member) => [member.id, memberDisplayName(member.nickname, member.departed)]),
+    );
     if (myId) memberNameById.set(myId, t('common.me'));
 
     // 分类展示信息（识别色 + 图标）按分类预先计算；流水循环只查 Map。
@@ -790,7 +800,7 @@ export default function ReportScreen() {
         visible={memberAnalysisOpen}
         dimension={dimension}
         analytics={reportData ?? EMPTY_REPORT_ANALYTICS}
-        members={membersQ.data ?? []}
+        members={ledgerMembers}
         categories={catsQ.data ?? []}
         hidden={privacy}
         onClose={() => setMemberAnalysisOpen(false)}
@@ -829,7 +839,7 @@ export default function ReportScreen() {
       <ReportFilterSheet
         visible={filterOpen}
         filters={filters}
-        members={membersQ.data ?? []}
+        members={ledgerMembers}
         categories={catsQ.data ?? []}
         matchedCount={filteredCount}
         onChange={setFilters}

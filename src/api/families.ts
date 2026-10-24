@@ -10,6 +10,7 @@ import {
   type PickedFamilyCover,
 } from '@/adapters/storage';
 import type { Tables } from '@/lib/database.types';
+import { buildLedgerMembers, type LedgerMember } from '@/lib/member-name';
 import { validateNickname } from '@/lib/profile';
 import { supabase } from '@/lib/supabase';
 
@@ -36,13 +37,38 @@ export function useMyProfile() {
   return useQuery({ queryKey: queryKeys.profile, queryFn: fetchMyProfile });
 }
 
-export type FamilyMember = Pick<Profile, 'id' | 'nickname' | 'avatar_url'>;
+export type FamilyMember = LedgerMember;
 
-/** 同家庭成员（含自己）的昵称/头像；RLS（shares_family）只返回同家庭成员。 */
+/**
+ * 当前家庭账本里要显示的人：仍在家庭中的成员，以及已经退出或被移出的人。
+ * 名单来自本家庭的成员关系，不把其他家庭的注销账号算进来。
+ */
 export async function fetchFamilyMembers(): Promise<FamilyMember[]> {
-  const { data, error } = await supabase.from('profiles').select('id, nickname, avatar_url');
+  const { data: memberships, error } = await supabase
+    .from('memberships')
+    .select('user_id, status, nickname, role, joined_at, left_at');
   if (error) throw error;
-  return data;
+  const rows = memberships ?? [];
+  const ids = [...new Set(rows.map((row) => row.user_id))];
+  if (ids.length === 0) return [];
+
+  const { data: profiles, error: profileError } = await supabase
+    .from('profiles')
+    .select('id, nickname, avatar_url')
+    .in('id', ids);
+  if (profileError) throw profileError;
+
+  return buildLedgerMembers(
+    rows.map((row) => ({
+      userId: row.user_id,
+      status: row.status,
+      nickname: row.nickname,
+      role: row.role,
+      joinedAt: row.joined_at,
+      leftAt: row.left_at,
+    })),
+    profiles ?? [],
+  );
 }
 
 export function useFamilyMembers() {

@@ -1032,6 +1032,7 @@ const zhHans = {
     transferSlide: '滑动以确认转让',
     joinedAt: '加入于 {{date}}',
     manageHint: '点其他成员可转让户主或移除。被移除者的历史记账会保留在家里。',
+    leftName: '{{name}}（已退出）',
   },
 } as const;
 

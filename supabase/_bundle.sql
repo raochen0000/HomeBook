@@ -1,4 +1,4 @@
--- 家账 HomeBook · 全量建库脚本（43 个迁移按序合并）
+-- 家账 HomeBook · 全量建库脚本（58 个迁移按序合并）
 -- 用法：在自托管实例的 Studio → SQL Editor 整段粘贴执行一次。
 -- 全程包在一个事务里，任一步出错整体回滚，便于安全重试。
 -- 注意：表无 IF NOT EXISTS，仅供首次建库；重复执行会因对象已存在而报错（属预期）。
@@ -3764,5 +3764,1683 @@ drop index if exists public.notifications_push_pending_idx;
 create index notifications_push_due_idx
   on public.notifications (push_next_attempt_at nulls first, created_at)
   where channel = 'in_app' and pushed_at is null;
+
+-- ============================================================
+-- >>> migrations/20260827120043_device_token_locale.sql
+-- ============================================================
+-- 0043 · 推送令牌携带界面语言，供系统推送按设备语言投递
+-- ----------------------------------------------------------------------------
+-- 语义：locale 为短码 zh | en，默认 zh（兼容旧行与旧客户端）。
+-- 写仍只走 SECURITY DEFINER RPC。增加 p_locale 且带 default，旧三参数调用从 SQL 侧仍合法；
+-- 先 drop 三参数函数，避免 PostgREST 命中不含 locale 的旧重载。
+
+alter table public.device_tokens
+  add column if not exists locale text not null default 'zh';
+
+alter table public.device_tokens
+  drop constraint if exists device_tokens_locale_check;
+
+alter table public.device_tokens
+  add constraint device_tokens_locale_check check (locale in ('zh', 'en'));
+
+drop function if exists public.register_device_token(text, text, text);
+
+create or replace function public.register_device_token(
+  p_token    text,
+  p_platform text,
+  p_provider text default 'expo',
+  p_locale   text default 'zh'
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_locale text := case when p_locale in ('zh', 'en') then p_locale else 'zh' end;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+  if p_token is null or btrim(p_token) = '' then
+    raise exception 'token 不能为空' using errcode = '22023';
+  end if;
+  if p_platform not in ('ios','android') then
+    raise exception 'platform 不合法' using errcode = '22023';
+  end if;
+  if coalesce(p_provider, 'expo') not in ('expo','apns') then
+    raise exception 'provider 不合法' using errcode = '22023';
+  end if;
+
+  insert into public.device_tokens (token, user_id, platform, provider, locale)
+  values (btrim(p_token), v_uid, p_platform, coalesce(p_provider, 'expo'), v_locale)
+  on conflict (token) do update
+    set user_id    = excluded.user_id,
+        platform   = excluded.platform,
+        provider   = excluded.provider,
+        locale     = excluded.locale,
+        updated_at = now();
+end;
+$$;
+
+revoke execute on function public.register_device_token(text, text, text, text) from public;
+grant  execute on function public.register_device_token(text, text, text, text) to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260831124018_create_legacy_public_storage_buckets.sql
+-- ============================================================
+-- 0044 · 将历史 Studio 手工创建的公开媒体 bucket 纳入版本化 migration
+-- -----------------------------------------------------------------------------
+-- 0020/0022 已定义这两个 bucket 的 storage.objects policy，但旧阿里云环境中 bucket
+-- 是通过 Studio 手工创建的，导致干净项目重放仓库 migration 后缺少对象存储容器。
+-- 路径 A 以仓库为唯一重建来源：此 migration 保证 Cloud 从零重建时能得到一致的公开 bucket。
+-- 现有对象 policy 不在这里重建，仍由先前 migration 管理。
+
+insert into storage.buckets (id, name, public)
+values
+  ('homebook-user-avatars', 'homebook-user-avatars', true),
+  ('homebook-family-covers', 'homebook-family-covers', true)
+on conflict (id) do update
+  set name = excluded.name,
+      public = excluded.public;
+
+-- ============================================================
+-- >>> migrations/20260901045243_harden_trigger_functions_and_feedback_rate_limit.sql
+-- ============================================================
+-- 0046 · 收紧内部触发器函数权限，并修复反馈限流异常码
+-- -----------------------------------------------------------------------------
+-- 这三个 SECURITY DEFINER 函数仅由数据库 trigger 调用，不是客户端 RPC。
+-- PostgreSQL 默认向 PUBLIC 授予函数 EXECUTE，须显式撤销，避免被 Data API 调用。
+revoke execute on function public.handle_new_user() from public;
+revoke execute on function public.enforce_member_limit() from public;
+revoke execute on function public.enforce_goal_limit() from public;
+
+-- 旧的非 SECURITY DEFINER trigger 函数同样固定 search_path，消除 role-mutable
+-- search_path 风险；函数体中的外部引用均已使用 schema 限定，或为内建函数。
+alter function public.set_updated_at() set search_path = '';
+alter function public.prevent_family_id_change() set search_path = '';
+alter function public.set_transaction_last_editor() set search_path = '';
+
+-- PostgreSQL SQLSTATE 必须是 5 个字符；HTTP 状态码 429 不能直接作为 errcode。
+-- 客户端展示原始中文提示，不依赖该 SQLSTATE 映射 HTTP 状态。
+create or replace function public.submit_feedback(
+  p_type        text,
+  p_content     text,
+  p_image_paths text[]  default '{}',
+  p_contact_ok  boolean default true,
+  p_device      jsonb   default '{}'
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid     uuid := (select auth.uid());
+  v_content text := btrim(coalesce(p_content, ''));
+  v_family  uuid;
+  v_recent  int;
+  v_id      uuid;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  if p_type is null or p_type not in ('feature', 'bug', 'suggestion', 'other') then
+    raise exception '反馈类型不合法' using errcode = '22023';
+  end if;
+  if char_length(v_content) < 5 or char_length(v_content) > 200 then
+    raise exception '问题描述需 5–200 字' using errcode = '22023';
+  end if;
+  if coalesce(array_length(p_image_paths, 1), 0) > 5 then
+    raise exception '最多上传 5 张图片' using errcode = '22023';
+  end if;
+
+  if exists (
+    select 1
+    from public.feedback
+    where user_id = v_uid
+      and created_at > now() - interval '30 seconds'
+  ) then
+    raise exception '提交过于频繁，请稍后再试' using errcode = 'P0001';
+  end if;
+
+  select count(*)
+  into v_recent
+  from public.feedback
+  where user_id = v_uid
+    and created_at > now() - interval '1 day';
+
+  if v_recent >= 20 then
+    raise exception '今日反馈已达上限' using errcode = 'P0001';
+  end if;
+
+  select current_family_id
+  into v_family
+  from public.profiles
+  where id = v_uid;
+
+  insert into public.feedback (
+    user_id,
+    family_id,
+    type,
+    content,
+    image_paths,
+    contact_ok,
+    device
+  )
+  values (
+    v_uid,
+    v_family,
+    p_type,
+    v_content,
+    coalesce(p_image_paths, '{}'),
+    coalesce(p_contact_ok, true),
+    coalesce(p_device, '{}')
+  )
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+revoke execute on function public.submit_feedback(text, text, text[], boolean, jsonb) from public;
+grant execute on function public.submit_feedback(text, text, text[], boolean, jsonb) to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260901045743_grant_family_hidden_categories_data_api_access.sql
+-- ============================================================
+-- 0047 · 暴露家庭分类隐藏覆盖表所需的最小 Data API 权限
+-- -----------------------------------------------------------------------------
+-- RLS policy 已将行访问限制为所属家庭成员。Cloud 项目关闭“Automatically
+-- expose new tables”后，仍须为实际客户端直连的表单独授予表级权限。
+-- upsert 需要 SELECT + INSERT + UPDATE；客户端还支持取消隐藏，因此需要 DELETE。
+grant select, insert, update, delete on table public.family_hidden_categories to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260902045929_harden_create_invitation_lint.sql
+-- ============================================================
+-- 0048 · 消除 create_invitation 的 plpgsql lint 警告
+-- ----------------------------------------------------------------------------
+-- 保持 0032 的邀请语义不变：仅移除由整数 FOR 循环隐式声明的重复变量，
+-- 并为静态分析补齐理论上不可达的失败出口。
+
+create or replace function public.create_invitation(p_force_new boolean default false)
+returns public.invitations
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid      uuid := (select auth.uid());
+  v_family   uuid;
+  v_alpha    text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  v_code     text;
+  v_inv      public.invitations;
+  v_attempts int := 0;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  select family_id into v_family from public.memberships
+    where user_id = v_uid and role = 'owner' and status = 'active';
+  if v_family is null then
+    raise exception '仅户主可生成邀请码' using errcode = '42501';
+  end if;
+
+  if (select member_count from public.families where id = v_family) >= 5 then
+    raise exception '家庭成员已达上限（5 人），需先移除成员';
+  end if;
+
+  if not p_force_new then
+    select * into v_inv from public.invitations
+      where family_id = v_family and status = 'valid' and expires_at > now()
+      order by expires_at desc limit 1;
+    if found then
+      return v_inv;
+    end if;
+  end if;
+
+  update public.invitations set status = 'revoked'
+    where family_id = v_family and status = 'valid';
+
+  loop
+    v_attempts := v_attempts + 1;
+    v_code := '';
+    for i in 1..6 loop
+      v_code := v_code || substr(v_alpha, 1 + floor(random() * length(v_alpha))::int, 1);
+    end loop;
+    begin
+      insert into public.invitations (family_id, code, expires_at, status)
+        values (v_family, v_code, now() + interval '24 hours', 'valid')
+        returning * into v_inv;
+      return v_inv;
+    exception when unique_violation then
+      if v_attempts >= 8 then
+        raise;
+      end if;
+    end;
+  end loop;
+
+  raise exception '邀请码生成失败，请重试' using errcode = 'P0001';
+end;
+$$;
+
+revoke execute on function public.create_invitation(boolean) from public;
+grant execute on function public.create_invitation(boolean) to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260903132248_harden_storage_upload_constraints.sql
+-- ============================================================
+-- 0049 · 收紧 Storage 上传文件类型与体积
+-- -----------------------------------------------------------------------------
+-- 客户端所有头像、家庭图片与反馈截图均压缩为 JPEG；反馈图已在客户端限制为 2 MB。
+-- 在 bucket 层重复约束，避免攻击者绕过客户端以 publishable key 上传任意 MIME 或超大文件。
+
+do $$
+declare
+  v_bucket_count integer;
+begin
+  select count(*) into v_bucket_count
+  from storage.buckets
+  where id in (
+    'homebook-user-avatars',
+    'homebook-family-covers',
+    'homebook-family-background',
+    'homebook-feedback-images'
+  );
+
+  if v_bucket_count <> 4 then
+    raise exception 'expected four HomeBook Storage buckets, found %', v_bucket_count;
+  end if;
+
+  update storage.buckets
+  set file_size_limit = 2 * 1024 * 1024,
+      allowed_mime_types = array['image/jpeg']::text[]
+  where id in (
+    'homebook-user-avatars',
+    'homebook-family-covers',
+    'homebook-family-background',
+    'homebook-feedback-images'
+  );
+end;
+$$;
+
+-- ============================================================
+-- >>> migrations/20260903215006_storage_allow_common_image_mime_types.sql
+-- ============================================================
+-- Storage · allow the image formats supported by the Cloud configuration
+-- ---------------------------------------------------------------------------
+-- 0049 establishes a 2 MB limit and a JPEG-only baseline. This migration keeps
+-- the repository aligned with the verified Cloud configuration while retaining
+-- an explicit allow-list instead of permitting every image/* MIME type.
+
+do $$
+declare
+  expected_bucket_count constant integer := 4;
+  actual_bucket_count integer;
+begin
+  select count(*)
+    into actual_bucket_count
+  from storage.buckets
+  where id in (
+    'homebook-user-avatars',
+    'homebook-family-covers',
+    'homebook-family-background',
+    'homebook-feedback-images'
+  );
+
+  if actual_bucket_count <> expected_bucket_count then
+    raise exception
+      'Expected % HomeBook storage buckets, found %',
+      expected_bucket_count,
+      actual_bucket_count;
+  end if;
+
+  update storage.buckets
+  set allowed_mime_types = array[
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/heic',
+    'image/heif',
+    'image/gif'
+  ]::text[]
+  where id in (
+    'homebook-user-avatars',
+    'homebook-family-covers',
+    'homebook-family-background',
+    'homebook-feedback-images'
+  );
+end;
+$$;
+
+-- ============================================================
+-- >>> migrations/20260904133622_add_push_dispatch_claims_and_cron.sql
+-- ============================================================
+-- 0051 · Supabase Edge Function push dispatcher: claims, settlement, and Cron
+-- ---------------------------------------------------------------------------
+-- A worker first claims rows with SKIP LOCKED, then calls Expo, then settles
+-- only rows still owned by its claim token. This prevents overlapping Cron
+-- invocations from delivering the same notification concurrently.
+
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+alter table public.notifications
+  add column if not exists push_claim_token uuid,
+  add column if not exists push_claimed_at timestamptz;
+
+create index if not exists notifications_push_unclaimed_due_idx
+  on public.notifications (push_next_attempt_at nulls first, created_at)
+  where channel = 'in_app'
+    and pushed_at is null
+    and push_claimed_at is null;
+
+create index if not exists notifications_push_expired_claim_idx
+  on public.notifications (push_claimed_at)
+  where channel = 'in_app'
+    and pushed_at is null
+    and push_claimed_at is not null;
+
+create or replace function public.claim_due_push_notifications(
+  p_claim_token uuid,
+  p_limit integer default 100
+)
+returns table (
+  id uuid,
+  user_id uuid,
+  type text,
+  payload jsonb,
+  push_attempts smallint
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if p_claim_token is null then
+    raise exception 'claim token is required' using errcode = '22023';
+  end if;
+
+  return query
+  with eligible as (
+    select n.id
+      from public.notifications n
+     where n.channel = 'in_app'
+       and n.pushed_at is null
+       and (n.push_next_attempt_at is null or n.push_next_attempt_at <= now())
+       and (
+         n.push_claimed_at is null
+         or n.push_claimed_at < now() - interval '10 minutes'
+       )
+     order by n.push_next_attempt_at nulls first, n.created_at
+     limit least(greatest(coalesce(p_limit, 100), 1), 100)
+     for update skip locked
+  ), claimed as (
+    update public.notifications n
+       set push_claim_token = p_claim_token,
+           push_claimed_at = now()
+      from eligible e
+     where n.id = e.id
+     returning n.id, n.user_id, n.type, n.payload, n.push_attempts
+  )
+  select c.id, c.user_id, c.type, c.payload, c.push_attempts
+    from claimed c;
+end;
+$$;
+
+revoke all on function public.claim_due_push_notifications(uuid, integer) from public, anon, authenticated;
+grant execute on function public.claim_due_push_notifications(uuid, integer) to service_role;
+
+create or replace function public.finalize_push_notifications(
+  p_claim_token uuid,
+  p_notification_ids uuid[],
+  p_outcome text,
+  p_next_attempt_at timestamptz default null
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  affected_count integer;
+begin
+  if p_claim_token is null or coalesce(array_length(p_notification_ids, 1), 0) = 0 then
+    raise exception 'claim token and notification ids are required' using errcode = '22023';
+  end if;
+
+  if p_outcome not in ('terminal', 'retry') then
+    raise exception 'unsupported push outcome: %', p_outcome using errcode = '22023';
+  end if;
+
+  if p_outcome = 'retry' and p_next_attempt_at is null then
+    raise exception 'retry requires next attempt time' using errcode = '22023';
+  end if;
+
+  update public.notifications n
+     set pushed_at = case when p_outcome = 'terminal' then now() else n.pushed_at end,
+         push_attempts = case
+           when p_outcome = 'retry' then least(n.push_attempts + 1, 32767)::smallint
+           else n.push_attempts
+         end,
+         push_next_attempt_at = case when p_outcome = 'retry' then p_next_attempt_at else null end,
+         push_claim_token = null,
+         push_claimed_at = null
+   where n.id = any(p_notification_ids)
+     and n.push_claim_token = p_claim_token;
+
+  get diagnostics affected_count = row_count;
+  return affected_count;
+end;
+$$;
+
+revoke all on function public.finalize_push_notifications(uuid, uuid[], text, timestamptz) from public, anon, authenticated;
+grant execute on function public.finalize_push_notifications(uuid, uuid[], text, timestamptz) to service_role;
+
+-- The two Vault values are created manually before this migration is applied:
+--   homebook_project_url                  = https://<project-ref>.supabase.co
+--   homebook_push_dispatch_cron_secret    = same value as Edge Function
+--                                          PUSH_DISPATCH_CRON_SECRET
+-- Never put either value in this migration or a committed env file.
+do $schedule$
+declare
+  existing_job_id bigint;
+begin
+  select jobid
+    into existing_job_id
+    from cron.job
+   where jobname = 'homebook-push-dispatch';
+
+  if existing_job_id is not null then
+    perform cron.unschedule(existing_job_id);
+  end if;
+
+  perform cron.schedule(
+    'homebook-push-dispatch',
+    '*/10 * * * *',
+    $job$
+      select net.http_post(
+        url := (
+          select decrypted_secret
+            from vault.decrypted_secrets
+           where name = 'homebook_project_url'
+        ) || '/functions/v1/push-dispatch',
+        headers := jsonb_build_object(
+          'Content-Type', 'application/json',
+          'x-homebook-cron-secret', (
+            select decrypted_secret
+              from vault.decrypted_secrets
+             where name = 'homebook_push_dispatch_cron_secret'
+          )
+        ),
+        body := jsonb_build_object('scheduled_at', now()),
+        timeout_milliseconds := 15000
+      );
+    $job$
+  );
+end;
+$schedule$;
+
+-- ============================================================
+-- >>> migrations/20260904143756_adjust_push_dispatch_cron_frequency.sql
+-- ============================================================
+-- 0052 · Increase the push dispatcher cadence from 10 to 2 minutes.
+-- Keep the same authenticated pg_net request as 0051. Re-registering by the
+-- stable job name avoids reliance on pg_cron version-specific alter APIs.
+
+do $schedule$
+declare
+  existing_job_id bigint;
+begin
+  select jobid
+    into existing_job_id
+    from cron.job
+   where jobname = 'homebook-push-dispatch';
+
+  if existing_job_id is null then
+    raise exception 'homebook-push-dispatch Cron job is missing';
+  end if;
+
+  perform cron.unschedule(existing_job_id);
+
+  perform cron.schedule(
+    'homebook-push-dispatch',
+    '*/2 * * * *',
+    $job$
+      select net.http_post(
+        url := (
+          select decrypted_secret
+            from vault.decrypted_secrets
+           where name = 'homebook_project_url'
+        ) || '/functions/v1/push-dispatch',
+        headers := jsonb_build_object(
+          'Content-Type', 'application/json',
+          'x-homebook-cron-secret', (
+            select decrypted_secret
+              from vault.decrypted_secrets
+             where name = 'homebook_push_dispatch_cron_secret'
+          )
+        ),
+        body := jsonb_build_object('scheduled_at', now()),
+        timeout_milliseconds := 15000
+      );
+    $job$
+  );
+end;
+$schedule$;
+
+-- ============================================================
+-- >>> migrations/20260904144805_grant_push_dispatch_service_role_access.sql
+-- ============================================================
+-- 0053 · Grant the Edge push dispatcher only the table privileges it needs.
+-- ---------------------------------------------------------------------------
+-- `service_role` bypasses RLS but still requires explicit table privileges.
+-- These grants are server-only: no anon/authenticated privileges are added or
+-- changed, and existing RLS policies remain in force for client requests.
+
+grant select on table public.notification_preferences to service_role;
+grant select, delete on table public.device_tokens to service_role;
+
+-- ============================================================
+-- >>> migrations/20260904150214_reassert_push_dispatch_two_minute_schedule.sql
+-- ============================================================
+-- 0054 · Reassert the approved two-minute push dispatcher cadence.
+-- ---------------------------------------------------------------------------
+-- Migration 0052 introduced the two-minute cadence. This follow-up restores
+-- it in Cloud after an out-of-band schedule change, so replayed migrations and
+-- the live project have the same final state.
+
+do $schedule$
+declare
+  existing_job_id bigint;
+begin
+  select jobid
+    into existing_job_id
+    from cron.job
+   where jobname = 'homebook-push-dispatch';
+
+  if existing_job_id is null then
+    raise exception 'homebook-push-dispatch Cron job is missing';
+  end if;
+
+  perform cron.unschedule(existing_job_id);
+
+  perform cron.schedule(
+    'homebook-push-dispatch',
+    '*/2 * * * *',
+    $job$
+      select net.http_post(
+        url := (
+          select decrypted_secret
+            from vault.decrypted_secrets
+           where name = 'homebook_project_url'
+        ) || '/functions/v1/push-dispatch',
+        headers := jsonb_build_object(
+          'Content-Type', 'application/json',
+          'x-homebook-cron-secret', (
+            select decrypted_secret
+              from vault.decrypted_secrets
+             where name = 'homebook_push_dispatch_cron_secret'
+          )
+        ),
+        body := jsonb_build_object('scheduled_at', now()),
+        timeout_milliseconds := 15000
+      );
+    $job$
+  );
+end;
+$schedule$;
+
+-- ============================================================
+-- >>> migrations/20260905040725_complete_analytics_data_access.sql
+-- ============================================================
+-- 0046 · 完整统计数据访问：按家庭账期聚合，明细独立分页
+-- ----------------------------------------------------------------------------
+-- 统计不得依赖客户端已加载流水。所有函数以 auth.uid() 解析当前活动家庭，
+-- security invoker 保持底表 RLS 生效；账期边界统一由 families.timezone 推导。
+
+-- 预算、分类报表和分类下钻按家庭 + 分类 + 时间过滤；成员筛选也有独立路径。
+-- 现有 family + occurred_at 索引继续服务无筛选的总览，不为低选择性的列堆叠索引。
+create index transactions_family_normal_expense_category_occurred_idx
+  on public.transactions (family_id, category_id, occurred_at desc)
+  where is_deleted = false and type = 'expense' and source = 'normal';
+
+create index transactions_family_recorder_occurred_idx
+  on public.transactions (family_id, recorder_user_id, occurred_at desc)
+  where is_deleted = false;
+
+create or replace function public.get_monthly_summary(p_period text)
+returns table (
+  earliest_period text,
+  transaction_count bigint,
+  income_amount bigint,
+  expense_amount bigint,
+  consumption_expense_amount bigint,
+  previous_income_amount bigint,
+  previous_expense_amount bigint,
+  max_expense_id uuid,
+  max_expense_amount bigint,
+  max_expense_category_id uuid,
+  max_expense_occurred_at timestamptz,
+  top_category_id uuid,
+  top_category_amount bigint,
+  top_recorder_user_id uuid,
+  top_recorder_count bigint
+)
+language plpgsql
+security invoker
+stable
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_family public.families;
+  v_start timestamptz;
+  v_end timestamptz;
+  v_prev_start timestamptz;
+  v_prev_end timestamptz;
+  v_previous_compare_end timestamptz;
+  v_day_cap integer;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+  if p_period !~ '^\d{4}-(0[1-9]|1[0-2])$' then
+    raise exception '账期格式必须为 YYYY-MM' using errcode = '22007';
+  end if;
+
+  select f.* into v_family
+  from public.families f
+  join public.memberships m on m.family_id = f.id
+  where m.user_id = v_uid and m.status = 'active'
+  limit 1;
+  if not found then return; end if;
+
+  v_start := (p_period || '-01 00:00:00')::timestamp at time zone v_family.timezone;
+  v_end := ((p_period || '-01')::date + interval '1 month')::timestamp at time zone v_family.timezone;
+  v_prev_start := ((p_period || '-01')::date - interval '1 month')::timestamp at time zone v_family.timezone;
+  v_prev_end := v_start;
+  v_day_cap := extract(day from (now() at time zone v_family.timezone))::integer;
+  v_previous_compare_end := case
+    when p_period = to_char(now() at time zone v_family.timezone, 'YYYY-MM')
+      then least(v_prev_end, v_prev_start + v_day_cap * interval '1 day')
+    else v_prev_end
+  end;
+
+  return query
+  with scoped as materialized (
+    select t.*
+    from public.transactions t
+    where t.family_id = v_family.id
+      and t.is_deleted = false
+      and t.occurred_at >= v_prev_start
+      and t.occurred_at < v_end
+  ),
+  current_period as materialized (
+    select * from scoped where occurred_at >= v_start
+  ),
+  previous_period as materialized (
+    select * from scoped where occurred_at < v_previous_compare_end
+  ),
+  earliest as (
+    select to_char(min(t.occurred_at at time zone v_family.timezone), 'YYYY-MM') as period
+    from public.transactions t
+    where t.family_id = v_family.id and t.is_deleted = false
+  ),
+  totals as (
+    select
+      count(*)::bigint as transaction_count,
+      coalesce(sum(amount) filter (where type = 'income'), 0)::bigint as income_amount,
+      coalesce(sum(amount) filter (where type = 'expense'), 0)::bigint as expense_amount,
+      coalesce(sum(amount) filter (where type = 'expense' and source = 'normal'), 0)::bigint as consumption_expense_amount
+    from current_period
+  ),
+  previous_totals as (
+    select
+      coalesce(sum(amount) filter (where type = 'income'), 0)::bigint as income_amount,
+      coalesce(sum(amount) filter (where type = 'expense'), 0)::bigint as expense_amount
+    from previous_period
+  ),
+  max_expense as (
+    select id, amount, category_id, occurred_at
+    from current_period
+    where type = 'expense' and source = 'normal'
+    order by amount desc, occurred_at desc, id desc
+    limit 1
+  ),
+  top_category as (
+    select category_id, sum(amount)::bigint as amount
+    from current_period
+    where type = 'expense' and source = 'normal'
+    group by category_id
+    order by sum(amount) desc, category_id
+    limit 1
+  ),
+  top_recorder as (
+    select recorder_user_id, count(*)::bigint as count
+    from current_period
+    group by recorder_user_id
+    order by count(*) desc, recorder_user_id
+    limit 1
+  )
+  select
+    earliest.period,
+    totals.transaction_count,
+    totals.income_amount,
+    totals.expense_amount,
+    totals.consumption_expense_amount,
+    previous_totals.income_amount,
+    previous_totals.expense_amount,
+    max_expense.id,
+    max_expense.amount,
+    max_expense.category_id,
+    max_expense.occurred_at,
+    top_category.category_id,
+    top_category.amount,
+    top_recorder.recorder_user_id,
+    top_recorder.count
+  from totals
+  cross join previous_totals
+  cross join earliest
+  left join max_expense on true
+  left join top_category on true
+  left join top_recorder on true;
+end;
+$$;
+
+revoke all on function public.get_monthly_summary(text) from public;
+grant execute on function public.get_monthly_summary(text) to authenticated;
+
+create or replace function public.get_budget_progress(p_period text)
+returns table (used_amount bigint, category_usage jsonb)
+language plpgsql
+security invoker
+stable
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_family public.families;
+  v_start timestamptz;
+  v_end timestamptz;
+begin
+  if v_uid is null then raise exception '未认证' using errcode = '28000'; end if;
+  if p_period !~ '^\d{4}-(0[1-9]|1[0-2])$' then
+    raise exception '账期格式必须为 YYYY-MM' using errcode = '22007';
+  end if;
+
+  select f.* into v_family
+  from public.families f join public.memberships m on m.family_id = f.id
+  where m.user_id = v_uid and m.status = 'active'
+  limit 1;
+  if not found then return; end if;
+
+  v_start := (p_period || '-01 00:00:00')::timestamp at time zone v_family.timezone;
+  v_end := ((p_period || '-01')::date + interval '1 month')::timestamp at time zone v_family.timezone;
+
+  return query
+  with expenses as (
+    select category_id, amount
+    from public.transactions
+    where family_id = v_family.id
+      and is_deleted = false
+      and type = 'expense'
+      and source = 'normal'
+      and occurred_at >= v_start
+      and occurred_at < v_end
+  ),
+  grouped as (
+    select category_id, sum(amount)::bigint as amount
+    from expenses
+    group by category_id
+  )
+  select
+    coalesce((select sum(amount) from expenses), 0)::bigint,
+    coalesce(jsonb_object_agg(category_id, amount), '{}'::jsonb)
+  from grouped;
+end;
+$$;
+
+revoke all on function public.get_budget_progress(text) from public;
+grant execute on function public.get_budget_progress(text) to authenticated;
+
+comment on function public.get_monthly_summary(text) is
+  '完整账期月度总结；所有边界按当前家庭 timezone 计算。';
+comment on function public.get_budget_progress(text) is
+  '完整账期预算执行；仅普通支出，按分类分组。';
+
+create or replace function public.get_family_activity()
+returns table (
+  month_count bigint,
+  family_streak integer,
+  my_month_count bigint,
+  my_streak integer,
+  today_count bigint,
+  month_member_count bigint,
+  latest_transaction_id uuid,
+  latest_category_id uuid,
+  latest_recorder_user_id uuid,
+  latest_amount bigint
+)
+language plpgsql
+security invoker
+stable
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_family public.families;
+  v_today date;
+  v_month_start timestamptz;
+  v_month_end timestamptz;
+  v_today_start timestamptz;
+  v_tomorrow_start timestamptz;
+begin
+  if v_uid is null then raise exception '未认证' using errcode = '28000'; end if;
+  select f.* into v_family
+  from public.families f join public.memberships m on m.family_id = f.id
+  where m.user_id = v_uid and m.status = 'active'
+  limit 1;
+  if not found then return; end if;
+
+  v_today := (now() at time zone v_family.timezone)::date;
+  v_month_start := date_trunc('month', v_today)::timestamp at time zone v_family.timezone;
+  v_month_end := (date_trunc('month', v_today) + interval '1 month')::timestamp at time zone v_family.timezone;
+  v_today_start := v_today::timestamp at time zone v_family.timezone;
+  v_tomorrow_start := (v_today + 1)::timestamp at time zone v_family.timezone;
+
+  return query
+  with all_days as materialized (
+    select distinct (t.occurred_at at time zone v_family.timezone)::date as day, t.recorder_user_id
+    from public.transactions t
+    where t.family_id = v_family.id and t.is_deleted = false and t.occurred_at < v_tomorrow_start
+  ),
+  date_bounds as (
+    select min(day) as first_day from all_days
+  ),
+  family_streak_calc as (
+    select coalesce(
+      (select coalesce(min(g.ordinality) filter (where d.day is null) - 1, count(*))::integer
+       from date_bounds b
+       cross join lateral generate_series(
+         case when exists (select 1 from all_days where day = v_today) then v_today else v_today - 1 end,
+         b.first_day,
+         '-1 day'::interval
+       ) with ordinality as g(day, ordinality)
+       left join (select distinct day from all_days) d on d.day = g.day),
+      0
+    ) as value
+  ),
+  my_streak_calc as (
+    select coalesce(
+      (select coalesce(min(g.ordinality) filter (where d.day is null) - 1, count(*))::integer
+       from (select min(day) as first_day from all_days where recorder_user_id = v_uid) b
+       cross join lateral generate_series(
+         case when exists (select 1 from all_days where day = v_today and recorder_user_id = v_uid) then v_today else v_today - 1 end,
+         b.first_day,
+         '-1 day'::interval
+       ) with ordinality as g(day, ordinality)
+       left join (select distinct day from all_days where recorder_user_id = v_uid) d on d.day = g.day),
+      0
+    ) as value
+  ),
+  month_transactions as materialized (
+    select * from public.transactions t
+    where t.family_id = v_family.id and t.is_deleted = false
+      and t.occurred_at >= v_month_start and t.occurred_at < v_month_end
+  ),
+  latest as (
+    select id, category_id, recorder_user_id, amount
+    from month_transactions
+    order by occurred_at desc, id desc
+    limit 1
+  )
+  select
+    (select count(*) from month_transactions)::bigint,
+    (select value from family_streak_calc),
+    (select count(*) from month_transactions where recorder_user_id = v_uid)::bigint,
+    (select value from my_streak_calc),
+    (select count(*) from month_transactions where occurred_at >= v_today_start and occurred_at < v_tomorrow_start)::bigint,
+    (select count(distinct recorder_user_id) from month_transactions)::bigint,
+    latest.id, latest.category_id, latest.recorder_user_id, latest.amount
+  from latest
+  right join (select 1) singleton on true;
+end;
+$$;
+
+revoke all on function public.get_family_activity() from public;
+grant execute on function public.get_family_activity() to authenticated;
+comment on function public.get_family_activity() is
+  '家庭当下活动指标；按家庭 timezone 统计完整历史流水。';
+
+create or replace function public.get_report_analytics(
+  p_start date,
+  p_end date,
+  p_previous_start date,
+  p_history_start date,
+  p_member_ids uuid[] default '{}'::uuid[],
+  p_category_ids uuid[] default '{}'::uuid[])
+returns jsonb
+language plpgsql
+security invoker
+stable
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_family public.families;
+  v_start timestamptz;
+  v_end timestamptz;
+  v_previous_start timestamptz;
+  v_history_start timestamptz;
+begin
+  if v_uid is null then raise exception '未认证' using errcode = '28000'; end if;
+  if p_start >= p_end or p_previous_start >= p_start or p_history_start > p_start then
+    raise exception '报表日期范围无效' using errcode = '22007';
+  end if;
+  select f.* into v_family
+  from public.families f join public.memberships m on m.family_id = f.id
+  where m.user_id = v_uid and m.status = 'active'
+  limit 1;
+  if not found then return '{}'::jsonb; end if;
+
+  v_start := p_start::timestamp at time zone v_family.timezone;
+  v_end := p_end::timestamp at time zone v_family.timezone;
+  v_previous_start := p_previous_start::timestamp at time zone v_family.timezone;
+  v_history_start := p_history_start::timestamp at time zone v_family.timezone;
+
+  return (
+    with scoped as materialized (
+      select t.*
+      from public.transactions t
+      where t.family_id = v_family.id and t.is_deleted = false
+        and t.occurred_at >= v_history_start and t.occurred_at < v_end
+        and (cardinality(p_member_ids) = 0 or t.recorder_user_id = any(p_member_ids))
+        and (cardinality(p_category_ids) = 0 or t.category_id = any(p_category_ids))
+    ),
+    current_rows as materialized (
+      select * from scoped where occurred_at >= v_start
+    ),
+    previous_rows as materialized (
+      select * from scoped where occurred_at >= v_previous_start and occurred_at < v_start
+    ),
+    summary as (
+      select jsonb_build_object(
+        'transactionCount', count(*),
+        'incomeAmount', coalesce(sum(amount) filter (where type = 'income'), 0),
+        'expenseAmount', coalesce(sum(amount) filter (where type = 'expense'), 0),
+        'expenseNormalAmount', coalesce(sum(amount) filter (where type = 'expense' and source = 'normal'), 0)
+      ) as value from current_rows
+    ),
+    expense_categories as (
+      select jsonb_agg(jsonb_build_object('categoryId', category_id, 'currentAmount', current_amount, 'previousAmount', previous_amount)
+                       order by current_amount desc, previous_amount desc, category_id)
+      from (
+        select category_id,
+          coalesce(sum(amount) filter (where occurred_at >= v_start), 0)::bigint as current_amount,
+          coalesce(sum(amount) filter (where occurred_at < v_start), 0)::bigint as previous_amount
+        from (select * from current_rows union all select * from previous_rows) x
+        where type = 'expense' and source = 'normal'
+        group by category_id
+      ) grouped
+    ),
+    income_categories as (
+      select jsonb_agg(jsonb_build_object('categoryId', category_id, 'amount', amount) order by amount desc, category_id)
+      from (
+        select category_id, sum(amount)::bigint as amount
+        from current_rows where type = 'income' and source = 'normal'
+        group by category_id
+      ) grouped
+    ),
+    members as (
+      select jsonb_agg(jsonb_build_object(
+        'userId', recorder_user_id, 'count', transaction_count,
+        'incomeAmount', income_amount, 'expenseAmount', expense_amount,
+        'expenseNormalAmount', expense_normal_amount
+      ) order by expense_normal_amount desc, recorder_user_id)
+      from (
+        select recorder_user_id, count(*)::bigint as transaction_count,
+          coalesce(sum(amount) filter (where type = 'income'), 0)::bigint as income_amount,
+          coalesce(sum(amount) filter (where type = 'expense'), 0)::bigint as expense_amount,
+          coalesce(sum(amount) filter (where type = 'expense' and source = 'normal'), 0)::bigint as expense_normal_amount
+        from current_rows group by recorder_user_id
+      ) grouped
+    ),
+    member_categories as (
+      select jsonb_agg(jsonb_build_object('userId', recorder_user_id, 'categoryId', category_id, 'amount', amount)
+                       order by recorder_user_id, amount desc, category_id)
+      from (
+        select recorder_user_id, category_id, sum(amount)::bigint as amount
+        from current_rows where type = 'expense' and source = 'normal'
+        group by recorder_user_id, category_id
+      ) grouped
+    ),
+    top_expenses as (
+      select jsonb_agg(jsonb_build_object('id', id, 'categoryId', category_id, 'note', note, 'amount', amount,
+                                           'occurredAt', occurred_at) order by amount desc, occurred_at desc, id desc)
+      from (
+        select id, category_id, note, amount, occurred_at
+        from current_rows where type = 'expense' and source = 'normal'
+        order by amount desc, occurred_at desc, id desc limit 5
+      ) ranked
+    ),
+    days as (
+      select jsonb_agg(jsonb_build_object(
+        'date', day, 'incomeAmount', income_amount, 'expenseAmount', expense_amount,
+        'incomeNormalAmount', income_normal_amount, 'expenseNormalAmount', expense_normal_amount
+      ) order by day)
+      from (
+        select (occurred_at at time zone v_family.timezone)::date::text as day,
+          coalesce(sum(amount) filter (where type = 'income'), 0)::bigint as income_amount,
+          coalesce(sum(amount) filter (where type = 'expense'), 0)::bigint as expense_amount,
+          coalesce(sum(amount) filter (where type = 'income' and source = 'normal'), 0)::bigint as income_normal_amount,
+          coalesce(sum(amount) filter (where type = 'expense' and source = 'normal'), 0)::bigint as expense_normal_amount
+        from scoped group by (occurred_at at time zone v_family.timezone)::date
+      ) grouped
+    )
+    select jsonb_build_object(
+      'summary', (select value from summary),
+      'expenseCategories', coalesce((select * from expense_categories), '[]'::jsonb),
+      'incomeCategories', coalesce((select * from income_categories), '[]'::jsonb),
+      'members', coalesce((select * from members), '[]'::jsonb),
+      'memberCategories', coalesce((select * from member_categories), '[]'::jsonb),
+      'topExpenses', coalesce((select * from top_expenses), '[]'::jsonb),
+      'days', coalesce((select * from days), '[]'::jsonb)
+    )
+  );
+end;
+$$;
+
+revoke all on function public.get_report_analytics(date, date, date, date, uuid[], uuid[]) from public;
+grant execute on function public.get_report_analytics(date, date, date, date, uuid[], uuid[]) to authenticated;
+comment on function public.get_report_analytics(date, date, date, date, uuid[], uuid[]) is
+  '完整报表聚合；仅返回有限分组、Top N 与按日分桶，不传回原始流水全集。';
+
+create or replace function public.get_report_category_detail(
+  p_start date,
+  p_end date,
+  p_history_start date,
+  p_category_ids uuid[],
+  p_cursor_occurred_at timestamptz default null,
+  p_cursor_id uuid default null,
+  p_page_size integer default 50)
+returns jsonb
+language plpgsql
+security invoker
+stable
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_family public.families;
+  v_start timestamptz;
+  v_end timestamptz;
+  v_history_start timestamptz;
+  v_page_size integer := least(greatest(p_page_size, 1), 100);
+  v_result jsonb;
+begin
+  if v_uid is null then raise exception '未认证' using errcode = '28000'; end if;
+  if p_start >= p_end or p_history_start > p_start or cardinality(p_category_ids) = 0 then
+    raise exception '分类明细参数无效' using errcode = '22007';
+  end if;
+  select f.* into v_family from public.families f join public.memberships m on m.family_id = f.id
+  where m.user_id = v_uid and m.status = 'active' limit 1;
+  if not found then return '{}'::jsonb; end if;
+  v_start := p_start::timestamp at time zone v_family.timezone;
+  v_end := p_end::timestamp at time zone v_family.timezone;
+  v_history_start := p_history_start::timestamp at time zone v_family.timezone;
+
+  with current_rows as materialized (
+      select * from public.transactions t
+      where t.family_id = v_family.id and t.is_deleted = false and t.type = 'expense' and t.source = 'normal'
+        and t.category_id = any(p_category_ids) and t.occurred_at >= v_start and t.occurred_at < v_end
+    ),
+    history_rows as materialized (
+      select * from public.transactions t
+      where t.family_id = v_family.id and t.is_deleted = false and t.type = 'expense' and t.source = 'normal'
+        and t.category_id = any(p_category_ids) and t.occurred_at >= v_history_start and t.occurred_at < v_end
+    ),
+    page as (
+      select id, note, amount, occurred_at from current_rows
+      where p_cursor_occurred_at is null or (occurred_at, id) < (p_cursor_occurred_at, p_cursor_id)
+      order by occurred_at desc, id desc limit v_page_size
+    ),
+    note_groups as (
+      select jsonb_agg(jsonb_build_object('name', name, 'amount', amount, 'count', count) order by amount desc, count desc, name)
+      from (
+        select left(coalesce(nullif(btrim(note), ''), '未填写'), 12) as name, sum(amount)::bigint as amount, count(*)::bigint as count
+        from current_rows group by left(coalesce(nullif(btrim(note), ''), '未填写'), 12)
+        order by sum(amount) desc, count(*) desc, left(coalesce(nullif(btrim(note), ''), '未填写'), 12) limit 5
+      ) grouped
+    ),
+    daily as (
+      select jsonb_agg(jsonb_build_object('date', day, 'amount', amount) order by day)
+      from (
+        select (occurred_at at time zone v_family.timezone)::date::text as day, sum(amount)::bigint as amount
+        from history_rows group by (occurred_at at time zone v_family.timezone)::date
+      ) grouped
+    )
+  select jsonb_build_object(
+      'count', (select count(*) from current_rows),
+      'amount', (select coalesce(sum(amount), 0) from current_rows),
+      'notes', coalesce((select * from note_groups), '[]'::jsonb),
+      'days', coalesce((select * from daily), '[]'::jsonb),
+      'rows', coalesce(
+        (
+          select jsonb_agg(row_value order by occurred_at desc, id desc)
+          from (
+            select
+              jsonb_build_object('id', id, 'note', note, 'amount', amount, 'occurredAt', occurred_at) as row_value,
+              occurred_at,
+              id
+            from page
+          ) page_rows
+        ),
+        '[]'::jsonb
+      )
+    )
+  into v_result;
+  return v_result;
+end;
+$$;
+
+revoke all on function public.get_report_category_detail(date, date, date, uuid[], timestamptz, uuid, integer) from public;
+grant execute on function public.get_report_category_detail(date, date, date, uuid[], timestamptz, uuid, integer) to authenticated;
+
+create or replace function public.search_transactions(
+  p_keyword text default '',
+  p_keyword_category_ids uuid[] default '{}'::uuid[],
+  p_keyword_recorder_ids uuid[] default '{}'::uuid[],
+  p_types text[] default '{}'::text[],
+  p_category_ids uuid[] default '{}'::uuid[],
+  p_recorder_ids uuid[] default '{}'::uuid[],
+  p_date_preset text default 'all',
+  p_custom_from date default null,
+  p_custom_to date default null,
+  p_amount_min bigint default null,
+  p_amount_max bigint default null,
+  p_cursor_occurred_at timestamptz default null,
+  p_cursor_id uuid default null,
+  p_page_size integer default 50)
+returns jsonb
+language plpgsql
+security invoker
+stable
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_family public.families;
+  v_today date;
+  v_start timestamptz := null;
+  v_end timestamptz := null;
+  v_page_size integer := least(greatest(p_page_size, 1), 100);
+  v_keyword text := btrim(p_keyword);
+begin
+  if v_uid is null then raise exception '未认证' using errcode = '28000'; end if;
+  if p_amount_min is not null and p_amount_max is not null and p_amount_min > p_amount_max then
+    raise exception '金额范围无效' using errcode = '22003';
+  end if;
+  if p_date_preset not in ('all', 'thisMonth', 'lastMonth', 'last7', 'last30', 'thisYear', 'custom') then
+    raise exception '日期筛选无效' using errcode = '22007';
+  end if;
+  select f.* into v_family from public.families f join public.memberships m on m.family_id = f.id
+  where m.user_id = v_uid and m.status = 'active' limit 1;
+  if not found then return jsonb_build_object('count', 0, 'rows', '[]'::jsonb); end if;
+  v_today := (now() at time zone v_family.timezone)::date;
+  case p_date_preset
+    when 'thisMonth' then
+      v_start := date_trunc('month', v_today)::timestamp at time zone v_family.timezone;
+      v_end := (date_trunc('month', v_today) + interval '1 month')::timestamp at time zone v_family.timezone;
+    when 'lastMonth' then
+      v_start := (date_trunc('month', v_today) - interval '1 month')::timestamp at time zone v_family.timezone;
+      v_end := date_trunc('month', v_today)::timestamp at time zone v_family.timezone;
+    when 'last7' then
+      v_start := (v_today - 6)::timestamp at time zone v_family.timezone;
+      v_end := (v_today + 1)::timestamp at time zone v_family.timezone;
+    when 'last30' then
+      v_start := (v_today - 29)::timestamp at time zone v_family.timezone;
+      v_end := (v_today + 1)::timestamp at time zone v_family.timezone;
+    when 'thisYear' then
+      v_start := date_trunc('year', v_today)::timestamp at time zone v_family.timezone;
+      v_end := (date_trunc('year', v_today) + interval '1 year')::timestamp at time zone v_family.timezone;
+    when 'custom' then
+      if p_custom_from is not null then v_start := p_custom_from::timestamp at time zone v_family.timezone; end if;
+      if p_custom_to is not null then v_end := (p_custom_to + 1)::timestamp at time zone v_family.timezone; end if;
+      if p_custom_from is not null and p_custom_to is not null and p_custom_from > p_custom_to then
+        raise exception '日期范围无效' using errcode = '22007';
+      end if;
+    else null;
+  end case;
+  return (
+    with matched as materialized (
+      select t.* from public.transactions t
+      where t.family_id = v_family.id and t.is_deleted = false
+        and (cardinality(p_types) = 0 or t.type = any(p_types))
+        and (cardinality(p_category_ids) = 0 or t.category_id = any(p_category_ids))
+        and (cardinality(p_recorder_ids) = 0 or t.recorder_user_id = any(p_recorder_ids))
+        and (v_start is null or t.occurred_at >= v_start)
+        and (v_end is null or t.occurred_at < v_end)
+        and (p_amount_min is null or t.amount >= p_amount_min)
+        and (p_amount_max is null or t.amount <= p_amount_max)
+        and (
+          v_keyword = '' or t.note ilike '%' || v_keyword || '%'
+          or t.category_id = any(p_keyword_category_ids) or t.recorder_user_id = any(p_keyword_recorder_ids)
+        )
+    ),
+    page as (
+      select id, family_id, type, amount, category_id, recorder_user_id, note, occurred_at, source, updated_at, last_editor_user_id
+      from matched
+      where p_cursor_occurred_at is null or (occurred_at, id) < (p_cursor_occurred_at, p_cursor_id)
+      order by occurred_at desc, id desc limit v_page_size
+    )
+    select jsonb_build_object(
+      'count', (select count(*) from matched),
+      'expenseAmount', (select coalesce(sum(amount) filter (where type = 'expense' and source = 'normal'), 0) from matched),
+      'incomeAmount', (select coalesce(sum(amount) filter (where type = 'income' and source = 'normal'), 0) from matched),
+      'rows', coalesce((select jsonb_agg(jsonb_build_object(
+        'id', id, 'familyId', family_id, 'type', type, 'amount', amount, 'categoryId', category_id,
+        'recorderUserId', recorder_user_id, 'note', note, 'occurredAt', occurred_at, 'source', source,
+        'updatedAt', updated_at, 'lastEditorUserId', last_editor_user_id
+      ) order by occurred_at desc, id desc) from page), '[]'::jsonb)
+    )
+  );
+end;
+$$;
+
+revoke all on function public.search_transactions(text, uuid[], uuid[], text[], uuid[], uuid[], text, date, date, bigint, bigint, timestamptz, uuid, integer) from public;
+grant execute on function public.search_transactions(text, uuid[], uuid[], text[], uuid[], uuid[], text, date, date, bigint, bigint, timestamptz, uuid, integer) to authenticated;
+
+-- ============================================================
+-- >>> migrations/20260905091500_family_live_sync.sql
+-- ============================================================
+-- 家庭在线协作门铃：一张版本号表 + 共享表写触发器 + Realtime publication。
+-- 客户端只订这一行（以及本人 notifications），再失效 React Query，不逐表拼缓存。
+-- Cloud 关闭了「新表自动暴露」，须显式 GRANT SELECT；写路径仅内部触发器。
+
+create table public.family_data_revisions (
+  family_id  uuid primary key references public.families (id) on delete cascade,
+  revision   bigint not null default 1 check (revision >= 1),
+  updated_at timestamptz not null default now()
+);
+
+comment on table public.family_data_revisions is
+  '家庭共享数据版本号。共享表写入后 revision + 1，供 Realtime 门铃失效客户端缓存。';
+
+alter table public.family_data_revisions enable row level security;
+
+create policy "family_data_revisions_select_member" on public.family_data_revisions
+  for select to authenticated
+  using (private.is_family_member(family_id));
+
+grant select on table public.family_data_revisions to authenticated;
+
+create or replace function private.touch_family_revision(p_family_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if p_family_id is null then
+    return;
+  end if;
+  insert into public.family_data_revisions (family_id, revision, updated_at)
+  values (p_family_id, 1, now())
+  on conflict (family_id) do update
+    set revision = public.family_data_revisions.revision + 1,
+        updated_at = now();
+end;
+$$;
+
+revoke all on function private.touch_family_revision(uuid) from public, anon, authenticated;
+
+create or replace function private.tg_touch_family_revision_from_family_id()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    perform private.touch_family_revision(old.family_id);
+    return old;
+  end if;
+  perform private.touch_family_revision(new.family_id);
+  if tg_op = 'UPDATE' and old.family_id is distinct from new.family_id then
+    perform private.touch_family_revision(old.family_id);
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function private.tg_touch_family_revision_from_family_pk()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    perform private.touch_family_revision(old.id);
+    return old;
+  end if;
+  perform private.touch_family_revision(new.id);
+  return new;
+end;
+$$;
+
+create or replace function private.tg_touch_family_revision_from_budget()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_family uuid;
+  v_budget uuid := coalesce(new.budget_id, old.budget_id);
+begin
+  select family_id into v_family from public.budgets where id = v_budget;
+  perform private.touch_family_revision(v_family);
+  return coalesce(new, old);
+end;
+$$;
+
+create or replace function private.tg_touch_family_revision_from_goal()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_family uuid;
+  v_goal uuid := coalesce(new.goal_id, old.goal_id);
+begin
+  select family_id into v_family from public.savings_goals where id = v_goal;
+  perform private.touch_family_revision(v_family);
+  return coalesce(new, old);
+end;
+$$;
+
+create or replace function private.tg_touch_family_revision_from_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE'
+     and new.nickname is not distinct from old.nickname
+     and new.avatar_url is not distinct from old.avatar_url
+     and new.current_family_id is not distinct from old.current_family_id then
+    return new;
+  end if;
+  if tg_op = 'DELETE' then
+    perform private.touch_family_revision(old.current_family_id);
+    return old;
+  end if;
+  perform private.touch_family_revision(new.current_family_id);
+  if tg_op = 'UPDATE' and old.current_family_id is distinct from new.current_family_id then
+    perform private.touch_family_revision(old.current_family_id);
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function private.tg_touch_family_revision_from_category()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    perform private.touch_family_revision(old.family_id);
+    return old;
+  end if;
+  -- 系统分类 family_id 为空，不敲门铃。
+  perform private.touch_family_revision(new.family_id);
+  if tg_op = 'UPDATE' and old.family_id is distinct from new.family_id then
+    perform private.touch_family_revision(old.family_id);
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.tg_touch_family_revision_from_family_id() from public, anon, authenticated;
+revoke all on function private.tg_touch_family_revision_from_family_pk() from public, anon, authenticated;
+revoke all on function private.tg_touch_family_revision_from_budget() from public, anon, authenticated;
+revoke all on function private.tg_touch_family_revision_from_goal() from public, anon, authenticated;
+revoke all on function private.tg_touch_family_revision_from_profile() from public, anon, authenticated;
+revoke all on function private.tg_touch_family_revision_from_category() from public, anon, authenticated;
+
+create trigger family_data_revisions_on_families
+  after insert or update on public.families
+  for each row execute function private.tg_touch_family_revision_from_family_pk();
+
+create trigger family_data_revisions_on_memberships
+  after insert or update or delete on public.memberships
+  for each row execute function private.tg_touch_family_revision_from_family_id();
+
+create trigger family_data_revisions_on_transactions
+  after insert or update or delete on public.transactions
+  for each row execute function private.tg_touch_family_revision_from_family_id();
+
+create trigger family_data_revisions_on_categories
+  after insert or update or delete on public.categories
+  for each row execute function private.tg_touch_family_revision_from_category();
+
+create trigger family_data_revisions_on_hidden_categories
+  after insert or update or delete on public.family_hidden_categories
+  for each row execute function private.tg_touch_family_revision_from_family_id();
+
+create trigger family_data_revisions_on_savings_goals
+  after insert or update or delete on public.savings_goals
+  for each row execute function private.tg_touch_family_revision_from_family_id();
+
+create trigger family_data_revisions_on_savings_entries
+  after insert or update or delete on public.savings_entries
+  for each row execute function private.tg_touch_family_revision_from_goal();
+
+create trigger family_data_revisions_on_budgets
+  after insert or update or delete on public.budgets
+  for each row execute function private.tg_touch_family_revision_from_family_id();
+
+create trigger family_data_revisions_on_budget_categories
+  after insert or update or delete on public.budget_categories
+  for each row execute function private.tg_touch_family_revision_from_budget();
+
+create trigger family_data_revisions_on_recurring
+  after insert or update or delete on public.recurring_transactions
+  for each row execute function private.tg_touch_family_revision_from_family_id();
+
+create trigger family_data_revisions_on_profiles
+  after update or delete on public.profiles
+  for each row execute function private.tg_touch_family_revision_from_profile();
+
+insert into public.family_data_revisions (family_id, revision)
+select id, 1 from public.families
+on conflict (family_id) do nothing;
+
+-- 通知按 user_id 过滤 Realtime；非主键列的 UPDATE/DELETE 需要完整 replica identity。
+alter table public.notifications replica identity full;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'family_data_revisions'
+  ) then
+    execute 'alter publication supabase_realtime add table public.family_data_revisions';
+  end if;
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'notifications'
+  ) then
+    execute 'alter publication supabase_realtime add table public.notifications';
+  end if;
+end;
+$$;
+
+-- ============================================================
+-- >>> migrations/20260906130000_require_recent_auth_for_account_deletion.sql
+-- ============================================================
+-- 0055 · 敏感账号操作：注销前必须使用刚完成重新认证的新 Cloud 会话
+-- -----------------------------------------------------------------------------
+-- 客户端在注销前以当前密码或 Apple 原生授权重新登录；GoTrue 为该动作创建新 session。
+-- 这里直接从已验证 JWT 的 session_id 取 auth.sessions.created_at，而不是接受客户端时间戳。
+-- 仅保护 delete_account：邮箱换绑和改密由 Cloud Auth 的 Secure email/password change 分别保护；
+-- Apple 解绑仍由 GoTrue 的“至少两个 identity”约束与客户端重新授权共同保护。
+
+create or replace function public.delete_account()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid                uuid := (select auth.uid());
+  v_session_id         uuid := nullif((select auth.jwt() ->> 'session_id'), '')::uuid;
+  v_session_created_at timestamptz;
+  v_mem                public.memberships;
+  v_multi              boolean;
+begin
+  if v_uid is null then
+    raise exception '未认证' using errcode = '28000';
+  end if;
+
+  select created_at
+    into v_session_created_at
+    from auth.sessions
+   where id = v_session_id
+     and user_id = v_uid;
+
+  if v_session_created_at is null or v_session_created_at < now() - interval '10 minutes' then
+    raise exception '请重新验证身份后再注销账号' using errcode = '28000';
+  end if;
+
+  -- 当前 active 成员关系（单人无家庭时可能没有）
+  select * into v_mem from public.memberships
+    where user_id = v_uid and status = 'active';
+
+  if found then
+    if v_mem.role = 'owner' then
+      select count(*) > 1 into v_multi from public.memberships
+        where family_id = v_mem.family_id and status = 'active';
+      if v_multi then
+        raise exception '你是家庭户主，请先转让户主或解散家庭后再注销'
+          using errcode = '42501';
+      end if;
+
+      update public.invitations set status = 'revoked'
+        where family_id = v_mem.family_id and status = 'valid';
+      update public.families set status = 'dissolved', member_count = 0
+        where id = v_mem.family_id;
+    else
+      update public.families set member_count = greatest(member_count - 1, 0)
+        where id = v_mem.family_id;
+    end if;
+
+    update public.memberships set status = 'left', left_at = now()
+      where id = v_mem.id;
+  end if;
+
+  -- 保留完全匿名的 profile 墓碑，以维持历史流水的外键和展示。
+  update public.profiles
+     set nickname          = '已注销用户',
+         avatar_url        = null,
+         current_family_id = null,
+         status            = 'deactivated',
+         updated_at        = now()
+   where id = v_uid;
+
+  delete from auth.identities where user_id = v_uid;
+  delete from auth.sessions   where user_id = v_uid;
+  update auth.users
+     set phone              = null,
+         phone_confirmed_at = null,
+         email              = null,
+         email_confirmed_at = null,
+         encrypted_password = null,
+         banned_until       = 'infinity',
+         updated_at         = now()
+   where id = v_uid;
+end;
+$$;
+
+-- ============================================================
+-- >>> migrations/20261024145000_freeze_membership_nickname.sql
+-- ============================================================
+-- 离开当前家庭时冻结当时的昵称。
+-- 自己退出、被户主移出、解散家庭、注销后自动退出，都把 profiles.nickname 抄到 memberships.nickname。
+-- 注销仍会把 profile 改成「已注销用户」；家庭账本读的是这里冻结的名称，并在界面加上「（已退出）」。
+-- delete_account 必须先把 membership 标为 left，再匿名化 profile。当前函数已是这个顺序，触发器才能抄到原名。
+
+alter table public.memberships add column nickname text;
+
+comment on column public.memberships.nickname is
+  '离开当前家庭时冻结的昵称。active 时为空，展示用 profiles.nickname；left/removed 后家庭账本用此名称。';
+
+update public.memberships as membership
+   set nickname = profile.nickname
+  from public.profiles as profile
+ where profile.id = membership.user_id
+   and membership.status in ('left', 'removed')
+   and profile.nickname is not null
+   and btrim(profile.nickname) <> '';
+
+alter table public.memberships
+  add constraint memberships_departed_nickname_check
+  check (
+    status = 'active'
+    or (nickname is not null and btrim(nickname) <> '')
+  );
+
+create or replace function private.freeze_membership_nickname()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_nickname text;
+begin
+  if new.status = 'active' then
+    new.nickname := null;
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE'
+     and old.status = 'active'
+     and new.status in ('left', 'removed') then
+    select profile.nickname
+      into v_nickname
+      from public.profiles as profile
+     where profile.id = new.user_id;
+    new.nickname := nullif(btrim(coalesce(v_nickname, '')), '');
+    if new.nickname is null then
+      raise exception '离开家庭时缺少可保留的名称';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function private.freeze_membership_nickname() from public, anon, authenticated;
+
+create trigger memberships_freeze_nickname
+  before insert or update of status on public.memberships
+  for each row execute function private.freeze_membership_nickname();
 
 commit;

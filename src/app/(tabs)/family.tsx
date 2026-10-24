@@ -20,6 +20,7 @@ import {
   useCreateFamily,
   useDissolveFamily,
   useFamilyActivity,
+  useFamilyMembers,
   useLeaveFamily,
   useMemberships,
   useMyFamily,
@@ -52,6 +53,7 @@ import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { budgetLevel, daysToMonthEnd } from '@/lib/budget';
 import { currentPeriodInTimeZone, formatAmount } from '@/lib/format';
+import { memberDisplayName } from '@/lib/member-name';
 
 /** 瓦片角标用的紧凑金额：分 → 「¥1,280」（取整到元，带千分位）。 */
 function formatCny(cents: number): string {
@@ -67,6 +69,7 @@ export default function FamilyScreen() {
   const familyQ = useMyFamily();
   const period = currentPeriodInTimeZone(familyQ.data?.timezone);
   const membershipsQ = useMemberships();
+  const ledgerMembersQ = useFamilyMembers();
   const activityQ = useFamilyActivity();
   const categoriesQ = useCategories();
   const budgetQ = useBudget(period);
@@ -149,7 +152,11 @@ export default function FamilyScreen() {
       : t('common.uncategorized')
     : null;
   const latestMonthRecorder = latestTxn
-    ? (members.find((member) => member.userId === latestTxn.recorder_user_id)?.nickname ?? t('common.familyMember'))
+    ? (() => {
+        const recorder = (ledgerMembersQ.data ?? []).find((member) => member.id === latestTxn.recorder_user_id);
+        if (!recorder?.nickname) return t('common.familyMember');
+        return memberDisplayName(recorder.nickname, recorder.departed);
+      })()
     : null;
   // 单人家庭：隐藏成员列表与「家庭当下」，聚焦邀请转化（PRD F1 关键态）。
   const singlePerson = (family?.member_count ?? members.length) <= 1;

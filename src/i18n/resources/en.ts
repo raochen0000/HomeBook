@@ -1036,6 +1036,7 @@ const en = {
     transferSlide: 'Slide to transfer',
     joinedAt: 'Joined {{date}}',
     manageHint: 'Tap a member to transfer ownership or remove them. Their past entries stay in the ledger.',
+    leftName: '{{name}} (left)',
   },
 } as const;
 

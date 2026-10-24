@@ -428,6 +428,7 @@ export type Database = {
           id: string;
           joined_at: string;
           left_at: string | null;
+          nickname: string | null;
           role: string;
           status: string;
           updated_at: string;
@@ -439,6 +440,7 @@ export type Database = {
           id?: string;
           joined_at?: string;
           left_at?: string | null;
+          nickname?: string | null;
           role: string;
           status?: string;
           updated_at?: string;
@@ -450,6 +452,7 @@ export type Database = {
           id?: string;
           joined_at?: string;
           left_at?: string | null;
+          nickname?: string | null;
           role?: string;
           status?: string;
           updated_at?: string;

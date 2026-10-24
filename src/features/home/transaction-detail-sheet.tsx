@@ -14,10 +14,11 @@ import { useCategories, useFamilyMembers, useMyProfile, type Transaction } from 
 import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { displayCategoryName, t, useLocalePreference } from '@/i18n';
-import { fromI18nLanguage, INTL_LOCALE } from '@/i18n/locale';
 import { i18n } from '@/i18n/instance';
+import { fromI18nLanguage, INTL_LOCALE } from '@/i18n/locale';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { clockTime, formatAmount, signForType } from '@/lib/format';
+import { memberDisplayName } from '@/lib/member-name';
 
 /** 下拉超过此位移（pt）即判定为关闭，否则弹回原位。 */
 const DISMISS_THRESHOLD = 80;
@@ -31,11 +32,13 @@ function fullDate(iso: string): string {
 function MemberRow({
   label,
   nickname,
+  avatarNickname,
   avatarUrl,
   sub,
 }: {
   label: string;
   nickname: string;
+  avatarNickname: string;
   avatarUrl: string | null;
   sub?: string;
 }) {
@@ -44,7 +47,7 @@ function MemberRow({
     <View style={styles.field}>
       <Text style={[styles.fieldLabel, { color: palette.textSecondary }]}>{label}</Text>
       <View style={styles.member}>
-        <UserAvatar avatarUrl={avatarUrl} nickname={nickname} size={28} />
+        <UserAvatar avatarUrl={avatarUrl} nickname={avatarNickname} size={28} />
         <Text style={[styles.fieldValue, { color: palette.textPrimary }]}>
           {nickname}
           {sub ? <Text style={{ color: palette.textTertiary }}>{`  ${sub}`}</Text> : null}
@@ -110,10 +113,17 @@ function Body({
   const cat = (categoriesQ.data ?? []).find((c) => c.id === txn.category_id) ?? null;
   const members = membersQ.data ?? [];
   const myId = profileQ.data?.id;
-  const nameOf = (id: string) =>
-    id === myId
-      ? (profileQ.data?.nickname ?? t('common.me'))
-      : (members.find((m) => m.id === id)?.nickname ?? t('common.member'));
+  const memberOf = (id: string) => members.find((member) => member.id === id);
+  const nameOf = (id: string) => {
+    if (id === myId) return profileQ.data?.nickname ?? t('common.me');
+    const member = memberOf(id);
+    if (!member?.nickname) return t('common.member');
+    return memberDisplayName(member.nickname, member.departed);
+  };
+  const avatarNameOf = (id: string) => {
+    if (id === myId) return profileQ.data?.nickname ?? t('common.me');
+    return memberOf(id)?.nickname || t('common.member');
+  };
   const avatarOf = (id: string) =>
     members.find((m) => m.id === id)?.avatar_url ?? (id === myId ? (profileQ.data?.avatar_url ?? null) : null);
 
@@ -195,12 +205,14 @@ function Body({
           <MemberRow
             label={t('record.recorder')}
             nickname={nameOf(txn.recorder_user_id)}
+            avatarNickname={avatarNameOf(txn.recorder_user_id)}
             avatarUrl={avatarOf(txn.recorder_user_id)}
           />
           {editedByOther ? (
             <MemberRow
               label={t('record.modifier')}
               nickname={nameOf(txn.last_editor_user_id as string)}
+              avatarNickname={avatarNameOf(txn.last_editor_user_id as string)}
               avatarUrl={avatarOf(txn.last_editor_user_id as string)}
               sub={t('record.modifiedAt', { time: fullDate(txn.updated_at) })}
             />

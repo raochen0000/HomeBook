@@ -41,8 +41,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import {
-  useCategories,
   fetchTransaction,
+  useCategories,
   useFamilyMembers,
   useMyFamily,
   useMyProfile,
@@ -60,6 +60,7 @@ import { RecordSheet } from '@/features/record/record-sheet';
 import { alertOk, categorySearchNames, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { clockTime, dayKey, humanDay, signForType } from '@/lib/format';
+import { memberDisplayName } from '@/lib/member-name';
 import {
   hasAnyQuery,
   resolveAmountRange,
@@ -220,6 +221,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   });
 
   const searchInput = useMemo(() => {
+    void locale;
     if (!valid || !hasCurrentQuery) return null;
     const keywordLower = deferredFilters.keyword.trim().toLowerCase();
     const keywordCategoryIds = keywordLower
@@ -236,6 +238,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
           .filter(
             (member) =>
               member.nickname.toLowerCase().includes(keywordLower) ||
+              memberDisplayName(member.nickname, member.departed).toLowerCase().includes(keywordLower) ||
               (member.id === myId && t('common.me').toLowerCase().includes(keywordLower)),
           )
           .map((member) => member.id)
@@ -258,7 +261,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       amountMin: minCents,
       amountMax: maxCents,
     };
-  }, [valid, hasCurrentQuery, deferredFilters, catsQ.data, membersQ.data, myId]);
+  }, [valid, hasCurrentQuery, deferredFilters, catsQ.data, membersQ.data, myId, locale]);
   const searchQ = useSearchTransactions(searchInput);
 
   const { groups } = useMemo(() => {
@@ -404,7 +407,9 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const memberLabel =
     recorderIds.size > 0
       ? summarizeSelectedLabels(
-          members.filter((m) => recorderIds.has(m.id)).map((m) => (m.id === myId ? t('common.me') : m.nickname)),
+          members
+            .filter((m) => recorderIds.has(m.id))
+            .map((m) => (m.id === myId ? t('common.me') : memberDisplayName(m.nickname, m.departed))),
         )
       : t('search.member');
   const dateLabel =
@@ -943,7 +948,7 @@ type DropdownProps = {
   categories: { id: string; name: string; is_system: boolean }[];
   categoryIds: Set<string>;
   setCategoryIds: (s: Set<string>) => void;
-  members: { id: string; nickname: string }[];
+  members: { id: string; nickname: string; departed: boolean }[];
   myId: string | undefined;
   recorderIds: Set<string>;
   setRecorderIds: (s: Set<string>) => void;
@@ -1139,7 +1144,7 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
         {members.map((m) => (
           <OptionRow
             key={m.id}
-            label={m.id === myId ? t('common.me') : m.nickname}
+            label={m.id === myId ? t('common.me') : memberDisplayName(m.nickname, m.departed)}
             active={recorderIds.has(m.id)}
             onPress={() => toggle(recorderIds, setRecorderIds, m.id)}
             disabled={filterControlsLocked}

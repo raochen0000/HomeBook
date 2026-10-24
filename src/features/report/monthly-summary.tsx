@@ -17,6 +17,7 @@ import { useCategories, useFamilyMembers, useMonthlySummary, useMyFamily, useMyP
 import { Radius, Space, usePalette } from '@/constants/design';
 import { displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { currentPeriod, currentPeriodInTimeZone, formatAmount, formatMonthDay, signForNet } from '@/lib/format';
+import { memberDisplayName } from '@/lib/member-name';
 
 const WARM_KEYS_SETTLED = [
   'summary.warmCount',
@@ -96,7 +97,9 @@ function Screen({ initialPeriod }: { initialPeriod?: string }) {
   const summary = useMemo(() => {
     void locale;
     const catById = new Map((catsQ.data ?? []).map((c) => [c.id, c]));
-    const memById = new Map((membersQ.data ?? []).map((m) => [m.id, m.nickname]));
+    const memById = new Map(
+      (membersQ.data ?? []).map((member) => [member.id, memberDisplayName(member.nickname, member.departed)]),
+    );
     const myId = profileQ.data?.id;
     const data = summaryQ.data;
     if (!data || data.transaction_count === 0) return null;

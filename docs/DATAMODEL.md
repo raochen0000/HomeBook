@@ -101,16 +101,17 @@ erDiagram
 
 ### 3.3 MEMBERSHIP（成员关系）
 
-| 字段                    | 类型      | 约束 | 说明                          |
-| ----------------------- | --------- | ---- | ----------------------------- |
-| `id`                    | UUID      | PK   |                               |
-| `family_id`             | UUID      | FK   |                               |
-| `user_id`               | UUID      | FK   |                               |
-| `role`                  | enum      |      | `owner` / `member`            |
-| `status`                | enum      |      | `active` / `left` / `removed` |
-| `joined_at` / `left_at` | timestamp |      |                               |
+| 字段                    | 类型      | 约束 | 说明                                                                                                         |
+| ----------------------- | --------- | ---- | ------------------------------------------------------------------------------------------------------------ |
+| `id`                    | UUID      | PK   |                                                                                                              |
+| `family_id`             | UUID      | FK   |                                                                                                              |
+| `user_id`               | UUID      | FK   |                                                                                                              |
+| `role`                  | enum      |      | `owner` / `member`                                                                                           |
+| `status`                | enum      |      | `active` / `left` / `removed`                                                                                |
+| `nickname`              | string    | null | 离开当前家庭时冻结的昵称。`active` 时为空，展示用 `profiles.nickname`；`left` / `removed` 后家庭账本用此名称 |
+| `joined_at` / `left_at` | timestamp |      |                                                                                                              |
 
-> **约束**：`(family_id, user_id)` 唯一；一个用户同时只能有一条 `status=active` 的成员关系（落地「一人一家」）。退出/移除时置 `left`/`removed` 而非删除（保留报表中成员名称，对应 PRD 流程 9）。
+> **约束**：`(family_id, user_id)` 唯一；一个用户同时只能有一条 `status=active` 的成员关系（落地「一人一家」）。退出/移除时置 `left`/`removed` 而非删除，并把当时的 `profiles.nickname` 冻结到 `memberships.nickname`（对应 PRD 流程 9）。`left` / `removed` 的 `nickname` 不能为空。界面在这个名称后显示「（已退出）」；账号注销仍把 `profiles.nickname` 改成「已注销用户」，不覆盖已经冻结的家庭名称。
 
 ### 3.4 TRANSACTION（流水）—— 模型核心
 
