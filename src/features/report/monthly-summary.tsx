@@ -1,6 +1,7 @@
 /**
  * 月度总结（流程 9 / PRD §11.5.2）：独立 push 页（`/summary`）、可翻月的单一视图。
- * 用户会久留、来回翻月查看数据，故为带返回头的独立页面，而非 Modal（DESIGN §9.9 规则 3）。
+ * 用户会久留、来回翻月查看数据，故为带系统返回头的独立页面，而非 Modal（DESIGN §9.9 规则 3）。
+ * 左上角返回键与账号与安全等设置页相同，由根栈 `headerBackButtonDisplayMode: 'minimal'` 绘制。
  * 入口＝首页 hero「本月脉搏卡」整卡点击，默认落地「本月至今」实例（实时计算，
  * 进行中语气、不提供保存图片）；左右翻月（chevron / 横滑）看历史，上月及更早为
  * 「已结算」仪式实例（保留全部字段 + 暖心文案，保存图片发布前补齐）。
@@ -50,11 +51,11 @@ function periodLabel(period: string): string {
   return t('dates.yearMonth', { year: y, month: m });
 }
 
-export function MonthlySummaryScreen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: () => void }) {
-  return <Screen initialPeriod={initialPeriod} onClose={onClose} />;
+export function MonthlySummaryScreen({ initialPeriod }: { initialPeriod?: string }) {
+  return <Screen initialPeriod={initialPeriod} />;
 }
 
-function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: () => void }) {
+function Screen({ initialPeriod }: { initialPeriod?: string }) {
   const palette = usePalette();
   const { locale } = useLocalePreference();
   const catsQ = useCategories();
@@ -159,16 +160,8 @@ function Screen({ initialPeriod, onClose }: { initialPeriod?: string; onClose: (
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
-        <View style={styles.topBar}>
-          <Pressable hitSlop={8} onPress={onClose} style={[styles.navBack, { backgroundColor: palette.cardPill }]}>
-            <SymbolView name="chevron.left" tintColor={palette.textPrimary} size={17} weight="semibold" />
-          </Pressable>
-          <Text style={[styles.title, { color: palette.textPrimary }]}>{t('summary.title')}</Text>
-          <View style={styles.navSide} />
-        </View>
-
-        {/* 翻月条：‹ 标题 ›（横滑亦可） */}
+      <SafeAreaView edges={['left', 'right']} style={styles.flex}>
+        {/* 翻月条：‹ 标题 ›（横滑亦可）。返回与页面标题由系统导航栏承担。 */}
         <View style={styles.periodBar} {...pan.panHandlers}>
           <Pressable hitSlop={10} onPress={goPrev} disabled={!canPrev}>
             <SymbolView
@@ -354,28 +347,13 @@ function StatRow({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[3],
-  },
-  title: { fontSize: 20, fontWeight: '700' },
-  navBack: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navSide: { width: 36 },
   periodBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: Space[6],
-    paddingBottom: Space[2],
+    paddingTop: Space[4],
+    paddingBottom: Space[4],
   },
   periodLabel: { fontSize: 17, fontWeight: '600', minWidth: 180, textAlign: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space[2] },
