@@ -112,7 +112,7 @@ function Body({ onClose, onRequestInvite }: { onClose: () => void; onRequestInvi
                     <UserAvatar avatarUrl={m.avatarUrl} nickname={m.nickname} size={44} />
                     <View style={styles.flex}>
                       <View style={styles.nameRow}>
-                        <Text style={[styles.name, { color: palette.textPrimary }]}>
+                        <Text style={[styles.name, { color: palette.textPrimary }]} numberOfLines={1}>
                           {m.nickname}
                           {m.userId === myId ? t('member.meSuffix') : ''}
                         </Text>
@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Space[4],
   },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
-  name: { fontSize: 16, fontWeight: '600' },
+  name: { flexShrink: 1, fontSize: 16, fontWeight: '600' },
   sub: { fontSize: 13, lineHeight: 16, marginTop: 2 },
   roleBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: Radius.sm },
   roleBadgeText: { fontSize: 12, lineHeight: 16, fontWeight: '600' },

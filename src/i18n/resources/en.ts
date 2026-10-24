@@ -644,7 +644,8 @@ const en = {
     nicknameInvalid: 'That name isn’t allowed',
     saveFailed: 'Couldn’t save',
     editNickname: 'Edit name',
-    nicknameRange: 'Enter {{min}}-{{max}} characters',
+    nicknameHint: 'Up to 10 Chinese characters, or 20 English letters',
+    nicknameOk: 'OK',
     loginSafety:
       'Keep at least one sign-in method. The last one can’t be unlinked. Verify your identity before sensitive changes.',
     reauthTitle: 'Verify your identity',

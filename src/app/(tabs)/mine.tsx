@@ -11,7 +11,16 @@
  * 头像用 SwiftUI 固定尺寸（ListUserAvatar），不经 RNHostView，避免 List 提议高度把这一行拉满。
  */
 import { HStack, Image, Section, Spacer, Text, VStack } from '@expo/ui/swift-ui';
-import { contentShape, font, foregroundColor, listRowInsets, onTapGesture, shapes } from '@expo/ui/swift-ui/modifiers';
+import {
+  contentShape,
+  font,
+  foregroundColor,
+  frame,
+  lineLimit,
+  listRowInsets,
+  onTapGesture,
+  shapes,
+} from '@expo/ui/swift-ui/modifiers';
 import { useRouter, type Href } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
@@ -111,8 +120,14 @@ export default function MineScreen() {
             ]}
           >
             <ListUserAvatar uri={avatarUri} nickname={profile?.nickname ?? t('common.user')} size={60} />
-            <VStack alignment="leading" spacing={Space[1]}>
-              <Text modifiers={[font({ size: 22, weight: 'semibold' }), foregroundColor(palette.textPrimary)]}>
+            <VStack
+              alignment="leading"
+              spacing={Space[1]}
+              modifiers={[frame({ maxWidth: 9999, alignment: 'leading' })]}
+            >
+              <Text
+                modifiers={[font({ size: 22, weight: 'semibold' }), foregroundColor(palette.textPrimary), lineLimit(1)]}
+              >
                 {profile?.nickname ?? t('common.user')}
               </Text>
               <Text modifiers={[font({ size: 14 }), foregroundColor(palette.textSecondary)]}>

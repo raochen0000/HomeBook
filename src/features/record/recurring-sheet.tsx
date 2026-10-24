@@ -407,7 +407,9 @@ function MemberPickerSheet({
             return (
               <Pressable key={m.id} style={styles.memberRow} onPress={() => onSelect(m.userId)}>
                 <SymbolView name="person.crop.circle.fill" tintColor={palette.textTertiary} size={32} />
-                <Text style={[styles.memberName, { color: palette.textPrimary }]}>{m.nickname}</Text>
+                <Text style={[styles.memberName, { color: palette.textPrimary }]} numberOfLines={1}>
+                  {m.nickname}
+                </Text>
                 <View style={styles.rowSpacer} />
                 {active ? <SymbolView name="checkmark" tintColor={palette.info} size={18} /> : null}
               </Pressable>
@@ -486,5 +488,5 @@ const styles = StyleSheet.create({
   memberHeaderSide: { width: 24, alignItems: 'flex-end' },
   memberTitle: { fontSize: 16, fontWeight: '600' },
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: Space[3], paddingVertical: Space[3] },
-  memberName: { fontSize: 16, fontWeight: '500' },
+  memberName: { flexShrink: 1, fontSize: 16, fontWeight: '500' },
 });

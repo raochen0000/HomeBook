@@ -76,15 +76,15 @@ erDiagram
 
 **业务侧（`public.profiles`）**
 
-| 字段                        | 类型        | 约束                | 说明                                 |
-| --------------------------- | ----------- | ------------------- | ------------------------------------ |
-| `id`                        | UUID        | PK, FK→`auth.users` | 用户唯一标识                         |
-| `nickname`                  | string      | not null            | 昵称（可重复、可改，不作校验凭据）   |
-| `avatar_url`                | string      | null                | 头像                                 |
-| `current_family_id`         | UUID        | FK→FAMILY           | 当前所属家庭（一人仅一个）           |
-| `last_login_at`             | timestamptz |                     | 用于户主 30 天继任判定               |
-| `status`                    | enum        |                     | `active` / `deactivated`（注销墓碑） |
-| `created_at` / `updated_at` | timestamptz |                     |                                      |
+| 字段                        | 类型        | 约束                | 说明                                                             |
+| --------------------------- | ----------- | ------------------- | ---------------------------------------------------------------- |
+| `id`                        | UUID        | PK, FK→`auth.users` | 用户唯一标识                                                     |
+| `nickname`                  | string      | not null            | 昵称。客户端限制视觉宽度 ≤ 20 后写入；可重复、可改，不是登录凭据 |
+| `avatar_url`                | string      | null                | 头像                                                             |
+| `current_family_id`         | UUID        | FK→FAMILY           | 当前所属家庭（一人仅一个）                                       |
+| `last_login_at`             | timestamptz |                     | 用于户主 30 天继任判定                                           |
+| `status`                    | enum        |                     | `active` / `deactivated`（注销墓碑）                             |
+| `created_at` / `updated_at` | timestamptz |                     |                                                                  |
 
 ### 3.2 FAMILY（家庭）
 

@@ -2932,12 +2932,7 @@ function MonthlyMemberCard({
         <View style={styles.memberList}>
           {members.map((member) => (
             <View key={member.id} style={styles.memberRow}>
-              <ThemedText
-                style={[styles.memberName, { color: palette.textPrimary }]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.75}
-              >
+              <ThemedText style={[styles.memberName, { color: palette.textPrimary }]} numberOfLines={1}>
                 {member.name}
               </ThemedText>
               <View style={styles.memberBarWrap}>
@@ -3540,12 +3535,7 @@ function MemberAnalysisSheet({
               </View>
               {rows.map((item) => (
                 <View key={item.id} style={styles.memberContributionRow}>
-                  <Text
-                    style={[styles.memberContributionName, { color: palette.textPrimary }]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.75}
-                  >
+                  <Text style={[styles.memberContributionName, { color: palette.textPrimary }]} numberOfLines={1}>
                     {item.name}
                   </Text>
                   <View style={styles.memberContributionBars}>

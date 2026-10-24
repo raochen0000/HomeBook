@@ -27,6 +27,7 @@ import { ImageTooLargeError } from '@/adapters/storage';
 import { useMyProfile, useUpdateMyAvatar, useUpdateMyNickname } from '@/api';
 import { ListUserAvatar } from '@/components/list-user-avatar';
 import { Space, usePalette } from '@/constants/design';
+import { NicknamePrompt } from '@/features/account/nickname-prompt';
 import { requireSensitiveReauthentication } from '@/features/auth/sensitive-reauth';
 import { DangerConfirmSheet } from '@/features/family/danger-confirm-sheet';
 import { useAvatarFiles } from '@/features/home/use-avatar-files';
@@ -39,7 +40,6 @@ import {
   subscribeLoginIdentities,
   type LoginIdentitySnapshot,
 } from '@/lib/login-identity-cache';
-import { NICKNAME_MAX_LENGTH, NICKNAME_MIN_LENGTH, validateNickname } from '@/lib/profile';
 
 /** 邮箱脱敏为 r***@gmail.com。 */
 function maskEmail(email?: string | null): string {
@@ -62,6 +62,7 @@ export default function AccountScreen() {
   // 账号注销二次确认：输入「我确认注销」+ 危险红滑块（像滑动关机），替代原 Alert 双按钮。
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [preparingDelete, setPreparingDelete] = useState(false);
+  const [nicknameOpen, setNicknameOpen] = useState(false);
 
   // 头像预下载到本地 file://，供原生 Image uiImage 同步读（与首页流水头像同一链路）。
   const avatarFiles = useAvatarFiles(profile ? [{ id: profile.id, avatar_url: profile.avatar_url }] : []);
@@ -115,26 +116,7 @@ export default function AccountScreen() {
     });
   };
 
-  const onEditNickname = () => {
-    Alert.prompt(
-      t('account.editNickname'),
-      t('account.nicknameRange', { min: NICKNAME_MIN_LENGTH, max: NICKNAME_MAX_LENGTH }),
-      (text) => {
-        const v = text?.trim();
-        if (!v || v === profile?.nickname) return;
-        const invalid = validateNickname(v);
-        if (invalid) {
-          Alert.alert(t('account.nicknameInvalid'), invalid, alertOk());
-          return;
-        }
-        updateNickname.mutate(v, {
-          onError: (e) => Alert.alert(t('account.saveFailed'), (e as Error).message ?? String(e), alertOk()),
-        });
-      },
-      'plain-text',
-      profile?.nickname ?? '',
-    );
-  };
+  const onEditNickname = () => setNicknameOpen(true);
 
   // 二次销毁确认：打开危险确认弹层（输入「我确认注销」解锁滑块）。成功后本地会话被清掉，
   // 根布局 Stack.Protected 把本页从栈里摘掉并落到登录页。
@@ -173,7 +155,14 @@ export default function AccountScreen() {
           >
             <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{t('account.nickname')}</Text>
             <Spacer />
-            <Text modifiers={[font({ size: 15 }), foregroundColor(palette.textSecondary)]}>
+            <Text
+              modifiers={[
+                font({ size: 15 }),
+                foregroundColor(palette.textSecondary),
+                lineLimit(1),
+                frame({ maxWidth: 220, alignment: 'trailing' }),
+              ]}
+            >
               {profile?.nickname ?? '—'}
             </Text>
             <Image systemName="chevron.right" size={13} color={palette.textTertiary} />
@@ -253,6 +242,17 @@ export default function AccountScreen() {
       </SettingsList>
 
       {/* 账号注销二次确认：输入「我确认注销」解锁危险红滑块，滑到底执行（像滑动关机）。 */}
+      <NicknamePrompt
+        visible={nicknameOpen}
+        initial={profile?.nickname ?? ''}
+        onClose={() => setNicknameOpen(false)}
+        onSubmit={(nickname) => {
+          updateNickname.mutate(nickname, {
+            onError: (e) => Alert.alert(t('account.saveFailed'), (e as Error).message ?? String(e), alertOk()),
+          });
+        }}
+      />
+
       <DangerConfirmSheet
         visible={deleteOpen}
         title={t('account.deleteAccount')}

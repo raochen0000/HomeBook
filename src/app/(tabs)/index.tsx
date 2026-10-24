@@ -573,7 +573,7 @@ export default function HomeScreen() {
           >
             <View style={styles.headerText}>
               <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('tabs.home')}</ThemedText>
-              <ThemedText style={[styles.subtitle, { color: palette.textSecondary }]} numberOfLines={2}>
+              <ThemedText style={[styles.subtitle, { color: palette.textSecondary }]} numberOfLines={1}>
                 {profileQ.data?.nickname
                   ? t('home.greetingWithName', { greeting: greetingForHour(now), name: profileQ.data.nickname })
                   : t('home.greetingSolo', { greeting: greetingForHour(now) })}
