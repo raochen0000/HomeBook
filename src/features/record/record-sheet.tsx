@@ -11,7 +11,7 @@
 import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -30,8 +30,8 @@ import {
   useAccountingPrefs,
   useCategories,
   useCreateTransaction,
-  useHiddenCategoryIds,
   useHasTransactions,
+  useHiddenCategoryIds,
   useMemberships,
   useUpdateTransaction,
   type Category,
@@ -39,11 +39,13 @@ import {
   type Transaction,
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
-import { toast } from '@/components/toast';
+import { playToastHaptic, toast, ToastNotice, type ToastItem } from '@/components/toast';
 import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
+
+import { isLikelyNetworkError, isSaveAttemptTimeout, SAVE_NETWORK_TIMEOUT_MS, withDeadline } from './save-attempt';
 
 type TxnType = 'expense' | 'income';
 
@@ -56,8 +58,11 @@ export type RecordSheetProps = {
   recorderId: string;
   /** null = 新建；非 null = 编辑该流水。 */
   editing: Transaction | null;
-  /** 保存成功回调；firstRecord=true 表示这是家庭第一笔（父层据此在面板关闭后弹庆祝，否则弹 toast）。 */
-  onSaved?: (info: { firstRecord: boolean }) => void;
+  /**
+   * 保存成功回调。firstRecord=true 表示这是家庭第一笔（父层在面板关闭后弹庆祝）。
+   * updated=true 表示编辑；「更新成功」由本面板在关闭动画结束后发出，父层不要再提示「已记一笔」。
+   */
+  onSaved?: (info: { firstRecord: boolean; updated?: boolean }) => void;
   /** 面板关闭动画结束（iOS）；父层用它在面板消失后再弹首次记账庆祝。 */
   onDismiss?: () => void;
 };
@@ -87,14 +92,42 @@ function rawToCents(raw: string): number {
 
 /** 外壳：原生 pageSheet。内部表单只在打开时挂载，靠 useState 初值按 editing 还原（避免 setState-in-effect）。 */
 export function RecordSheet({ visible, onClose, onDismiss, familyId, recorderId, editing, onSaved }: RecordSheetProps) {
+  const updateToastPending = useRef(false);
+
   return (
-    <PageSheet visible={visible} onClose={onClose} onDismiss={onDismiss}>
-      <RecordForm familyId={familyId} recorderId={recorderId} editing={editing} onClose={onClose} onSaved={onSaved} />
+    <PageSheet
+      visible={visible}
+      onClose={onClose}
+      onDismiss={() => {
+        const showUpdated = updateToastPending.current;
+        updateToastPending.current = false;
+        onDismiss?.();
+        // 面板已离开屏幕后再提示，避免被 pageSheet 挡住。
+        if (showUpdated) toast.success(t('record.updated'));
+      }}
+    >
+      <RecordForm
+        familyId={familyId}
+        recorderId={recorderId}
+        editing={editing}
+        onClose={onClose}
+        onSaved={onSaved}
+        onUpdated={() => {
+          updateToastPending.current = true;
+        }}
+      />
     </PageSheet>
   );
 }
 
-function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<RecordSheetProps, 'visible'>) {
+function RecordForm({
+  familyId,
+  recorderId,
+  editing,
+  onClose,
+  onSaved,
+  onUpdated,
+}: Omit<RecordSheetProps, 'visible' | 'onDismiss'> & { onUpdated: () => void }) {
   const palette = useSheetPalette();
   useLocalePreference();
   const catColors = useCategoryColors();
@@ -105,7 +138,19 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
   const createM = useCreateTransaction();
   const updateM = useUpdateTransaction();
   const hasTransactionsQ = useHasTransactions(familyId);
-  const saving = createM.isPending || updateM.isPending;
+  // 只用本次等待控制按钮。请求超过 8 秒后 mutation 可能仍在飞，按钮要先恢复。
+  const [awaitingSave, setAwaitingSave] = useState(false);
+  const [continueToast, setContinueToast] = useState<ToastItem | null>(null);
+  const continueToastSeq = useRef(0);
+  const mountedRef = useRef(true);
+  const saving = awaitingSave;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // 记账偏好（记账设置 §18.3.1）：默认记账类型 + 记一笔后行为。
   const prefs = useAccountingPrefs().data;
@@ -175,45 +220,69 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
     if (!canSave || !effectiveCategoryId) return;
     // 家庭第一笔？只查询是否存在任意流水，不加载历史列表。
     const isFirstRecord = !editing && hasTransactionsQ.isSuccess && !hasTransactionsQ.data;
+    setAwaitingSave(true);
     try {
       if (editing) {
-        await updateM.mutateAsync({
-          id: editing.id,
+        await withDeadline(
+          updateM.mutateAsync({
+            id: editing.id,
+            type,
+            amount: cents,
+            category_id: effectiveCategoryId,
+            note: note || null,
+            occurred_at: occurredAt.toISOString(),
+            recorder_user_id: recorderUserId,
+          }),
+          SAVE_NETWORK_TIMEOUT_MS,
+        );
+        if (!mountedRef.current) return;
+        onUpdated();
+        onSaved?.({ firstRecord: false, updated: true });
+        onClose();
+        return;
+      }
+
+      await withDeadline(
+        createM.mutateAsync({
+          family_id: familyId,
+          recorder_user_id: recorderUserId,
           type,
           amount: cents,
           category_id: effectiveCategoryId,
           note: note || null,
           occurred_at: occurredAt.toISOString(),
-          recorder_user_id: recorderUserId,
-        });
-        onSaved?.({ firstRecord: false });
-        onClose();
-        return;
-      }
-
-      await createM.mutateAsync({
-        family_id: familyId,
-        recorder_user_id: recorderUserId,
-        type,
-        amount: cents,
-        category_id: effectiveCategoryId,
-        note: note || null,
-        occurred_at: occurredAt.toISOString(),
-      });
+        }),
+        SAVE_NETWORK_TIMEOUT_MS,
+      );
+      if (!mountedRef.current) return;
 
       // 记一笔后行为（§18.3.1）：继续记下一笔 → 清空金额/备注/分类、面板不关；否则保存即关。
       if (afterBehavior === 'continue') {
         setRaw('');
         setNote('');
         setCategoryId(null);
-        toast.success(t('record.savedContinue'));
+        // 根上的 Toast 在 pageSheet 后面。面板不关时，把同一条提示画在面板里。
+        playToastHaptic('success');
+        setContinueToast({
+          id: ++continueToastSeq.current,
+          kind: 'success',
+          text: t('record.savedContinue'),
+          duration: 3000,
+        });
       } else {
         // 庆祝交由父层在面板关闭后展示（onDismiss），这里只上报「是否家庭第一笔」并关闭面板。
         onSaved?.({ firstRecord: isFirstRecord });
         onClose();
       }
     } catch (e) {
+      if (!mountedRef.current) return;
+      if (isSaveAttemptTimeout(e) || isLikelyNetworkError(e)) {
+        Alert.alert(t('record.networkRetry'), undefined, alertOk());
+        return;
+      }
       Alert.alert(t('record.saveFailed'), (e as Error).message ?? String(e), alertOk());
+    } finally {
+      if (mountedRef.current) setAwaitingSave(false);
     }
   };
 
@@ -406,6 +475,10 @@ function RecordForm({ familyId, recorderId, editing, onClose, onSaved }: Omit<Re
           }}
           onClose={() => setMemberOpen(false)}
         />
+      ) : null}
+
+      {continueToast ? (
+        <ToastNotice key={continueToast.id} item={continueToast} top={Space[8]} onHide={() => setContinueToast(null)} />
       ) : null}
     </View>
   );

@@ -261,6 +261,8 @@ const en = {
     notePlaceholder: 'Add a note…',
     recurringNotePlaceholder: 'Add a note… (e.g. salary, Apple Music)',
     savedContinue: 'Saved. Add another',
+    updated: 'Updated',
+    networkRetry: 'Network error. Try again later',
     saveFailed: 'Couldn’t save',
     expense: 'Expense',
     income: 'Income',

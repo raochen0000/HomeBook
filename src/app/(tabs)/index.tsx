@@ -597,8 +597,9 @@ export default function HomeScreen() {
         editing={sheet.editing}
         familyId={sheet.familyId}
         recorderId={profileQ.data?.id ?? ''}
-        onSaved={({ firstRecord }) => {
-          // 第一笔：标记待庆祝（面板关闭后再弹）；否则走常规「已记一笔」toast。
+        onSaved={({ firstRecord, updated }) => {
+          // 编辑成功的「更新成功」由记账面板在关闭后发出。第一笔等面板关闭再庆祝；其余新建提示「已记一笔」。
+          if (updated) return;
           if (firstRecord) pendingCelebrateRef.current = true;
           else toast.success(t('home.savedToast'));
         }}

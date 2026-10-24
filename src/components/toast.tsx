@@ -6,7 +6,8 @@
  *   success（成功勾）/ error（叹号圈）/ info（i 圈·蓝）/ warning（三角·琥珀）。
  *
  * 单例队列：新提示**替换**当前提示（按 id 重挂动画），避免同页连续提示互相打断而丢失。
- * `<ToastHost />` 在根布局挂一次（见 app/_layout.tsx），置于所有覆盖层之上。
+ * `<ToastHost />` 在根布局挂一次（见 app/_layout.tsx）。原生 pageSheet 是独立窗口，会挡住根上的提示；
+ * 面板不关闭时，调用方改在该 Modal 内渲染 `ToastNotice`。
  *
  * HUD 材质随主题适配（同 iOS 系统 HUD）：浅色=浅磨砂 + 近黑字，深色=深磨砂 + 白字。
  * 文字色直接取 `palette.textPrimary`（本就随主题反相），图标走语义令牌，两个主题都够辨识。
@@ -22,7 +23,7 @@ import { Radius, Space, usePalette } from '@/constants/design';
 
 export type ToastKind = 'success' | 'error' | 'info' | 'warning';
 
-type ToastItem = { id: number; kind: ToastKind; text: string; duration: number };
+export type ToastItem = { id: number; kind: ToastKind; text: string; duration: number };
 type ToastOptions = { duration?: number };
 
 // ── 单例事件通道 ──────────────────────────────────────────────────────────────
@@ -39,10 +40,14 @@ const HAPTIC: Record<ToastKind, Haptics.NotificationFeedbackType | null> = {
   info: null,
 };
 
+export function playToastHaptic(kind: ToastKind) {
+  const h = HAPTIC[kind];
+  if (h) void Haptics.notificationAsync(h).catch(() => {});
+}
+
 function emit(kind: ToastKind, text: string, opts?: ToastOptions) {
   if (!text || !listener) return;
-  const h = HAPTIC[kind];
-  if (h) Haptics.notificationAsync(h).catch(() => {});
+  playToastHaptic(kind);
   listener({ id: ++seq, kind, text, duration: opts?.duration ?? 3000 });
 }
 
@@ -68,7 +73,8 @@ const KIND: Record<ToastKind, { symbol: SymbolViewProps['name']; tint: (p: Retur
   };
 
 /**
- * 根级挂载点：订阅单例通道并渲染当前提示。放在所有覆盖层之上（顶部安全区下方）。
+ * 根级挂载点：订阅单例通道并渲染当前提示（顶部安全区下方）。
+ * 原生 pageSheet 会盖住这一层；面板不关闭时的提示改用 ToastNotice 画在 Modal 内。
  */
 export function ToastHost() {
   const [item, setItem] = useState<ToastItem | null>(null);
@@ -85,10 +91,15 @@ export function ToastHost() {
   return <ToastView key={item.id} item={item} onHide={() => setItem(null)} />;
 }
 
-function ToastView({ item, onHide }: { item: ToastItem; onHide: () => void }) {
+export function ToastNotice({ item, onHide, top }: { item: ToastItem; onHide: () => void; top?: number }) {
+  return <ToastView item={item} onHide={onHide} top={top} />;
+}
+
+function ToastView({ item, onHide, top }: { item: ToastItem; onHide: () => void; top?: number }) {
   const palette = usePalette();
   const isDark = useColorScheme() === 'dark';
   const insets = useSafeAreaInsets();
+  const offset = top ?? insets.top + Space[2];
   // Animated.Value 只在挂载时建一次（惰性 useState，避免在 render 期读 ref.current）。
   const [translateY] = useState(() => new Animated.Value(-24));
   const [opacity] = useState(() => new Animated.Value(0));
@@ -122,7 +133,7 @@ function ToastView({ item, onHide }: { item: ToastItem; onHide: () => void }) {
       pointerEvents="none"
       // VoiceOver 播报：错误态 assertive（打断当前播报），其余 polite。
       accessibilityLiveRegion={item.kind === 'error' ? 'assertive' : 'polite'}
-      style={[styles.wrap, { top: insets.top + Space[2], opacity, transform: [{ translateY }] }]}
+      style={[styles.wrap, { top: offset, opacity, transform: [{ translateY }] }]}
     >
       {/*
        * 阴影层与材质层分开：iOS 上同一视图不能既 overflow:hidden（圆角裁切 BlurView）

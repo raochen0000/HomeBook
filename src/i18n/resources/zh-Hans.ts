@@ -261,6 +261,8 @@ const zhHans = {
     notePlaceholder: '加个备注…',
     recurringNotePlaceholder: '加个备注…（如 工资、Apple Music）',
     savedContinue: '已保存，继续记下一笔',
+    updated: '更新成功',
+    networkRetry: '网络异常，请稍后重试',
     saveFailed: '保存失败',
     expense: '支出',
     income: '收入',
