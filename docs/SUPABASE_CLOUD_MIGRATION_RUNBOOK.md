@@ -249,6 +249,7 @@ Free 方案在 2026-08-30 的规划基线如下；执行当天仍需重新核对
 - `2026-09-01`：`auth.homebook-app.com` 在 Resend 东京区域的状态为 `Verified`；DKIM TXT 与两条发信 CNAME 均已验证，收信能力保持关闭。根域现有 SPF、DKIM 与 DMARC 未改动。
 - `2026-09-01`：Cloud Auth 已启用自定义 SMTP，使用 `no-reply@auth.homebook-app.com` / `HomeBook`、`smtp.resend.com:465` 与 Resend 的域名受限发送权限凭据。凭据未记录到仓库或本运行手册。
 - 模板兼容性审计：注册页面没有输入邮箱 OTP，故 Confirm sign up 保留 `{{ .ConfirmationURL }}`；找回密码客户端以 `verifyOtp(type=recovery)` 消费 6 位 OTP，故 Reset password 包含 `{{ .Token }}`；Cloud Secure email change 开启，Change email address 通过 `{{ .ConfirmationURL }}` 分别向旧、新邮箱确认，客户端不再消费 `email_change` OTP。
+- `2026-10-24` 订正：绑定和更换邮箱改为只在 App 内验证新邮箱的 6 位验证码，不再要求旧邮箱点击确认链接。负责人在 Cloud 控制台手动完成三项，仓库不代改：关闭 Secure email change；「Change email address」模板只保留 `{{ .Token }}`，不要放 `{{ .ConfirmationURL }}`；启用 Security notification「Email address changed」，发给旧邮箱，说明登录邮箱已更换，并写上 homebook-feedback@outlook.com，通知里不放验证码或链接。注册确认仍用链接，找回密码仍用 6 位验证码。在这三项完成前，只填写新邮箱验证码不会完成更换。
 - `2026-09-01`：已保存“Confirm sign up”双语模板（`{{ .ConfirmationURL }}`）、“Reset password”双语模板（`{{ .Token }}`）及“Change email address”双语模板（`{{ .ConfirmationURL }}`）。模板与当前 App 流程匹配；端到端收件与链接有效性仍待阶段 8 真机/邮箱矩阵验证。
 - `2026-09-02`：用户在 iOS 真机已安装的 Beta 中确认“通过 Apple 登录”可完成系统授权并正常进入应用。此前模拟器显示的未知授权错误不作为 Cloud Auth 失败证据；Expo 仅支持在模拟器做有限测试，Apple 链路以真机结果为准。经 EAS 只读核对，截至当日最新 production iOS build 3 创建于 `2026-08-30`，早于本次 Cloud 切换，故该结果当时仅证明原生 Apple 授权正常，不能作为目标 Cloud provider 的验收。
 - `2026-09-03`：用户完成新的 EAS production iOS 构建、TestFlight 更新和真机回归，并确认 Gmail、Outlook、iCloud 的认证邮件，Apple 首次/重复登录、隐藏邮箱、绑定/解绑，以及账号注销后同一身份重新登录均通过。Resend 的额度、退信查看和供应商故障人工应对已记录在运营侧；未向仓库写入任何凭据。
@@ -349,7 +350,7 @@ Edge Function + Cron 验收：
 - [x] 登录页保留邮箱和 Apple，移除/隐藏手机号 OTP 标签、页面和错误文案。
   - [x] 已按 Supabase Auth 错误码区分“邮箱未确认”；不得将其回退为注册，也不得把防枚举伪用户提示为注册成功。
 - [ ] 账号安全页移除手机号管理入口，重新实现“至少一种登录方式”和敏感操作验证。
-  - [x] 已移除手机号管理入口与 `/account/phone` 页面；换绑邮箱改用 Cloud 的旧/新邮箱确认链接，并在回到页面时刷新会话。
+  - [x] 已移除手机号管理入口与 `/account/phone` 页面；换绑邮箱改用 Cloud 的旧/新邮箱确认链接，并在回到页面时刷新会话。`2026-10-24` 起客户端改为新邮箱 6 位验证码，Cloud 侧的关闭安全换绑、更换模板和旧邮箱通知见阶段 4 的同日订正。
   - [x] 客户端已在邮箱换绑、Apple 解绑、改密和注销前重新认证；仅 Apple 账号必须重新完成原生 Apple 授权，且 Apple 为唯一 identity 时按钮不可用。
   - [ ] `0055` 注销 session 新鲜度校验待新版 TestFlight 二进制就绪后部署并在真机验证；不能先让旧二进制失去注销能力。
 - [x] 检查通知、反馈、协议/隐私文案中对手机号、阿里云、数据区域的描述；当前文案披露 Supabase Cloud 新加坡区域、实际邮件服务商、Apple 与 Expo Push。

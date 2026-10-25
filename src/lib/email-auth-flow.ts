@@ -25,3 +25,22 @@ export function classifyEmailSignInFailure(error: EmailSignInFailure): EmailSign
 export function isObfuscatedExistingSignUpUser(user: { identities?: unknown[] } | null): boolean {
   return !user?.identities?.length;
 }
+
+/** 绑定 / 更换邮箱的验证码位数，与 Cloud Email OTP Length 一致。 */
+export const EMAIL_CHANGE_CODE_LENGTH = 6;
+
+/** 同一地址重新发送验证码的间隔，与找回密码一致。 */
+export const EMAIL_CHANGE_RESEND_SECONDS = 60;
+
+/**
+ * 距离可以再次发送还要等的秒数。
+ * 没有发送时间或时间无法解析时返回 0；时钟超前时按完整间隔计算，避免立刻连发。
+ */
+export function emailChangeResendCooldown(sentAt: string | null | undefined, now = Date.now()): number {
+  if (!sentAt) return 0;
+  const sent = Date.parse(sentAt);
+  if (!Number.isFinite(sent)) return 0;
+  const elapsed = Math.floor((now - sent) / 1000);
+  if (elapsed < 0) return EMAIL_CHANGE_RESEND_SECONDS;
+  return Math.max(0, EMAIL_CHANGE_RESEND_SECONDS - elapsed);
+}

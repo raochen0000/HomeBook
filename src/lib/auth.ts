@@ -236,15 +236,61 @@ export function normalizeEmail(raw: string): string | null {
 }
 
 /**
- * 已登录用户绑定 / 换绑邮箱（把邮箱挂到当前 auth.users）。
- * Cloud 的 Secure email change 开启时，已有邮箱的换绑会分别向旧、新邮箱发送确认链接；
- * 两个链接均被确认后由服务端提交变更。客户端不消费 email_change OTP。
+ * 已登录用户绑定 / 更换邮箱：向新邮箱发送 6 位验证码。
+ * Cloud 必须关闭 Secure email change，邮件只发往新邮箱。验证通过前当前邮箱不变。
  */
 export async function bindEmail(email: string): Promise<void> {
   const normalized = normalizeEmail(email);
   if (!normalized) throw new Error(t('auth.invalidEmail'));
   const { error } = await supabase.auth.updateUser({ email: normalized });
   if (error) throw error;
+}
+
+/** 向同一待确认的新邮箱重新发送验证码。调用方负责同一地址不再要求重新认证。 */
+export async function resendEmailChange(email: string): Promise<void> {
+  const normalized = normalizeEmail(email);
+  if (!normalized) throw new Error(t('auth.invalidEmail'));
+  const { error } = await supabase.auth.resend({ type: 'email_change', email: normalized });
+  if (error) throw error;
+}
+
+/**
+ * 校验新邮箱的 6 位验证码并完成绑定 / 更换。
+ * 只有服务端已经把登录邮箱改成目标地址时才算成功；只确认了一部分时保持原邮箱。
+ */
+export async function verifyEmailChange(email: string, token: string): Promise<void> {
+  const normalized = normalizeEmail(email);
+  if (!normalized) throw new Error(t('auth.invalidEmail'));
+  const code = token.trim();
+  if (!/^\d{6}$/.test(code)) throw new Error(t('auth.recoverCodeLen'));
+
+  const { error } = await supabase.auth.verifyOtp({ email: normalized, token: code, type: 'email_change' });
+  if (await confirmedEmailIs(normalized)) return;
+  if (error) throw error;
+  throw emailChangeIncompleteError();
+}
+
+function emailChangeIncompleteError(): Error {
+  const error = new Error(t('account.emailChangeNotApplied')) as Error & { code?: string };
+  error.code = 'email_change_incomplete';
+  return error;
+}
+
+/** 刷新会话后确认登录邮箱已是目标地址，且没有仍在等待的新邮箱。 */
+async function confirmedEmailIs(email: string): Promise<boolean> {
+  try {
+    const refreshed = await supabase.auth.refreshSession();
+    if (!refreshed.error && emailChangeIsConfirmed(refreshed.data.session?.user, email)) return true;
+  } catch {
+    // 刷新失败时再看本机会话，避免验证已经成功却被网络错误盖掉。
+  }
+  const { data } = await supabase.auth.getSession();
+  return emailChangeIsConfirmed(data.session?.user, email);
+}
+
+function emailChangeIsConfirmed(user: User | null | undefined, email: string): boolean {
+  if (!user || user.new_email) return false;
+  return normalizeEmail(user.email ?? '') === email;
 }
 
 /** Apple 原生设备是否支持 Sign in with Apple（仅 iOS）。 */

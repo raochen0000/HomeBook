@@ -75,7 +75,7 @@ pnpm exec eas submit --platform ios
 ### 登录与网络
 
 - [ ] 邮箱注册确认与登录；
-- [ ] 找回密码、换绑邮箱及验证码/链接流程正常；
+- [ ] 找回密码，以及绑定/更换邮箱的验证码流程正常；
 - [ ] 生产构建访问目标 `https://<project-ref>.supabase.co`，不能访问旧 `api.homebook-app.com`、裸 IP 或 HTTP；
 - [ ] 弱网、断网、恢复网络后数据状态符合预期；
 - [ ] Apple 登录、绑定与解绑；

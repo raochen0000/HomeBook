@@ -30,6 +30,7 @@ npm run zip            # 产出 function.zip（只含 index.js + package.json）
 ```
 
 FC 控制台 → 创建函数 → 选 **Web 函数**（**别选事件函数**——本服务靠透传原始 body 验签）：
+
 - 运行环境：**Node.js 20**
 - 上传 `function.zip`
 - **启动命令**：`node index.js`
@@ -91,8 +92,10 @@ curl -s -X POST "$EXPO_PUBLIC_SUPABASE_URL/auth/v1/recover" \
 
 ## 支持的邮件动作
 
-`recovery`（找回密码）· `email_change`(_current/_new，换绑邮箱)· `magiclink` · `signup` · `invite`
+`recovery`（找回密码）· `email_change`(\_current/\_new，换绑邮箱)· `magiclink` · `signup` · `invite`
 · `reauthentication`。主题/正文见 [`index.js`](index.js) 的 `EMAIL_TEMPLATES`。换绑邮箱会自动发到**新邮箱**。
+
+生产 Cloud 不走本 Hook。当前产品规则是：绑定和更换邮箱的验证码只发新邮箱；旧邮箱只在更换成功后收到变更通知。
 
 ## 密钥轮换
 

@@ -209,7 +209,7 @@ git --version
 - **Apple**：iOS 原生 `identityToken` → `signInWithIdToken`；账号绑定使用 manual linking。Apple provider、Bundle ID 与密钥轮换必须在 Cloud 测试项目真机验证。
 - **手机号**：首版关闭 Cloud phone provider，并在客户端移除手机号登录/管理入口。`services/sms-hook-fc` 与现有手机号代码在迁移完成前保留历史参考，但不得进入 production 路径。
 - **密码防爆破**：`…0036_password_login_lockout.sql` 的函数/表可暂时保留为未启用兼容代码。Free/Pro 无法启用 Password Verification Attempt Hook，因此首版只使用 Cloud 基础限流与风控，不声称精确“五次锁定 24 小时”已生效；恢复该规则前先升级 Team 并回归。
-- **敏感操作**：换绑邮箱、解绑 Apple、改密、注销前要求近期重新认证；邮箱密码账号使用当前密码，仅 Apple 账号重新完成 Apple 授权。Cloud Auth 负责凭据校验和新会话签发；`delete_account` 在服务端限制当前 session 创建时间不超过 10 分钟。换绑邮箱与改密还分别依赖 Cloud 的 Secure email/password change。
+- **敏感操作**：换绑邮箱、解绑 Apple、改密、注销前要求近期重新认证；邮箱密码账号使用当前密码，仅 Apple 账号重新完成 Apple 授权。Cloud Auth 负责凭据校验和新会话签发；`delete_account` 在服务端限制当前 session 创建时间不超过 10 分钟。更换邮箱在重新认证后只向新邮箱发送 6 位验证码，客户端以 `verifyOtp(type=email_change)` 完成更换；Cloud 关闭 Secure email change。更换成功后启用 Email address changed 通知，发给旧邮箱，不含验证码或链接。改密仍依赖 Cloud Secure password change。
 - **风控**：认证邮件遵守 Cloud rate limit 与 SMTP 供应商额度；邀请码仍为 6 位大写字母数字、24h 有效，`preview_family_by_code` 必须限频防枚举。
 - **密钥边界**：客户端只持 publishable key；secret/service-role key 绝不进入客户端、仓库、日志或 `EXPO_PUBLIC_*`。
 
