@@ -13,6 +13,7 @@ const THEME_PREFERENCE_KEY = 'homebook.theme-preference.v1';
 const ThemePreferenceContext = createContext<{
   preference: ThemePreference;
   setPreference: (preference: ThemePreference) => void;
+  restored: boolean;
 } | null>(null);
 
 function isThemePreference(value: string | null): value is ThemePreference {
@@ -28,6 +29,7 @@ function applyThemePreference(preference: ThemePreference) {
 
 export function ThemePreferenceProvider({ children }: { children: ReactNode }) {
   const [preference, setPreferenceState] = useState<ThemePreference>('system');
+  const [restored, setRestored] = useState(false);
   const hasUserChangedPreference = useRef(false);
 
   useEffect(() => {
@@ -35,10 +37,13 @@ export function ThemePreferenceProvider({ children }: { children: ReactNode }) {
 
     const restorePreference = async () => {
       const stored = await AsyncStorage.getItem(THEME_PREFERENCE_KEY).catch(() => null);
-      if (!active || hasUserChangedPreference.current || !isThemePreference(stored)) return;
+      if (!active) return;
 
-      applyThemePreference(stored);
-      setPreferenceState(stored);
+      if (!hasUserChangedPreference.current && isThemePreference(stored)) {
+        applyThemePreference(stored);
+        setPreferenceState(stored);
+      }
+      setRestored(true);
     };
 
     void restorePreference();
@@ -54,7 +59,7 @@ export function ThemePreferenceProvider({ children }: { children: ReactNode }) {
     void AsyncStorage.setItem(THEME_PREFERENCE_KEY, next).catch(() => {});
   }, []);
 
-  return <ThemePreferenceContext value={{ preference, setPreference }}>{children}</ThemePreferenceContext>;
+  return <ThemePreferenceContext value={{ preference, setPreference, restored }}>{children}</ThemePreferenceContext>;
 }
 
 export function useThemePreference() {

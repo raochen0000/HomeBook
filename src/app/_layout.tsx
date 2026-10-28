@@ -4,14 +4,14 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useColorScheme } from 'react-native';
 import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { LaunchScreenOverlay } from '@/components/launch-screen';
 import { ToastHost } from '@/components/toast';
 import { NotificationGate } from '@/features/notifications/notification-gate';
 import { useNotificationObserver } from '@/features/notifications/use-notification-observer';
 import { usePushRegistration } from '@/features/notifications/use-push-registration';
 import { useRecurringCatchup } from '@/features/record/use-recurring-catchup';
 import { SearchProvider } from '@/features/search/search-provider';
-import { ThemePreferenceProvider } from '@/features/settings/theme-preference';
+import { ThemePreferenceProvider, useThemePreference } from '@/features/settings/theme-preference';
 import { FamilyLiveSyncHost } from '@/features/sync/use-family-live-sync';
 import { localePathRef, LocalePreferenceProvider, pendingLocaleRestoreRef, useLocalePreference } from '@/i18n';
 import { useSession } from '@/lib/auth';
@@ -67,6 +67,7 @@ function RestoreLocaleRoute() {
 /** Provider 内层：依赖 QueryClient / session 的根级副作用与导航壳。 */
 function AppShell() {
   const colorScheme = useColorScheme();
+  const { restored: themePreferenceRestored } = useThemePreference();
   const { locale } = useLocalePreference();
   const pathname = usePathname();
   useEffect(() => {
@@ -75,6 +76,7 @@ function AppShell() {
   const { session, loading } = useSession();
   const signedIn = !loading && !!session;
   const signedOut = !loading && !session;
+  const showLaunchScreen = loading || !themePreferenceRestored;
 
   // 推送设备令牌注册（层级二骨架）：PUSH_DELIVERY_ENABLED 关时 no-op；APNs 配好翻开即通。
   usePushRegistration();
@@ -86,7 +88,6 @@ function AppShell() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
       {/* 搜索入口上下文：各 Tab 顶栏 🔍 共用跳转逻辑（流程 14）。 */}
       <SearchProvider>
         {/*
@@ -123,6 +124,7 @@ function AppShell() {
       {session ? <NotificationGate /> : null}
       {/* 已登录时的全局轻提示；未登录由 login 路由自己挂 ToastHost。 */}
       {session ? <ToastHost /> : null}
+      {showLaunchScreen ? <LaunchScreenOverlay /> : null}
     </ThemeProvider>
   );
 }

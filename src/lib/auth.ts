@@ -84,15 +84,14 @@ export function useSession(): { session: Session | null; loading: boolean } {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    void clearObsoleteProjectSessions()
-      // 存储清理失败时，当前项目的命名空间仍不会读取旧项目 session；不能卡住登录页。
-      .catch(() => {})
-      .then(() =>
-        supabase.auth.getSession().then(({ data }) => {
-          setSession(data.session);
-          setLoading(false);
-        }),
-      );
+    // 旧项目键清理和当前项目会话读取并行。清理函数只删除当前 storage key 之外的键，
+    // 不会与 getSession 访问同一条会话记录；避免全量枚举本地键阻塞启动。
+    void clearObsoleteProjectSessions().catch(() => {});
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => setSession(data.session))
+      .catch(() => setSession(null))
+      .finally(() => setLoading(false));
     const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
     return () => sub.subscription.unsubscribe();
   }, []);
