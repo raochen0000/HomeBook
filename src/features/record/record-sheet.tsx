@@ -417,7 +417,7 @@ function RecordForm({
           </Picker>
         </Host>
 
-        {/* 大号金额（支出绿 / 收入红） */}
+        {/* 大号金额（收入绿 / 支出红） */}
         <View style={styles.amountRow}>
           <Text style={[styles.amountSign, { color: amountColor }]}>{`${sign}¥`}</Text>
           <Text style={[styles.amountInt, { color: amountColor }]}>{parts.integer}</Text>

@@ -145,7 +145,7 @@ export default function AppleScreen() {
           <View style={[styles.statusPill, { backgroundColor: palette.cardPill }]}>
             <SymbolView
               name={hasApple ? 'checkmark.circle.fill' : 'circle'}
-              tintColor={hasApple ? palette.expense : palette.textTertiary}
+              tintColor={hasApple ? palette.success : palette.textTertiary}
               size={14}
             />
             <Text style={[styles.statusText, { color: hasApple ? palette.textPrimary : palette.textSecondary }]}>

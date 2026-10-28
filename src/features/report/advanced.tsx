@@ -192,7 +192,7 @@ export function CumulativeCard({
         : delta > 0
           ? t('report.vsPrevUp', { pct: Math.abs(delta) })
           : t('report.vsPrevDown', { pct: Math.abs(delta) });
-  const deltaColor = delta == null ? palette.textTertiary : delta > 0 ? palette.danger : palette.expense;
+  const deltaColor = delta == null ? palette.textTertiary : delta > 0 ? palette.danger : palette.success;
 
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
@@ -511,7 +511,7 @@ export function CategoryMomCard({ items, palette, hidden }: { items: MomItem[]; 
           const gone = it.cur === 0 && it.prev > 0;
           const pct = it.prev > 0 ? Math.round(((it.cur - it.prev) / it.prev) * 100) : 0;
           const up = it.cur >= it.prev;
-          const chipColor = isNew ? palette.danger : gone ? palette.expense : up ? palette.danger : palette.expense;
+          const chipColor = isNew ? palette.danger : gone ? palette.success : up ? palette.danger : palette.success;
           const chipText = isNew
             ? t('report.newItem')
             : gone

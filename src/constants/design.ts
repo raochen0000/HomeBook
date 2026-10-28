@@ -1,7 +1,7 @@
 /**
  * 设计令牌（对齐 docs/DESIGN.md v0.6.3）。
  * 基调：黑白灰做骨架 + 系统蓝做交互（accent），iOS 设置式「灰底白卡」分区。
- * 收支语义色按 DESIGN §2.6：收入=红、支出=绿（中国大陆 红涨绿跌 惯例）。
+ * 收支语义色按 DESIGN §2.6：收入=绿、支出=红。
  * 与既有 theme.ts（中性色 / Spacing）互补，这里补充语义色、分类识别色、排版、圆角与间距全刻度。
  */
 import { useColorScheme } from 'react-native';
@@ -49,14 +49,14 @@ export const Space = {
 export const TabBarInset = 120;
 
 type Palette = {
-  /** 收入：红 */
+  /** 收入：绿 */
   income: string;
-  /** 支出：绿 */
+  /** 支出：红 */
   expense: string;
   warning: string;
   danger: string;
   info: string;
-  /** 成功：绿（DESIGN §2.7 state/success）。与 expense 同色值，但语义独立——成功提示的绿勾不应复用「支出绿」令牌。 */
+  /** 成功：绿（DESIGN §2.7 state/success）。与 income 同色值，但语义独立——成功提示不复用收支令牌。 */
   success: string;
   /** 页面底 */
   base: string;
@@ -109,8 +109,8 @@ type Palette = {
  * accent = 系统蓝 #007AFF（DESIGN §2.5）；onAccent = 蓝底上的白。
  */
 const light: Palette = {
-  income: '#E2563D',
-  expense: '#2FA36B',
+  income: '#2FA36B',
+  expense: '#E2563D',
   warning: '#F5A623',
   danger: '#E2563D',
   info: '#007AFF',
@@ -138,8 +138,8 @@ const light: Palette = {
 };
 
 const dark: Palette = {
-  income: '#FF7461',
-  expense: '#46C98A',
+  income: '#46C98A',
+  expense: '#FF7461',
   warning: '#FFB84D',
   danger: '#FF7461',
   info: '#0A84FF',
@@ -251,7 +251,7 @@ export function useCategoryColors() {
  * DESIGN §3.0：
  * - 铁律 4——Light / Night 各自取值，不共用同一 hex。
  * - 铁律 3 /§1.2「红绿只在收支」——避开红 / 绿 / 琥珀语义色。旧值里 `#46C98A` 恰为
- *   `dark.expense`、`#F5A623` 恰为 `light.warning`，头像撞成「支出绿 / 预警琥珀」，已换成
+ *   `dark.expense`、`#F5A623` 恰为 `light.warning`，头像撞成「支出红 / 预警琥珀」，已换成
  *   teal / pink（槽位不变，老用户的回退色仍落在同一 hash 槽，只是换了非语义色相）。
  * 圆底其上的图标 / 文字恒为 `#FFFFFF`（§2.8 豁免，不随主题翻转）。
  */

@@ -212,7 +212,7 @@ function contentWidth(horizontalInset: number) {
   return Dimensions.get('window').width - horizontalInset * 2;
 }
 
-/** 当日净额颜色（红/绿语义，与本 App income=红/expense=绿一致）：正→红、负→绿、零→中性。 */
+/** 当日净额颜色：正数沿用收入绿、负数沿用支出红、零为中性。 */
 function netColor(cents: number, palette: ReturnType<typeof usePalette>) {
   if (cents > 0) return palette.income;
   if (cents < 0) return palette.expense;
@@ -388,7 +388,7 @@ function budgetBarColor(stage: 'safe' | 'normal' | 'warning' | 'danger', palette
     case 'normal':
       return palette.info; // 蓝：50%~80%
     default:
-      return palette.expense; // 绿：<50%（已用占比低 = 充裕）
+      return palette.success; // 绿：<50%（已用占比低 = 充裕）
   }
 }
 

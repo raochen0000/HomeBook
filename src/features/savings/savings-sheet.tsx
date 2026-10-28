@@ -156,7 +156,7 @@ function GoalList({
               >
                 <View style={styles.goalHead}>
                   <Text style={[styles.goalName, { color: palette.textPrimary }]}>{g.name}</Text>
-                  {done ? <SymbolView name="checkmark.seal.fill" tintColor={palette.income} size={18} /> : null}
+                  {done ? <SymbolView name="checkmark.seal.fill" tintColor={palette.success} size={18} /> : null}
                 </View>
                 <ProgressBar pct={pct} palette={palette} />
                 <View style={styles.goalMeta}>
@@ -591,7 +591,7 @@ function ProgressBar({ pct, palette, big }: { pct: number; palette: ReturnType<t
   return (
     <View style={[styles.track, { backgroundColor: palette.base, height: big ? 12 : 8 }]}>
       <View
-        style={[styles.fill, { backgroundColor: pct >= 100 ? palette.income : palette.accent, width: `${pct}%` }]}
+        style={[styles.fill, { backgroundColor: pct >= 100 ? palette.success : palette.accent, width: `${pct}%` }]}
       />
     </View>
   );

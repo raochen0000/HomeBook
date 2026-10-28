@@ -2718,7 +2718,7 @@ function MonthlyBudgetCard({
   const remaining = total - used;
   const over = remaining < 0;
   const progress = Math.min(100, Math.max(0, percent));
-  const color = over ? palette.danger : percent >= 80 ? palette.warning : palette.expense;
+  const color = over ? palette.danger : percent >= 80 ? palette.warning : palette.success;
   const statusText = over
     ? t('common.overBy', { amount: maskAmount(formatAmount(Math.abs(remaining), ''), hidden) })
     : t('common.leftover', { amount: maskAmount(formatAmount(remaining, ''), hidden) });
@@ -2751,7 +2751,7 @@ function MonthlyBudgetCard({
         <View style={styles.budgetInsightIcon}>
           <SymbolView
             name={over || forecastOver ? 'exclamationmark.triangle.fill' : 'checkmark.circle.fill'}
-            tintColor={over || forecastOver ? palette.warning : palette.expense}
+            tintColor={over || forecastOver ? palette.warning : palette.success}
             size={17}
           />
         </View>
@@ -3019,7 +3019,7 @@ function SavingsGoalsCard({
       </View>
       {goals.slice(0, 3).map((goal, index) => {
         const progress = goal.target_amount > 0 ? Math.min(1, goal.saved_amount / goal.target_amount) : 0;
-        const progressColor = index % 2 === 0 ? palette.info : palette.expense;
+        const progressColor = index % 2 === 0 ? palette.info : palette.success;
         return (
           <Pressable
             key={goal.id}
