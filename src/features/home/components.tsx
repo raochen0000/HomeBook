@@ -136,11 +136,11 @@ type ContentInsets = { horizontal?: number; vertical?: number };
 function TransactionRow({
   row,
   onPress,
-  contentInsets,
+  contentVerticalInset,
 }: {
   row: RowData;
   onPress?: (id: string) => void;
-  contentInsets: ContentInsets;
+  contentVerticalInset: number;
 }) {
   const palette = usePalette();
   return (
@@ -148,22 +148,12 @@ function TransactionRow({
       spacing={0}
       // 整行（含留白）可点 → 详情弹窗；编辑/删除走左滑，不在此处。
       modifiers={[
-        listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }),
         // 垂直 hug：pageSheet 弹出时 List 会把剩余高度 propose 给可见行，禁止行被撑开。
         fixedSize({ horizontal: false, vertical: true }),
         ...(onPress ? [contentShape(shapes.rectangle()), onTapGesture(() => onPress(row.id))] : []),
       ]}
     >
-      <HStack
-        spacing={Space[2]}
-        alignment="center"
-        modifiers={[
-          padding({
-            horizontal: contentInsets.horizontal,
-            vertical: contentInsets.vertical,
-          }),
-        ]}
-      >
+      <HStack spacing={Space[3]} alignment="center" modifiers={[padding({ vertical: contentVerticalInset })]}>
         <CategoryAvatar symbol={row.symbol} color={row.iconColor} />
         <VStack alignment="leading" spacing={Space[1]} modifiers={[frame({ maxWidth: 9999 })]}>
           {/* 第一行：分类名 + 金额（正常字重） */}
@@ -255,17 +245,23 @@ export function DayGroup({
     </HStack>
   );
   return (
-    // listRowInsets 放在 Section 上：清零 insetGrouped 默认行内边距，避免叠加 TransactionRow 自带 padding。
+    // 每行显式设置四边 inset：左右与 Hero / 横幅对齐，上下保留舒展的行距。
     <Section header={header} modifiers={[listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 })]}>
       {rows.map((row) => (
         <SwipeActions
           key={row.id}
           modifiers={[
-            listRowInsets({ top: 0, bottom: 0, leading: 0, trailing: 0 }),
+            // listRowInsets 会同时重设四边；显式保留上下呼吸感，横向与 Hero / 横幅一致。
+            listRowInsets({
+              top: Space[4],
+              bottom: Space[4],
+              leading: rowInsets.horizontal ?? 0,
+              trailing: rowInsets.horizontal ?? 0,
+            }),
             fixedSize({ horizontal: false, vertical: true }),
           ]}
         >
-          <TransactionRow row={row} onPress={onRowPress} contentInsets={rowInsets} />
+          <TransactionRow row={row} onPress={onRowPress} contentVerticalInset={rowInsets.vertical ?? 0} />
           {/* allowsFullSwipe=false：滑到底也不自动触发首个动作（否则误触「编辑」）。
               删除按钮不用 role="destructive"（那会让 SwiftUI 在点击时直接把行收起，取消后不复原）；
               改用红色 tint，真正的二次确认与危险色交给 RN Alert。 */}
