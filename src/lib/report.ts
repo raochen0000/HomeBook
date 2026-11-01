@@ -61,7 +61,11 @@ export function shiftAnchor(dim: Dimension, anchor: Date, delta: number): Date {
   if (dim === 'week') x.setDate(x.getDate() + delta * 7);
   else if (dim === 'custom') x.setDate(x.getDate() + delta * 30);
   else if (dim === 'year') x.setFullYear(x.getFullYear() + delta);
-  else x.setMonth(x.getMonth() + delta);
+  else {
+    // 月维度只关心目标月份；先归一到 1 号，避免 29/30/31 日跨到短月时溢出回原月。
+    x.setDate(1);
+    x.setMonth(x.getMonth() + delta);
+  }
   return x;
 }
 

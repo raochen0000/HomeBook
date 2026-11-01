@@ -313,6 +313,7 @@ export default function ReportScreen() {
   const reportData = reportQ.data;
   const filteredCount = reportData?.summary.transactionCount ?? 0;
   const activeFilters = activeFilterCount(filters);
+  const reportLoadFailed = reportQ.isError && !reportData;
 
   useEffect(() => {
     let alive = true;
@@ -663,6 +664,8 @@ export default function ReportScreen() {
           <View style={styles.center}>
             <ActivityIndicator />
           </View>
+        ) : reportLoadFailed ? (
+          <ReportLoadErrorState palette={palette} onRetry={() => void reportQ.refetch()} />
         ) : (
           <Animated.ScrollView
             ref={scrollRef}
@@ -942,6 +945,31 @@ function ReportDataReadinessCard({ count, palette }: { count: number; palette: R
           {t('report.readinessBody', { count })}
         </ThemedText>
       </View>
+    </View>
+  );
+}
+
+function ReportLoadErrorState({ palette, onRetry }: { palette: ReturnType<typeof usePalette>; onRetry: () => void }) {
+  return (
+    <View
+      style={styles.reportErrorState}
+      accessible
+      accessibilityRole="alert"
+      accessibilityLabel={t('common.loadFailed')}
+    >
+      <SymbolView name="exclamationmark.triangle" tintColor={palette.textTertiary} size={36} />
+      <ThemedText style={[styles.reportErrorTitle, { color: palette.textPrimary }]}>
+        {t('common.loadFailed')}
+      </ThemedText>
+      <Pressable
+        style={[styles.reportRetryButton, { borderColor: palette.separator }]}
+        onPress={onRetry}
+        accessibilityRole="button"
+        accessibilityLabel={t('common.retry')}
+      >
+        <SymbolView name="arrow.clockwise" tintColor={palette.accent} size={15} />
+        <ThemedText style={[styles.reportRetryText, { color: palette.accent }]}>{t('common.retry')}</ThemedText>
+      </Pressable>
     </View>
   );
 }
@@ -3680,6 +3708,24 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  reportErrorState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Space[3],
+    paddingHorizontal: Space[8],
+  },
+  reportErrorTitle: { fontSize: 17, fontWeight: '600' },
+  reportRetryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[2],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md,
+    paddingHorizontal: Space[4],
+    paddingVertical: Space[2],
+  },
+  reportRetryText: { fontSize: 15, fontWeight: '600' },
   content: { paddingHorizontal: Space[4], paddingBottom: TabBarInset, gap: Space[4] },
   card: { borderRadius: Radius.lg, padding: Space[4] },
   noMargin: { marginBottom: 0 },

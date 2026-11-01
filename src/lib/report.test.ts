@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { setAppLocale } from '../i18n/instance';
-import { equalPeriodIncomeExpenseSeries, incomeExpenseSeries } from './report';
+import { equalPeriodIncomeExpenseSeries, incomeExpenseSeries, periodRange, shiftAnchor } from './report';
 
 afterEach(() => {
   setAppLocale('zh');
@@ -53,6 +53,20 @@ describe('incomeExpenseSeries', () => {
     );
     expect(s.map((x) => x.label)).toEqual(['2024', '2025', '2026']);
     expect(s[0].income).toBe(7);
+  });
+});
+
+describe('shiftAnchor', () => {
+  it.each([
+    [new Date(2026, 9, 31), -1, new Date(2026, 8, 1)],
+    [new Date(2026, 4, 31), -1, new Date(2026, 3, 1)],
+    [new Date(2026, 2, 31), -1, new Date(2026, 1, 1)],
+    [new Date(2028, 2, 31), -1, new Date(2028, 1, 1)],
+    [new Date(2026, 1, 28), 1, new Date(2026, 2, 1)],
+  ])('keeps monthly navigation in the target month for %s', (anchor, delta, expectedStart) => {
+    const shifted = shiftAnchor('month', anchor, delta);
+
+    expect(periodRange('month', shifted).start).toEqual(expectedStart);
   });
 });
 
