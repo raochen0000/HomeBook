@@ -744,6 +744,8 @@ export type Database = {
           family_id: string;
           frequency: string;
           id: string;
+          month_of_year: number | null;
+          next_due_date: string;
           note: string | null;
           recorder_user_id: string;
           start_date: string;
@@ -761,6 +763,8 @@ export type Database = {
           family_id: string;
           frequency?: string;
           id?: string;
+          month_of_year?: number | null;
+          next_due_date?: string;
           note?: string | null;
           recorder_user_id: string;
           start_date: string;
@@ -778,6 +782,8 @@ export type Database = {
           family_id?: string;
           frequency?: string;
           id?: string;
+          month_of_year?: number | null;
+          next_due_date?: string;
           note?: string | null;
           recorder_user_id?: string;
           start_date?: string;

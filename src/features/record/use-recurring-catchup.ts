@@ -2,10 +2,8 @@
  * 定时收支补记（PRD §18 自定义能力）。挂在根布局：登录态下、首屏可交互后或 App 进前台时调
  * generate_due_recurring_transactions() RPC，补记缺失的到期流水（服务端幂等，多设备安全）。
  *
- * 采用「客户端触发、服务端幂等生成」：无需 cron/Edge Function 基建，契合自托管 + 防火墙约束；
- * 代价是需 App 至少每月打开一次（对活跃记账用户几乎无感）。按天节流（AsyncStorage 记上次补记日），
- * 避免每次前台都打后端；RPC 本身幂等，即便偶发重复调用也不会重复记账。新建/编辑规则后由
- * 列表页另行显式触发一次（不受节流限制），使新规则立即生效。
+ * 后台定时任务是主要生成途径；此 RPC 是前台补记和旧版客户端兼容路径。按天节流
+ * 减少重复请求；服务端以同一期和同一天去重，并且不会在北京时间 6 点前生成当天的流水。
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';

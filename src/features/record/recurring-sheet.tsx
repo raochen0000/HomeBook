@@ -1,13 +1,10 @@
 /**
  * 定时收支编辑面板（PRD §18 自定义能力）。复用记账面板（record-sheet）的视觉语言：
  * 原生 pageSheet 壳 + 支出/收入分段 + 大号金额 + 自定义键盘 + 分类横滑 + 记账人（户主可选）。
- * 与记一笔的差异：把「时间」换成「每月记账日（1–28）」；无删除入口（删除在列表页左滑）。
- *
- * start_date 落为「当月 1 日」：使本月若已过记账日即可被补记，规则立刻可用（补记见 use-recurring-catchup）。
- * 编辑时不改 start_date / end_date（保持既有周期）。
+ * 支持每天、每月和每年；每日新规则的起始日期由服务端按北京时间确定。
  */
 import { Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
-import { labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
+import { accessibilityLabel, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
 import {
@@ -31,6 +28,7 @@ import {
   useUpdateRecurringRule,
   type Category,
   type FamilyMembership,
+  type RecurringFrequency,
   type RecurringRule,
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
@@ -49,7 +47,7 @@ export type RecurringSheetProps = {
   recorderId: string;
   /** null = 新建；非 null = 编辑该规则。 */
   editing: RecurringRule | null;
-  /** 保存成功回调（父层据此触发一次补记，使新规则立即生效）。 */
+  /** 保存成功回调（父层据此尝试补记已到期的规则）。 */
   onSaved?: () => void;
 };
 
@@ -106,7 +104,11 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   const [raw, setRaw] = useState(editing?.amount ? (editing.amount / 100).toString() : '');
   const [categoryId, setCategoryId] = useState<string | null>(editing?.category_id ?? null);
   const [note, setNote] = useState(editing?.note ?? '');
+  const [frequency, setFrequency] = useState<RecurringFrequency>(
+    editing?.frequency === 'daily' || editing?.frequency === 'yearly' ? editing.frequency : 'monthly',
+  );
   const [dayOfMonth, setDayOfMonth] = useState<number>(editing?.day_of_month ?? 1);
+  const [monthOfYear, setMonthOfYear] = useState<number>(editing?.month_of_year ?? 1);
   const [recorderUserId, setRecorderUserId] = useState(editing?.recorder_user_id ?? recorderId);
   const [memberOpen, setMemberOpen] = useState(false);
 
@@ -132,6 +134,8 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   const amountColor = type === 'expense' ? palette.expense : palette.income;
   const sign = type === 'expense' ? '-' : '+';
   const parts = displayParts(raw);
+  const daysInMonth = frequency === 'monthly' ? 28 : new Date(2000, monthOfYear, 0).getDate();
+  const selectedDay = Math.min(dayOfMonth, daysInMonth);
 
   const press = (k: string) => {
     setRaw((prev) => {
@@ -159,7 +163,9 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
           category_id: effectiveCategoryId,
           note: note || null,
           recorder_user_id: recorderUserId,
-          day_of_month: dayOfMonth,
+          frequency,
+          month_of_year: frequency === 'yearly' ? monthOfYear : null,
+          day_of_month: frequency === 'daily' ? 1 : selectedDay,
         });
       } else {
         await createM.mutateAsync({
@@ -170,7 +176,9 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
           amount: cents,
           category_id: effectiveCategoryId,
           note: note || null,
-          day_of_month: dayOfMonth,
+          frequency,
+          month_of_year: frequency === 'yearly' ? monthOfYear : null,
+          day_of_month: frequency === 'daily' ? 1 : selectedDay,
           start_date: firstOfCurrentMonth(),
           end_date: null,
         });
@@ -215,146 +223,210 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <View style={styles.grabberWrap}>
-        <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
-      </View>
-
-      <View style={styles.topBar}>
-        <Text style={[styles.topTitle, { color: palette.textPrimary }]}>
-          {editing ? t('record.editRecurring') : t('record.addRecurring')}
-        </Text>
-      </View>
-
-      {/* 支出 / 收入 */}
-      <Host style={styles.segmentHost}>
-        <Picker
-          modifiers={[pickerStyle('segmented')]}
-          selection={type}
-          onSelectionChange={(value) => setType(value as TxnType)}
-        >
-          <UIText modifiers={[tag('expense')]}>{t('record.expense')}</UIText>
-          <UIText modifiers={[tag('income')]}>{t('record.income')}</UIText>
-        </Picker>
-      </Host>
-
-      {/* 大号金额 */}
-      <View style={styles.amountRow}>
-        <Text style={[styles.amountSign, { color: amountColor }]}>{`${sign}¥`}</Text>
-        <Text style={[styles.amountInt, { color: amountColor }]}>{parts.integer}</Text>
-        {parts.hasDot ? <Text style={[styles.amountDec, { color: amountColor }]}>{`.${parts.decimal}`}</Text> : null}
-      </View>
-
-      {/* 详情卡：分类 / 记账日 / 备注 / 记账人 */}
-      <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
-        <View style={styles.catHeader}>
-          <Text style={[styles.catHeaderLabel, { color: palette.textSecondary }]}>{t('record.category')}</Text>
+      <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <View style={styles.grabberWrap}>
+          <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
         </View>
-        {categoriesQ.isLoading ? (
-          <View style={styles.catLoading}>
-            <ActivityIndicator />
-          </View>
-        ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.catRow}
-            keyboardShouldPersistTaps="handled"
+
+        <View style={styles.topBar}>
+          <Text style={[styles.topTitle, { color: palette.textPrimary }]}>
+            {editing ? t('record.editRecurring') : t('record.addRecurring')}
+          </Text>
+        </View>
+
+        {/* 支出 / 收入 */}
+        <Host style={styles.segmentHost}>
+          <Picker
+            modifiers={[pickerStyle('segmented')]}
+            selection={type}
+            onSelectionChange={(value) => {
+              if (value === 'expense' || value === 'income') setType(value);
+            }}
           >
-            {categories.map(renderCat)}
-          </ScrollView>
-        )}
+            <UIText modifiers={[tag('expense')]}>{t('record.expense')}</UIText>
+            <UIText modifiers={[tag('income')]}>{t('record.income')}</UIText>
+          </Picker>
+        </Host>
 
-        {divider}
-
-        {/* 每月记账日 */}
-        <View style={styles.rowInner}>
-          <SymbolView name="calendar" tintColor={palette.textTertiary} size={16} />
-          <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.monthlyDay')}</Text>
-          <View style={styles.rowSpacer} />
-          <Host matchContents style={styles.dayHost}>
-            <Picker
-              modifiers={[pickerStyle('menu'), labelsHidden()]}
-              selection={String(dayOfMonth)}
-              onSelectionChange={(v) => setDayOfMonth(Number(v))}
-            >
-              {Array.from({ length: 28 }, (_, i) => (
-                <UIText key={i} modifiers={[tag(String(i + 1))]}>
-                  {t('common.dayOfMonth', { day: i + 1 })}
-                </UIText>
-              ))}
-            </Picker>
-          </Host>
+        {/* 大号金额 */}
+        <View style={styles.amountRow}>
+          <Text style={[styles.amountSign, { color: amountColor }]}>{`${sign}¥`}</Text>
+          <Text style={[styles.amountInt, { color: amountColor }]}>{parts.integer}</Text>
+          {parts.hasDot ? <Text style={[styles.amountDec, { color: amountColor }]}>{`.${parts.decimal}`}</Text> : null}
         </View>
 
-        {divider}
-
-        {/* 备注 */}
-        <View style={styles.rowInner}>
-          <SymbolView name="pencil" tintColor={palette.textTertiary} size={16} />
-          <TextInput
-            style={[styles.noteInput, { color: palette.textPrimary }]}
-            placeholder={t('record.recurringNotePlaceholder')}
-            placeholderTextColor={palette.textTertiary}
-            value={note}
-            onChangeText={setNote}
-            maxLength={50}
-            returnKeyType="done"
-          />
-        </View>
-
-        {/* 记账人：仅户主可选 */}
-        {showRecorder ? (
-          <>
-            {divider}
-            <Pressable style={styles.rowInner} onPress={() => setMemberOpen(true)}>
-              <SymbolView name="person.crop.circle" tintColor={palette.textTertiary} size={16} />
-              <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.recorder')}</Text>
-              <View style={styles.rowSpacer} />
-              <Text style={[styles.infoValue, { color: palette.textSecondary }]}>{recorderName}</Text>
-              <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
-            </Pressable>
-          </>
-        ) : null}
-      </View>
-
-      {/* 数字键盘 */}
-      <View style={styles.keypad}>
-        {KEY_ROWS.map((row, ri) => (
-          <View key={ri} style={styles.keyRow}>
-            {row.map((k) => (
-              <Pressable
-                key={k}
-                style={({ pressed }) => [styles.key, { backgroundColor: pressed ? palette.separator : palette.card }]}
-                onPress={() => press(k)}
-              >
-                {k === '⌫' ? (
-                  <SymbolView name="delete.left" tintColor={palette.textPrimary} size={24} />
-                ) : (
-                  <Text style={[styles.keyText, { color: palette.textPrimary }]}>{k}</Text>
-                )}
-              </Pressable>
-            ))}
+        {/* 详情卡：分类 / 记账日 / 备注 / 记账人 */}
+        <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
+          <View style={styles.catHeader}>
+            <Text style={[styles.catHeaderLabel, { color: palette.textSecondary }]}>{t('record.category')}</Text>
           </View>
-        ))}
-      </View>
-
-      {/* 取消 / 保存 */}
-      <View style={styles.actions}>
-        <Pressable style={[styles.cancel, { borderColor: palette.separator }]} onPress={onClose}>
-          <Text style={[styles.cancelText, { color: palette.textSecondary }]}>{t('common.cancel')}</Text>
-        </Pressable>
-        <Pressable
-          disabled={!canSave}
-          onPress={handleSave}
-          style={[styles.save, { backgroundColor: palette.ink, opacity: canSave ? 1 : 0.35 }]}
-        >
-          {saving ? (
-            <ActivityIndicator color={palette.onInk} />
+          {categoriesQ.isLoading ? (
+            <View style={styles.catLoading}>
+              <ActivityIndicator />
+            </View>
           ) : (
-            <Text style={[styles.saveText, { color: palette.onInk }]}>{t('common.save')}</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.catRow}
+              keyboardShouldPersistTaps="handled"
+            >
+              {categories.map(renderCat)}
+            </ScrollView>
           )}
-        </Pressable>
-      </View>
+
+          {divider}
+
+          {/* 定时频率 */}
+          <View style={styles.rowInner}>
+            <SymbolView name="repeat" tintColor={palette.textTertiary} size={16} />
+            <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.recurringFrequency')}</Text>
+            <View style={styles.rowSpacer} />
+            <Host matchContents style={styles.dayHost}>
+              <Picker
+                modifiers={[pickerStyle('menu'), labelsHidden(), accessibilityLabel(t('record.recurringFrequency'))]}
+                selection={frequency}
+                onSelectionChange={(value) => {
+                  if (value === 'daily' || value === 'monthly' || value === 'yearly') setFrequency(value);
+                }}
+              >
+                <UIText modifiers={[tag('daily')]}>{t('record.recurringDaily')}</UIText>
+                <UIText modifiers={[tag('monthly')]}>{t('record.recurringMonthly')}</UIText>
+                <UIText modifiers={[tag('yearly')]}>{t('record.recurringYearly')}</UIText>
+              </Picker>
+            </Host>
+          </View>
+
+          {frequency !== 'daily' ? divider : null}
+
+          {/* 每月记账日 / 每年记账日期 */}
+          {frequency !== 'daily' ? (
+            <View style={styles.rowInner}>
+              <SymbolView name="calendar" tintColor={palette.textTertiary} size={16} />
+              <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>
+                {frequency === 'monthly' ? t('record.monthlyDay') : t('record.yearlyDay')}
+              </Text>
+              <View style={styles.rowSpacer} />
+              {frequency === 'yearly' ? (
+                <Host matchContents style={styles.dayHost}>
+                  <Picker
+                    modifiers={[pickerStyle('menu'), labelsHidden(), accessibilityLabel(t('record.recurringMonth'))]}
+                    selection={String(monthOfYear)}
+                    onSelectionChange={(value) => {
+                      const month = Number(value);
+                      if (Number.isInteger(month) && month >= 1 && month <= 12) setMonthOfYear(month);
+                    }}
+                  >
+                    {Array.from({ length: 12 }, (_, i) => (
+                      <UIText key={i} modifiers={[tag(String(i + 1))]}>
+                        {t('common.monthShort', { month: i + 1 })}
+                      </UIText>
+                    ))}
+                  </Picker>
+                </Host>
+              ) : null}
+              <Host matchContents style={styles.dayHost}>
+                <Picker
+                  modifiers={[
+                    pickerStyle('menu'),
+                    labelsHidden(),
+                    accessibilityLabel(frequency === 'yearly' ? t('record.recurringDay') : t('record.monthlyDay')),
+                  ]}
+                  selection={String(selectedDay)}
+                  onSelectionChange={(value) => {
+                    const day = Number(value);
+                    if (Number.isInteger(day) && day >= 1 && day <= daysInMonth) setDayOfMonth(day);
+                  }}
+                >
+                  {Array.from({ length: daysInMonth }, (_, i) => (
+                    <UIText key={i} modifiers={[tag(String(i + 1))]}>
+                      {t('common.dayOfMonth', { day: i + 1 })}
+                    </UIText>
+                  ))}
+                </Picker>
+              </Host>
+            </View>
+          ) : null}
+
+          {frequency === 'daily' && (!editing || editing.frequency !== 'daily') ? (
+            <Text style={[styles.scheduleHint, { color: palette.textSecondary }]}>
+              {t('record.recurringDailyStart')}
+            </Text>
+          ) : null}
+          {frequency === 'yearly' && monthOfYear === 2 && selectedDay === 29 ? (
+            <Text style={[styles.scheduleHint, { color: palette.textSecondary }]}>{t('record.recurringLeapYear')}</Text>
+          ) : null}
+
+          {divider}
+
+          {/* 备注 */}
+          <View style={styles.rowInner}>
+            <SymbolView name="pencil" tintColor={palette.textTertiary} size={16} />
+            <TextInput
+              style={[styles.noteInput, { color: palette.textPrimary }]}
+              placeholder={t('record.recurringNotePlaceholder')}
+              placeholderTextColor={palette.textTertiary}
+              value={note}
+              onChangeText={setNote}
+              maxLength={50}
+              returnKeyType="done"
+            />
+          </View>
+
+          {/* 记账人：仅户主可选 */}
+          {showRecorder ? (
+            <>
+              {divider}
+              <Pressable style={styles.rowInner} onPress={() => setMemberOpen(true)}>
+                <SymbolView name="person.crop.circle" tintColor={palette.textTertiary} size={16} />
+                <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.recorder')}</Text>
+                <View style={styles.rowSpacer} />
+                <Text style={[styles.infoValue, { color: palette.textSecondary }]}>{recorderName}</Text>
+                <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
+              </Pressable>
+            </>
+          ) : null}
+        </View>
+
+        {/* 数字键盘 */}
+        <View style={styles.keypad}>
+          {KEY_ROWS.map((row, ri) => (
+            <View key={ri} style={styles.keyRow}>
+              {row.map((k) => (
+                <Pressable
+                  key={k}
+                  style={({ pressed }) => [styles.key, { backgroundColor: pressed ? palette.separator : palette.card }]}
+                  onPress={() => press(k)}
+                >
+                  {k === '⌫' ? (
+                    <SymbolView name="delete.left" tintColor={palette.textPrimary} size={24} />
+                  ) : (
+                    <Text style={[styles.keyText, { color: palette.textPrimary }]}>{k}</Text>
+                  )}
+                </Pressable>
+              ))}
+            </View>
+          ))}
+        </View>
+
+        {/* 取消 / 保存 */}
+        <View style={styles.actions}>
+          <Pressable style={[styles.cancel, { borderColor: palette.separator }]} onPress={onClose}>
+            <Text style={[styles.cancelText, { color: palette.textSecondary }]}>{t('common.cancel')}</Text>
+          </Pressable>
+          <Pressable
+            disabled={!canSave}
+            onPress={handleSave}
+            style={[styles.save, { backgroundColor: palette.ink, opacity: canSave ? 1 : 0.35 }]}
+          >
+            {saving ? (
+              <ActivityIndicator color={palette.onInk} />
+            ) : (
+              <Text style={[styles.saveText, { color: palette.onInk }]}>{t('common.save')}</Text>
+            )}
+          </Pressable>
+        </View>
+      </ScrollView>
 
       <MemberPickerSheet
         visible={showRecorder && memberOpen}
@@ -444,6 +516,7 @@ const styles = StyleSheet.create({
   noteInput: { flex: 1, fontSize: 15, padding: 0 },
   infoLabel: { fontSize: 15 },
   infoValue: { fontSize: 15 },
+  scheduleHint: { fontSize: 12, lineHeight: 17, paddingLeft: Space[6], paddingBottom: Space[2] },
   rowSpacer: { flex: 1 },
   dayHost: { minWidth: 72, minHeight: 28 },
   keypad: { marginTop: Space[5], gap: Space[2] },

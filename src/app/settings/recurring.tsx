@@ -1,9 +1,7 @@
 /**
  * G10.2 定时收支（PRD §18 自定义能力）。原生 SwiftUI List 实现。
  *
- * 家庭共享规则列表：每行 分类图标 + 名称/备注 + 「每月 N 号 · 金额」 + 启用开关；左滑删除（List.ForEach onDelete）。
- * 顶部「新增定时收支」入口开编辑面板（RecurringSheet）。规则本身增删改即时落库；生成流水由客户端补记
- * （use-recurring-catchup，App 前台调 generate_due_recurring_transactions RPC，幂等）。
+ * 家庭共享规则列表：显示周期、金额和启用开关；左滑删除。服务端定时生成流水。
  */
 import { HStack, Image, List, Section, Spacer, Text, Toggle, VStack } from '@expo/ui/swift-ui';
 import { contentShape, font, foregroundColor, onTapGesture, shapes } from '@expo/ui/swift-ui/modifiers';
@@ -94,6 +92,12 @@ export default function RecurringScreen() {
                 const title = rule.note?.trim() ? rule.note : catName;
                 const amount = formatAmount(rule.amount, rtype === 'income' ? '+' : '-');
                 const amountColor = rtype === 'income' ? palette.income : palette.expense;
+                const schedule =
+                  rule.frequency === 'daily'
+                    ? t('record.recurringDaily')
+                    : rule.frequency === 'yearly' && rule.month_of_year !== null
+                      ? t('record.recurringYearlyOn', { month: rule.month_of_year, day: rule.day_of_month })
+                      : t('common.everyMonthDay', { day: rule.day_of_month });
                 return (
                   <HStack key={rule.id} alignment="center" spacing={Space[3]}>
                     <HStack
@@ -108,7 +112,7 @@ export default function RecurringScreen() {
                       <VStack alignment="leading" spacing={Space[1]}>
                         <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{title}</Text>
                         <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>
-                          {`${t('common.everyMonthDay', { day: rule.day_of_month })} · `}
+                          {`${schedule} · `}
                           <Text modifiers={[font({ size: 13 }), foregroundColor(amountColor)]}>{amount}</Text>
                         </Text>
                       </VStack>

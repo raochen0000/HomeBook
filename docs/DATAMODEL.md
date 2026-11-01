@@ -353,38 +353,41 @@ erDiagram
 
 ### 5.9 RECURRING_TRANSACTION / RECURRING_RUN（定时收支 · PRD §18 自定义能力）
 
-> **家庭共享**的「每月 N 号自动记一笔」规则（如工资、订阅），口径同流水账本，RLS 复用 `private.is_family_member`。生成的流水记入家庭账本、记账人 = 规则创建者。自动记录采用「**客户端触发、服务端幂等生成**」：客户端在 App 前台调 `generate_due_recurring_transactions()` RPC 补记缺失的到期流水；`RECURRING_RUN` 上的 `unique(rule_id, period_key)` 保证多设备 / 多成员并发下同一期只生成一条。
+> **家庭共享**的日、月、年自动记账规则，RLS 复用 `private.is_family_member`。生成的流水记入家庭账本，记账人使用规则的 `recorder_user_id`。服务端每分钟处理到期规则，截止日按北京时间 6:00 判断；客户端保留当前家庭补记 RPC。周期和到期日唯一约束防止并发和频率切换造成重复。
 
 **RECURRING_TRANSACTION（规则）**
 
-| 字段                        | 类型      | 约束                                     | 说明                                       |
-| --------------------------- | --------- | ---------------------------------------- | ------------------------------------------ |
-| `id`                        | UUID      | PK, default gen_random_uuid()            |                                            |
-| `family_id`                 | UUID      | FK→FAMILY, not null, on delete cascade   | 归属家庭                                   |
-| `type`                      | text      | not null, in(expense,income)             | 收支类型                                   |
-| `amount`                    | bigint    | not null, > 0                            | 单位：分                                   |
-| `category_id`               | UUID      | FK→CATEGORY, not null                    | 分类                                       |
-| `note`                      | text      |                                          | 备注（如「工资」「Apple Music」）          |
-| `recorder_user_id`          | UUID      | FK→USER, not null                        | 生成流水的记账人 = 规则创建者              |
-| `created_by`                | UUID      | FK→USER, not null                        | 规则创建者（RLS insert 校验 = auth.uid()） |
-| `day_of_month`              | int       | not null, between 1 and 28               | 每月记账日（限 1–28，规避小月边界）        |
-| `frequency`                 | text      | not null, default `monthly`, in(monthly) | 预留列，MVP 仅按月                         |
-| `start_date`                | date      | not null                                 | 首个生效月（含）；客户端落当月 1 日        |
-| `end_date`                  | date      |                                          | 可选结束（含）；null = 长期有效            |
-| `enabled`                   | bool      | not null, default true                   | 关闭 = 暂停自动记账（不删规则）            |
-| `created_at` / `updated_at` | timestamp |                                          |                                            |
+| 字段                        | 类型      | 约束                                   | 说明                                                                 |
+| --------------------------- | --------- | -------------------------------------- | -------------------------------------------------------------------- |
+| `id`                        | UUID      | PK, default gen_random_uuid()          |                                                                      |
+| `family_id`                 | UUID      | FK→FAMILY, not null, on delete cascade | 归属家庭                                                             |
+| `type`                      | text      | not null, in(expense,income)           | 收支类型                                                             |
+| `amount`                    | bigint    | not null, > 0                          | 单位：分                                                             |
+| `category_id`               | UUID      | FK→CATEGORY, not null                  | 分类                                                                 |
+| `note`                      | text      |                                        | 备注（如「工资」「Apple Music」）                                    |
+| `recorder_user_id`          | UUID      | FK→USER, not null                      | 生成流水的记账人 = 规则创建者                                        |
+| `created_by`                | UUID      | FK→USER, not null                      | 规则创建者（RLS insert 校验 = auth.uid()）                           |
+| `day_of_month`              | int       | not null                               | 月频率限 1–28；年频率为所选月的有效日期；日频率固定为 1              |
+| `month_of_year`             | int       | 年频率为 1–12，其他频率为 null         | 每年记账月份，2 月 29 日在平年按 2 月 28 日                          |
+| `frequency`                 | text      | not null, default `monthly`            | `daily` / `monthly` / `yearly`                                       |
+| `start_date`                | date      | not null                               | 起始日期（含）；日、年新规则由服务端落北京时间次日，月规则保留原语义 |
+| `next_due_date`             | date      | not null                               | 下一待处理到期日，供定时任务批量查询                                 |
+| `end_date`                  | date      |                                        | 可选结束（含）；null = 长期有效                                      |
+| `enabled`                   | bool      | not null, default true                 | 关闭 = 暂停自动记账（不删规则）                                      |
+| `created_at` / `updated_at` | timestamp |                                        |                                                                      |
 
 **RECURRING_RUN（幂等台账，每规则每期至多一行）**
 
-| 字段             | 类型      | 约束                                        | 说明                                        |
-| ---------------- | --------- | ------------------------------------------- | ------------------------------------------- |
-| `id`             | UUID      | PK, default gen_random_uuid()               |                                             |
-| `rule_id`        | UUID      | FK→RECURRING_TRANSACTION, on delete cascade | 所属规则                                    |
-| `period_key`     | text      | not null, `unique(rule_id, period_key)`     | 期键，如 `2026-07`                          |
-| `transaction_id` | UUID      | FK→TRANSACTION（可空）                      | 该期生成的流水；先占位 run 抢 unique 再回填 |
-| `created_at`     | timestamp |                                             |                                             |
+| 字段             | 类型      | 约束                                        | 说明                                                 |
+| ---------------- | --------- | ------------------------------------------- | ---------------------------------------------------- |
+| `id`             | UUID      | PK, default gen_random_uuid()               |                                                      |
+| `rule_id`        | UUID      | FK→RECURRING_TRANSACTION, on delete cascade | 所属规则                                             |
+| `period_key`     | text      | not null, `unique(rule_id, period_key)`     | 月：`2026-07`；日：`day:2026-07-01`；年：`year:2026` |
+| `scheduled_date` | date      | 同规则非空日期唯一                          | 到期日；避免频率切换时同一天重复生成                 |
+| `transaction_id` | UUID      | FK→TRANSACTION（可空）                      | 该期生成的流水；先占位 run 抢 unique 再回填          |
+| `created_at`     | timestamp |                                             |                                                      |
 
-**RLS**：`RECURRING_TRANSACTION` 家庭成员可 select/insert/update/delete（`private.is_family_member(family_id)`，insert 另校验 `created_by = auth.uid()`）；`RECURRING_RUN` 经所属规则的家庭做只读（写入仅经 RPC，`SECURITY DEFINER` 绕过 RLS）。**RPC `generate_due_recurring_transactions()`**：为调用者当前家庭遍历 `enabled` 规则，plpgsql 计算到期月份，「先占位 run（`on conflict do nothing`）→ 抢到者建流水并回填 `transaction_id`」，返回本次新生成条数。
+**RLS**：`RECURRING_TRANSACTION` 家庭成员可 select/insert/update/delete（`private.is_family_member(family_id)`，insert 另校验 `created_by = auth.uid()`）；`RECURRING_RUN` 经所属规则的家庭做只读。私有服务端函数按到期日锁定规则，先占位 run，再写流水并推进下一到期日；每次最多处理 1,000 个周期，单条规则失败不影响其他规则。`pg_cron` 每分钟执行一批；原 `generate_due_recurring_transactions()` RPC 仅为已认证用户的当前家庭调用同一函数。
 
 ### 5.10 FAMILY_DATA_REVISION（家庭协作门铃 · 在线同步）
 

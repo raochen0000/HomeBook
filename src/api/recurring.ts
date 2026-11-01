@@ -1,7 +1,7 @@
 /**
  * 定时收支规则（PRD §18 自定义能力 / DATAMODEL §5.9）。金额单位：分。
  * 家庭共享：list 由 RLS 隔离到当前家庭（同 transactions）。规则本身可增删改；生成的流水
- * 由 generate_due_recurring_transactions() RPC 在服务端幂等补记（见 use-recurring-catchup）。
+ * 由服务端定时生成；保留 generate_due_recurring_transactions() RPC 用于家庭补记。
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -11,6 +11,7 @@ import { supabase } from '@/lib/supabase';
 import { queryKeys } from './keys';
 
 export type RecurringRule = Tables<'recurring_transactions'>;
+export type RecurringFrequency = 'daily' | 'monthly' | 'yearly';
 
 /** 新建规则所需字段（family_id / recorder_user_id / created_by 由调用方按当前登录态填入）。 */
 export type NewRecurringRule = Pick<
@@ -23,6 +24,8 @@ export type NewRecurringRule = Pick<
   | 'recorder_user_id'
   | 'created_by'
   | 'day_of_month'
+  | 'month_of_year'
+  | 'frequency'
   | 'start_date'
   | 'end_date'
 >;
@@ -36,6 +39,8 @@ export type EditRecurringRule = {
   note?: string | null;
   recorder_user_id?: string;
   day_of_month?: number;
+  month_of_year?: number | null;
+  frequency?: RecurringFrequency;
   start_date?: string;
   end_date?: string | null;
   enabled?: boolean;
@@ -107,7 +112,7 @@ export async function generateDueRecurring(): Promise<number> {
   return data ?? 0;
 }
 
-/** 显式触发一次补记（新建 / 编辑规则后用，使新规则立即生效）；生成后失效流水缓存。 */
+/** 新建或编辑后尝试补记已到期的规则；生成后失效流水缓存。 */
 export function useGenerateDueRecurring() {
   const qc = useQueryClient();
   return useMutation({
