@@ -32,44 +32,16 @@ export type SaveBudgetInput = {
   categories: { category_id: string; amount: number }[];
 };
 
-/** 保存预算：upsert 总预算 + 全量替换分类预算（户主操作）。 */
+/** 保存预算：由服务端在同一事务内校验并替换一级分类预算。 */
 export async function saveBudget(input: SaveBudgetInput): Promise<void> {
-  const existing = await supabase.from('budgets').select('id').eq('period', input.period).maybeSingle();
-  if (existing.error) throw existing.error;
-
-  let budgetId: string;
-  if (existing.data) {
-    budgetId = existing.data.id;
-    const { error } = await supabase
-      .from('budgets')
-      .update({ total_amount: input.totalAmount, alert_enabled: input.alertEnabled })
-      .eq('id', budgetId);
-    if (error) throw error;
-  } else {
-    const { data, error } = await supabase
-      .from('budgets')
-      .insert({
-        family_id: input.familyId,
-        period: input.period,
-        total_amount: input.totalAmount,
-        alert_enabled: input.alertEnabled,
-      })
-      .select('id')
-      .single();
-    if (error) throw error;
-    budgetId = data.id;
-  }
-
-  // 全量替换分类预算（先删后插；amount 必须 > 0）
-  const del = await supabase.from('budget_categories').delete().eq('budget_id', budgetId);
-  if (del.error) throw del.error;
-  const rows = input.categories
-    .filter((c) => c.amount > 0)
-    .map((c) => ({ budget_id: budgetId, category_id: c.category_id, amount: c.amount }));
-  if (rows.length > 0) {
-    const { error } = await supabase.from('budget_categories').insert(rows);
-    if (error) throw error;
-  }
+  const { error } = await supabase.rpc('save_family_budget', {
+    p_family_id: input.familyId,
+    p_period: input.period,
+    p_total_amount: input.totalAmount,
+    p_alert_enabled: input.alertEnabled,
+    p_categories: input.categories.filter((category) => category.amount > 0),
+  });
+  if (error) throw error;
 }
 
 export function useSaveBudget() {

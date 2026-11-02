@@ -36,7 +36,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   DEFAULT_ACCOUNTING_PREFS,
   useAccountingPrefs,
-  useCategories,
+  useAllCategories,
   useCreateFamily,
   useFamilyMembers,
   useHomeDashboard,
@@ -203,7 +203,7 @@ export default function HomeScreen() {
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
   const membersQ = useFamilyMembers();
-  const categoriesQ = useCategories();
+  const categoriesQ = useAllCategories();
   const period = currentPeriod();
   const prevPeriodStr = previousPeriod(period);
   const familyId = familyQ.data?.id ?? profileQ.data?.current_family_id ?? null;

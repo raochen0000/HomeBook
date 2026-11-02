@@ -20,6 +20,7 @@ describe('family live query keys', () => {
       ['savings_entries'],
       ['categories'],
       queryKeys.hiddenCategories,
+      queryKeys.categoryLayout,
       queryKeys.recurringRules,
       queryKeys.notifications,
     ]);

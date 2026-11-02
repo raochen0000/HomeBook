@@ -13,7 +13,7 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useCategories, useFamilyMembers, useMonthlySummary, useMyFamily, useMyProfile } from '@/api';
+import { useAllCategories, useFamilyMembers, useMonthlySummary, useMyFamily, useMyProfile } from '@/api';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { currentPeriod, currentPeriodInTimeZone, formatAmount, formatMonthDay, signForNet } from '@/lib/format';
@@ -59,7 +59,7 @@ export function MonthlySummaryScreen({ initialPeriod }: { initialPeriod?: string
 function Screen({ initialPeriod }: { initialPeriod?: string }) {
   const palette = usePalette();
   const { locale } = useLocalePreference();
-  const catsQ = useCategories();
+  const catsQ = useAllCategories();
   const familyQ = useMyFamily();
   const membersQ = useFamilyMembers();
   const profileQ = useMyProfile();

@@ -10,6 +10,7 @@ export const queryKeys = {
   accountingPrefs: ['accounting_preferences'] as const,
   recurringRules: ['recurring_transactions'] as const,
   categories: (type?: 'expense' | 'income') => ['categories', type ?? 'all'] as const,
+  categoryLayout: ['category_layout'] as const,
   hiddenCategories: ['hidden_categories'] as const,
   transactions: ['transactions'] as const,
   transaction: (id: string) => ['transactions', 'detail', id] as const,

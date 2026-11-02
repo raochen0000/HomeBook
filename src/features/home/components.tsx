@@ -116,6 +116,7 @@ function AvatarStack({
 export type RowData = {
   id: string;
   title: string;
+  categoryParent?: string;
   symbol: string;
   iconColor: string;
   amountCents: number;
@@ -158,6 +159,11 @@ function TransactionRow({
         <VStack alignment="leading" spacing={Space[1]} modifiers={[frame({ maxWidth: 9999 })]}>
           {/* 第一行：分类名 + 金额（正常字重） */}
           <HStack alignment="firstTextBaseline">
+            {row.categoryParent ? (
+              <Text
+                modifiers={[font({ size: 17 }), foregroundColor(palette.textSecondary)]}
+              >{`${row.categoryParent} / `}</Text>
+            ) : null}
             <Text modifiers={[font({ size: 17, weight: 'medium' }), foregroundColor(palette.textPrimary)]}>
               {row.title}
             </Text>

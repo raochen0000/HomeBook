@@ -21,7 +21,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
-  useCategories,
+  useAllCategories,
+  useCategoryLayout,
   useCreateRecurringRule,
   useHiddenCategoryIds,
   useMemberships,
@@ -35,6 +36,7 @@ import { PageSheet } from '@/components/page-sheet';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
+import { buildCategoryHierarchy, categoryPath, selectableCategories } from '@/lib/category-hierarchy';
 
 type TxnType = 'expense' | 'income';
 
@@ -93,7 +95,8 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   useLocalePreference();
   const catColors = useCategoryColors();
 
-  const categoriesQ = useCategories();
+  const categoriesQ = useAllCategories();
+  const layoutQ = useCategoryLayout();
   const hiddenQ = useHiddenCategoryIds();
   const membersQ = useMemberships();
   const createM = useCreateRecurringRule();
@@ -116,13 +119,14 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   const showRecorder = members.some((m) => m.userId === recorderId && m.role === 'owner');
   const recorderName = members.find((m) => m.userId === recorderUserId)?.nickname ?? t('common.me');
 
-  const categories = useMemo<Category[]>(() => {
-    const hidden = hiddenQ.data ?? new Set<string>();
-    const all = categoriesQ.data ?? [];
-    return all.filter(
-      (c) => c.type === type && !c.name.startsWith('储蓄·') && (!hidden.has(c.id) || c.id === editing?.category_id),
-    );
-  }, [categoriesQ.data, hiddenQ.data, type, editing?.category_id]);
+  const hierarchy = useMemo(
+    () => buildCategoryHierarchy(categoriesQ.data ?? [], layoutQ.data ?? []),
+    [categoriesQ.data, layoutQ.data],
+  );
+  const categories = useMemo<Category[]>(
+    () => selectableCategories(hierarchy, type, hiddenQ.data ?? new Set<string>(), editing?.category_id),
+    [hierarchy, hiddenQ.data, type, editing?.category_id],
+  );
 
   const effectiveCategoryId = useMemo(() => {
     if (categoryId && categories.some((c) => c.id === categoryId)) return categoryId;
@@ -130,7 +134,14 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   }, [categoryId, categories]);
 
   const cents = rawToCents(raw);
-  const canSave = cents > 0 && !!effectiveCategoryId && !!familyId && !saving;
+  const canSave =
+    cents > 0 &&
+    !!effectiveCategoryId &&
+    !!familyId &&
+    !saving &&
+    categoriesQ.isSuccess &&
+    layoutQ.isSuccess &&
+    hiddenQ.isSuccess;
   const amountColor = type === 'expense' ? palette.expense : palette.income;
   const sign = type === 'expense' ? '-' : '+';
   const parts = displayParts(raw);
@@ -194,7 +205,21 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
     const active = c.id === effectiveCategoryId;
     const color = catColors[categoryColorKey(c.name, type, c.color_key)];
     return (
-      <Pressable key={c.id} style={styles.catItem} onPress={() => setCategoryId(c.id)}>
+      <Pressable
+        key={c.id}
+        style={styles.catItem}
+        accessibilityRole="radio"
+        accessibilityState={{ selected: active }}
+        accessibilityLabel={
+          categoryPath(
+            c.id,
+            hierarchy,
+            (category) => displayCategoryName(category.name, category.is_system),
+            t('category.unspecified'),
+          ) ?? undefined
+        }
+        onPress={() => setCategoryId(c.id)}
+      >
         <View
           style={[
             styles.catCircle,
@@ -213,7 +238,9 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
             maxWidth: 56,
           }}
         >
-          {displayCategoryName(c.name, c.is_system)}
+          {hierarchy.layoutById.get(c.id)?.is_group
+            ? t('category.unspecifiedPicker', { name: displayCategoryName(c.name, c.is_system) })
+            : displayCategoryName(c.name, c.is_system)}
         </Text>
       </Pressable>
     );

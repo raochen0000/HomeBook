@@ -10,6 +10,7 @@
  */
 import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -28,7 +29,8 @@ import {
 
 import {
   useAccountingPrefs,
-  useCategories,
+  useAllCategories,
+  useCategoryLayout,
   useCreateTransaction,
   useHasTransactions,
   useHiddenCategoryIds,
@@ -44,6 +46,7 @@ import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
+import { buildCategoryHierarchy, categoryPath, selectableRecordCategories } from '@/lib/category-hierarchy';
 
 import { isLikelyNetworkError, isSaveAttemptTimeout, SAVE_NETWORK_TIMEOUT_MS, withDeadline } from './save-attempt';
 
@@ -132,7 +135,8 @@ function RecordForm({
   useLocalePreference();
   const catColors = useCategoryColors();
 
-  const categoriesQ = useCategories();
+  const categoriesQ = useAllCategories();
+  const layoutQ = useCategoryLayout();
   const hiddenQ = useHiddenCategoryIds();
   const membersQ = useMemberships();
   const createM = useCreateTransaction();
@@ -162,6 +166,11 @@ function RecordForm({
   );
   const [raw, setRaw] = useState(editing?.amount ? (editing.amount / 100).toString() : '');
   const [categoryId, setCategoryId] = useState<string | null>(editing?.category_id ?? null);
+  const [recent, setRecent] = useState<{ expense: string | null; income: string | null }>({
+    expense: null,
+    income: null,
+  });
+  const [recentLoaded, setRecentLoaded] = useState(false);
   const [note, setNote] = useState(editing?.note ?? '');
   const [occurredAt, setOccurredAt] = useState<Date>(editing?.occurred_at ? new Date(editing.occurred_at) : new Date());
   const [recorderUserId, setRecorderUserId] = useState(editing?.recorder_user_id ?? recorderId);
@@ -176,26 +185,54 @@ function RecordForm({
 
   // 可手动选择的分类：当前类型 + 排除储蓄类系统分类（储蓄走专门入口，PRD 口径）+ 排除本家庭隐藏的系统分类。
   // 仅显示当前 Tab 类型——支出 Tab 不混入收入分类，反之亦然。
-  // 编辑时若该笔原分类已被家庭隐藏，仍保留它，便于查看/保留原分类。
-  const categories = useMemo<Category[]>(() => {
-    const hidden = hiddenQ.data ?? new Set<string>();
-    const all = categoriesQ.data ?? [];
-    return all.filter(
-      (c) => c.type === type && !c.name.startsWith('储蓄·') && (!hidden.has(c.id) || c.id === editing?.category_id),
-    );
-  }, [categoriesQ.data, hiddenQ.data, type, editing?.category_id]);
+  // 编辑时保留已隐藏的原分类，但一级分类不作为可选项。
+  const hierarchy = useMemo(
+    () => buildCategoryHierarchy(categoriesQ.data ?? [], layoutQ.data ?? []),
+    [categoriesQ.data, layoutQ.data],
+  );
+  const categories = useMemo<Category[]>(
+    () => selectableRecordCategories(hierarchy, type, hiddenQ.data ?? new Set<string>(), editing?.category_id),
+    [hierarchy, hiddenQ.data, type, editing?.category_id],
+  );
 
-  // 有效分类：用户已选且仍合法则用之，否则落到当前类型第一项（在 render 期派生，不用 effect）。
+  useEffect(() => {
+    let active = true;
+    const prefix = `homebook:last-category:${familyId}:${recorderId}`;
+    void AsyncStorage.multiGet([`${prefix}:expense`, `${prefix}:income`])
+      .then((rows) => {
+        if (active) setRecent({ expense: rows[0]?.[1] ?? null, income: rows[1]?.[1] ?? null });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setRecentLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [familyId, recorderId]);
+
+  // 旧流水若未重新选择分类，编辑时保留其原一级分类，避免自动改写历史。
+  const keepingOriginalGroup =
+    !!editing &&
+    categoryId === editing.category_id &&
+    type === editing.type &&
+    hierarchy.layoutById.get(editing.category_id)?.is_group === true;
+
+  // 用户选择优先；否则使用本人最近分类，首次或失效时回退到对应的「其他」。
   const effectiveCategoryId = useMemo(() => {
+    if (keepingOriginalGroup) return categoryId;
     if (categoryId && categories.some((c) => c.id === categoryId)) return categoryId;
-    return categories[0]?.id ?? null;
-  }, [categoryId, categories]);
+    if (recent[type] && categories.some((c) => c.id === recent[type])) return recent[type];
+    return categories.find((c) => c.is_system && c.name === (type === 'expense' ? '其他支出' : '其他收入'))?.id ?? null;
+  }, [categoryId, categories, keepingOriginalGroup, recent, type]);
 
   // 每行 5 个；按实测宽度均分。
   const catItemW = catAreaW > 0 ? catAreaW / 5 : 64;
 
   const cents = rawToCents(raw);
-  const canSave = cents > 0 && !!effectiveCategoryId && !!familyId && !saving;
+  const categoriesReady = categoriesQ.isSuccess && layoutQ.isSuccess && hiddenQ.isSuccess;
+  const canSave =
+    cents > 0 && !!effectiveCategoryId && !!familyId && !saving && categoriesReady && (!!editing || recentLoaded);
   const amountColor = type === 'expense' ? palette.expense : palette.income;
   const sign = type === 'expense' ? '-' : '+';
   const parts = displayParts(raw);
@@ -255,6 +292,10 @@ function RecordForm({
         SAVE_NETWORK_TIMEOUT_MS,
       );
       if (!mountedRef.current) return;
+      setRecent((previous) => ({ ...previous, [type]: effectiveCategoryId }));
+      void AsyncStorage.setItem(`homebook:last-category:${familyId}:${recorderId}:${type}`, effectiveCategoryId).catch(
+        () => {},
+      );
 
       // 记一笔后行为（§18.3.1）：继续记下一笔 → 清空金额/备注/分类、面板不关；否则保存即关。
       if (afterBehavior === 'continue') {
@@ -290,8 +331,35 @@ function RecordForm({
   const renderCat = (c: Category, itemWidth: DimensionValue) => {
     const active = c.id === effectiveCategoryId;
     const color = catColors[categoryColorKey(c.name, type, c.color_key)];
+    const name = displayCategoryName(c.name, c.is_system);
+    const path =
+      categoryPath(
+        c.id,
+        hierarchy,
+        (category) => displayCategoryName(category.name, category.is_system),
+        t('category.unspecified'),
+      ) ?? name;
+    const duplicate = categories.some(
+      (other) => other.id !== c.id && displayCategoryName(other.name, other.is_system) === name,
+    );
     return (
-      <Pressable key={c.id} style={[styles.catItem, { width: itemWidth }]} onPress={() => setCategoryId(c.id)}>
+      <Pressable
+        key={c.id}
+        style={[styles.catItem, { width: itemWidth }]}
+        accessibilityRole="radio"
+        accessibilityLabel={path}
+        accessibilityState={{ selected: active }}
+        onPress={() => {
+          setCategoryId(c.id);
+          if (duplicate)
+            setContinueToast({
+              id: ++continueToastSeq.current,
+              kind: 'info',
+              text: t('category.selectedPath', { path }),
+              duration: 2500,
+            });
+        }}
+      >
         <View
           style={[
             styles.catCircle,
@@ -302,7 +370,7 @@ function RecordForm({
           <SymbolView name={categorySymbol(c.icon, type) as SymbolViewProps['name']} tintColor="#FFFFFF" size={22} />
         </View>
         <Text
-          numberOfLines={1}
+          numberOfLines={2}
           style={{
             color: active ? palette.textPrimary : palette.textSecondary,
             fontSize: 12,
@@ -310,7 +378,7 @@ function RecordForm({
             maxWidth: 56,
           }}
         >
-          {displayCategoryName(c.name, c.is_system)}
+          {name}
         </Text>
       </Pressable>
     );
@@ -328,12 +396,27 @@ function RecordForm({
 
       {/* 分类：完整网格；只在此区域滚动，备注／时间／记账人保持可见。 */}
       <View style={styles.catArea} onLayout={(e) => setCatAreaW(e.nativeEvent.layout.width)}>
-        {categoriesQ.isLoading ? (
+        {categoriesQ.isLoading || layoutQ.isLoading || hiddenQ.isLoading ? (
           <View style={styles.catLoading}>
             <ActivityIndicator />
           </View>
+        ) : !categoriesReady ? (
+          <Pressable
+            onPress={() => {
+              void categoriesQ.refetch();
+              void layoutQ.refetch();
+              void hiddenQ.refetch();
+            }}
+          >
+            <Text style={{ color: palette.textSecondary }}>{t('common.retry')}</Text>
+          </Pressable>
         ) : (
           <ScrollView style={styles.catScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {keepingOriginalGroup ? (
+              <Text style={{ color: palette.textSecondary, fontSize: 12, paddingVertical: Space[2] }}>
+                {t('record.legacyCategoryKept')}
+              </Text>
+            ) : null}
             <View style={styles.catGrid}>{categories.map((c) => renderCat(c, catItemW))}</View>
           </ScrollView>
         )}

@@ -20,6 +20,8 @@ export type ReportAnalytics = {
   summary: ReportSummary;
   expenseCategories: { categoryId: string; currentAmount: number; previousAmount: number }[];
   incomeCategories: { categoryId: string; amount: number }[];
+  expenseCategoryChildren: { parentId: string; categoryId: string; currentAmount: number; previousAmount: number }[];
+  incomeCategoryChildren: { parentId: string; categoryId: string; amount: number }[];
   members: {
     userId: string;
     count: number;
@@ -50,6 +52,8 @@ export const EMPTY_REPORT_ANALYTICS: ReportAnalytics = {
   summary: { transactionCount: 0, incomeAmount: 0, expenseAmount: 0, expenseNormalAmount: 0 },
   expenseCategories: [],
   incomeCategories: [],
+  expenseCategoryChildren: [],
+  incomeCategoryChildren: [],
   members: [],
   memberCategories: [],
   topExpenses: [],
@@ -98,6 +102,23 @@ function parseReportAnalytics(value: Json): ReportAnalytics {
     incomeCategories: asRows(root.incomeCategories, (row) => {
       const categoryId = asString(row.categoryId);
       return categoryId ? { categoryId, amount: asNumber(row.amount) } : null;
+    }),
+    expenseCategoryChildren: asRows(root.expenseCategoryChildren, (row) => {
+      const parentId = asString(row.parentId);
+      const categoryId = asString(row.categoryId);
+      return parentId && categoryId
+        ? {
+            parentId,
+            categoryId,
+            currentAmount: asNumber(row.currentAmount),
+            previousAmount: asNumber(row.previousAmount),
+          }
+        : null;
+    }),
+    incomeCategoryChildren: asRows(root.incomeCategoryChildren, (row) => {
+      const parentId = asString(row.parentId);
+      const categoryId = asString(row.categoryId);
+      return parentId && categoryId ? { parentId, categoryId, amount: asNumber(row.amount) } : null;
     }),
     members: asRows(root.members, (row) => {
       const userId = asString(row.userId);
@@ -202,6 +223,8 @@ export type CategoryDetailInput = {
   end: string;
   historyStart: string;
   categoryIds: string[];
+  memberIds: string[];
+  type: 'expense' | 'income';
 };
 export type CategoryDetailPage = {
   count: number;
@@ -236,11 +259,13 @@ async function fetchCategoryDetail(
   input: CategoryDetailInput,
   cursor?: { occurredAt: string; id: string },
 ): Promise<CategoryDetailPage> {
-  const { data, error } = await supabase.rpc('get_report_category_detail', {
+  const { data, error } = await supabase.rpc('get_report_category_detail_v2', {
     p_start: input.start,
     p_end: input.end,
     p_history_start: input.historyStart,
     p_category_ids: input.categoryIds,
+    p_member_ids: input.memberIds,
+    p_type: input.type,
     p_cursor_occurred_at: cursor?.occurredAt ?? null,
     p_cursor_id: cursor?.id ?? null,
   });

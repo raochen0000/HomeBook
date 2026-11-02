@@ -23,6 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   useBudget,
   useCategories,
+  useCategoryLayout,
   useHiddenCategoryIds,
   useMyFamily,
   useMyProfile,
@@ -140,6 +141,7 @@ function BudgetView({
   useLocalePreference();
   const catsQ = useCategories('expense');
   const catById = useMemo(() => new Map((catsQ.data ?? []).map((c) => [c.id, c])), [catsQ.data]);
+  const activeBudgetCategories = categories.filter((item) => catById.has(item.category_id));
 
   const pct = total > 0 ? Math.round((usedTotal / total) * 100) : 0;
   const level = budgetLevel(pct);
@@ -173,12 +175,13 @@ function BudgetView({
       </View>
 
       {/* 分类预算执行 */}
-      {categories.length > 0 ? (
+      {activeBudgetCategories.length > 0 ? (
         <View style={styles.group}>
           <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('budget.byCategory')}</Text>
           <View style={[styles.card, { backgroundColor: palette.card }]}>
-            {categories.map((bc, i) => {
+            {activeBudgetCategories.map((bc, i) => {
               const cat = catById.get(bc.category_id);
+              if (!cat) return null;
               const u = usedByCat.get(bc.category_id) ?? 0;
               const cpct = bc.amount > 0 ? Math.round((u / bc.amount) * 100) : 0;
               const clevel = budgetLevel(cpct);
@@ -248,6 +251,7 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
   const familyQ = useMyFamily();
   const budgetQ = useBudget(period);
   const catsQ = useCategories('expense');
+  const layoutQ = useCategoryLayout();
   const hiddenQ = useHiddenCategoryIds();
   const saveM = useSaveBudget();
   const scrollRef = useRef<ScrollView>(null);
@@ -258,8 +262,13 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
   const expenseCats = useMemo<Category[]>(() => {
     const hidden = hiddenQ.data ?? new Set<string>();
     const budgeted = new Set((budgetQ.data?.categories ?? []).map((c) => c.category_id));
-    return (catsQ.data ?? []).filter((c) => !c.name.startsWith('储蓄·') && (!hidden.has(c.id) || budgeted.has(c.id)));
-  }, [catsQ.data, hiddenQ.data, budgetQ.data]);
+    const childIds = new Set(
+      (layoutQ.data ?? []).filter((item) => item.parent_category_id).map((item) => item.category_id),
+    );
+    return (catsQ.data ?? []).filter(
+      (c) => !childIds.has(c.id) && !c.name.startsWith('储蓄·') && (!hidden.has(c.id) || budgeted.has(c.id)),
+    );
+  }, [catsQ.data, hiddenQ.data, budgetQ.data, layoutQ.data]);
 
   const [total, setTotal] = useState(
     budgetQ.data?.budget?.total_amount ? (budgetQ.data.budget.total_amount / 100).toString() : '',
@@ -272,9 +281,17 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
   });
 
   const totalCents = toCents(total);
-  const catSum = Object.values(catAmounts).reduce((s, v) => s + toCents(v), 0);
+  const validCategoryIds = new Set(expenseCats.map((category) => category.id));
+  const validAmounts = Object.entries(catAmounts).filter(([categoryId]) => validCategoryIds.has(categoryId));
+  const catSum = validAmounts.reduce((s, [, value]) => s + toCents(value), 0);
   const overAllocated = totalCents > 0 && catSum > totalCents;
-  const canSave = totalCents > 0 && !saveM.isPending;
+  const canSave =
+    totalCents > 0 &&
+    !saveM.isPending &&
+    layoutQ.isSuccess &&
+    catsQ.isSuccess &&
+    hiddenQ.isSuccess &&
+    budgetQ.isSuccess;
 
   /**
    * 分类数量与行高都会随隐藏分类、长名称和动态字号变化，不能用索引估算滚动位置。
@@ -302,7 +319,7 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
           period,
           totalAmount: totalCents,
           alertEnabled,
-          categories: Object.entries(catAmounts).map(([category_id, v]) => ({ category_id, amount: toCents(v) })),
+          categories: validAmounts.map(([category_id, v]) => ({ category_id, amount: toCents(v) })),
         });
         onBack();
       } catch (e) {
@@ -333,6 +350,18 @@ function Editor({ period, onBack }: { period: string; onBack: () => void }) {
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
           >
+            {layoutQ.isError || catsQ.isError || hiddenQ.isError || budgetQ.isError ? (
+              <Pressable
+                onPress={() => {
+                  void layoutQ.refetch();
+                  void catsQ.refetch();
+                  void hiddenQ.refetch();
+                  void budgetQ.refetch();
+                }}
+              >
+                <Text style={{ color: palette.accent }}>{t('common.retry')}</Text>
+              </Pressable>
+            ) : null}
             <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('budget.monthTotal')}</Text>
             <TextInput
               style={[styles.bigAmount, { backgroundColor: palette.card, color: palette.textPrimary }]}

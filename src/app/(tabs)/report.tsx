@@ -10,6 +10,7 @@
 import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Image as ExpoImage } from 'expo-image';
 import { useRouter, type Href } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -23,7 +24,8 @@ import {
   EMPTY_REPORT_ANALYTICS,
   useAccountingPrefs,
   useBudget,
-  useCategories,
+  useAllCategories,
+  useCategoryLayout,
   useCategoryDetail,
   useFamilyMembers,
   useMyFamily,
@@ -55,6 +57,7 @@ import { displayCategoryName, i18n, INTL_LOCALE, t, useLocalePreference } from '
 import { fromI18nLanguage } from '@/i18n/locale';
 import { daysToMonthEnd } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
+import { buildCategoryHierarchy, categoryDescendantIds, type CategoryHierarchy } from '@/lib/category-hierarchy';
 import {
   calendarDateInTimeZone,
   currentPeriod,
@@ -77,7 +80,7 @@ import { resolveScopeCardLayout, type ReportCardId, type ReportScope } from '@/l
 
 type CatSlice = { id: string; name: string; amount: number; color: string; symbol: string };
 /** 分类下钻：单类用 id；「其它」聚合用 categoryIds。 */
-type CategoryDetail = { id: string; name: string; categoryIds?: string[] };
+type CategoryDetail = { id: string; name: string; categoryIds?: string[]; type?: 'expense' | 'income' };
 type DisplayCatSlice = CatSlice & { categoryIds?: string[] };
 type Member = { id: string; name: string; amount: number; count: number };
 type ReportDay = {
@@ -226,7 +229,12 @@ export default function ReportScreen() {
   // estimate 必须等于实测头高（paddingTop 8 + 标题 41 + paddingBottom 12），否则裁切框（overflow:hidden）
   // 偏小会在首帧切掉标题底部。
   const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 61);
-  const catsQ = useCategories();
+  const catsQ = useAllCategories();
+  const layoutQ = useCategoryLayout();
+  const hierarchy = useMemo(
+    () => buildCategoryHierarchy(catsQ.data ?? [], layoutQ.data ?? []),
+    [catsQ.data, layoutQ.data],
+  );
   const membersQ = useFamilyMembers();
   const ledgerMembers = useMemo(() => {
     void locale;
@@ -313,7 +321,7 @@ export default function ReportScreen() {
   const reportData = reportQ.data;
   const filteredCount = reportData?.summary.transactionCount ?? 0;
   const activeFilters = activeFilterCount(filters);
-  const reportLoadFailed = reportQ.isError && !reportData;
+  const reportLoadFailed = (reportQ.isError && !reportData) || catsQ.isError || layoutQ.isError;
 
   useEffect(() => {
     let alive = true;
@@ -424,8 +432,13 @@ export default function ReportScreen() {
     }));
     const inc = analytics?.summary.incomeAmount ?? 0;
     const exp = analytics?.summary.expenseAmount ?? 0;
-    const passiveInc = incomeSlices.reduce(
-      (total, item) => total + (isPassiveIncomeName(catById.get(item.id)?.name ?? '') ? item.amount : 0),
+    const passiveInc = (analytics?.incomeCategoryChildren ?? []).reduce(
+      (total, item) =>
+        total +
+        (isPassiveIncomeName(catById.get(item.categoryId)?.name ?? '') ||
+        isPassiveIncomeName(catById.get(item.parentId)?.name ?? '')
+          ? item.amount
+          : 0),
       0,
     );
 
@@ -449,7 +462,7 @@ export default function ReportScreen() {
     };
   }, [reportData, catsQ.data, membersQ.data, profileQ.data, range, dimension, catColors, locale]);
 
-  const loading = reportQ.isLoading || catsQ.isLoading;
+  const loading = reportQ.isLoading || catsQ.isLoading || layoutQ.isLoading;
   const memberCountMax = Math.max(1, ...members.map((m) => m.count));
   const isMonthlyView = dimension === 'month';
   const currentMonthRange = useMemo(() => periodRange('month', todayInFamilyTimeZone), [todayInFamilyTimeZone]);
@@ -612,7 +625,14 @@ export default function ReportScreen() {
     ),
     insights: commonInsightCard,
     income_trend: <MonthlyIncomeTrendCard series={incomeExpense} palette={palette} hidden={privacy} />,
-    income_structure: <IncomeStructureCard slices={incomeSlices} palette={palette} hidden={privacy} />,
+    income_structure: (
+      <IncomeStructureCard
+        slices={incomeSlices}
+        palette={palette}
+        hidden={privacy}
+        onOpenCategory={(item) => setDetail({ id: item.id, name: item.name, type: 'income' })}
+      />
+    ),
     more_stats: commonStatsCard,
   };
 
@@ -665,7 +685,14 @@ export default function ReportScreen() {
             <ActivityIndicator />
           </View>
         ) : reportLoadFailed ? (
-          <ReportLoadErrorState palette={palette} onRetry={() => void reportQ.refetch()} />
+          <ReportLoadErrorState
+            palette={palette}
+            onRetry={() => {
+              void reportQ.refetch();
+              void catsQ.refetch();
+              void layoutQ.refetch();
+            }}
+          />
         ) : (
           <Animated.ScrollView
             ref={scrollRef}
@@ -791,11 +818,15 @@ export default function ReportScreen() {
 
       {/* 分类流水明细下钻 */}
       <CategoryDetailSheet
+        key={detail?.id ?? 'closed'}
         detail={detail}
+        hierarchy={hierarchy}
+        analytics={reportData ?? EMPTY_REPORT_ANALYTICS}
         range={range}
         dimension={dimension}
         analyticsInput={analyticsInput}
         totalExpense={expenseTotal}
+        totalIncome={incomeSlices.reduce((sum, item) => sum + item.amount, 0)}
         hidden={privacy}
         onClose={() => setDetail(null)}
       />
@@ -844,6 +875,7 @@ export default function ReportScreen() {
         filters={filters}
         members={ledgerMembers}
         categories={catsQ.data ?? []}
+        hierarchy={hierarchy}
         matchedCount={filteredCount}
         onChange={setFilters}
         onClose={() => setFilterOpen(false)}
@@ -1002,6 +1034,7 @@ function ReportFilterSheet({
   filters,
   members,
   categories,
+  hierarchy,
   matchedCount,
   onChange,
   onClose,
@@ -1010,15 +1043,62 @@ function ReportFilterSheet({
   filters: ReportFilters;
   members: { id: string; nickname: string }[];
   categories: Category[];
+  hierarchy: CategoryHierarchy;
   matchedCount: number;
   onChange: (filters: ReportFilters) => void;
   onClose: () => void;
 }) {
   const palette = useSheetPalette();
-  const expenseCategories = categories.filter((c) => c.type === 'expense');
-  const incomeCategories = categories.filter((c) => c.type === 'income');
+  const expenseCategories = categories.filter(
+    (c) => c.type === 'expense' && !hierarchy.layoutById.get(c.id)?.parent_category_id,
+  );
+  const incomeCategories = categories.filter(
+    (c) => c.type === 'income' && !hierarchy.layoutById.get(c.id)?.parent_category_id,
+  );
   const setMember = (id: string) => onChange({ ...filters, memberIds: arrayToggle(filters.memberIds, id) });
   const setCategory = (id: string) => onChange({ ...filters, categoryIds: arrayToggle(filters.categoryIds, id) });
+  const toggleGroup = (id: string) => {
+    const ids = categoryDescendantIds(id, hierarchy);
+    const selected = new Set(filters.categoryIds);
+    const remove = ids.every((item) => selected.has(item));
+    for (const item of ids) {
+      if (remove) selected.delete(item);
+      else selected.add(item);
+    }
+    onChange({ ...filters, categoryIds: [...selected] });
+  };
+  const renderCategoryFilter = (category: Category) => {
+    const group = hierarchy.layoutById.get(category.id)?.is_group;
+    const ids = group ? categoryDescendantIds(category.id, hierarchy) : [category.id];
+    const selectedCount = ids.filter((id) => filters.categoryIds.includes(id)).length;
+    return (
+      <Fragment key={category.id}>
+        <FilterChip
+          label={`${displayCategoryName(category.name, category.is_system)}${group && selectedCount > 0 && selectedCount < ids.length ? ` (${t('category.partial')})` : ''}`}
+          selected={selectedCount === ids.length}
+          palette={palette}
+          onPress={() => (group ? toggleGroup(category.id) : setCategory(category.id))}
+        />
+        {group
+          ? ids.map((id) => {
+              const child = hierarchy.byId.get(id);
+              if (!child) return null;
+              const label =
+                id === category.id ? t('category.unspecified') : displayCategoryName(child.name, child.is_system);
+              return (
+                <FilterChip
+                  key={id}
+                  label={`${displayCategoryName(category.name, category.is_system)} / ${label}`}
+                  selected={filters.categoryIds.includes(id)}
+                  palette={palette}
+                  onPress={() => setCategory(id)}
+                />
+              );
+            })
+          : null}
+      </Fragment>
+    );
+  };
   const reset = () => onChange(EMPTY_FILTERS);
 
   return (
@@ -1052,26 +1132,10 @@ function ReportFilterSheet({
               ))}
             </FilterSection>
             <FilterSection title={t('report.filterExpenseCats')} palette={palette}>
-              {expenseCategories.map((category) => (
-                <FilterChip
-                  key={category.id}
-                  label={displayCategoryName(category.name, category.is_system)}
-                  selected={filters.categoryIds.includes(category.id)}
-                  palette={palette}
-                  onPress={() => setCategory(category.id)}
-                />
-              ))}
+              {expenseCategories.map(renderCategoryFilter)}
             </FilterSection>
             <FilterSection title={t('report.filterIncomeCats')} palette={palette}>
-              {incomeCategories.map((category) => (
-                <FilterChip
-                  key={category.id}
-                  label={displayCategoryName(category.name, category.is_system)}
-                  selected={filters.categoryIds.includes(category.id)}
-                  palette={palette}
-                  onPress={() => setCategory(category.id)}
-                />
-              ))}
+              {incomeCategories.map(renderCategoryFilter)}
             </FilterSection>
             <View style={[styles.pendingFilterCard, { backgroundColor: palette.card }]}>
               <SymbolView name="tray" tintColor={palette.textTertiary} size={20} />
@@ -3172,24 +3236,70 @@ function CustomRangeSheet({
 // ── 某分类区间流水明细（下钻）────────────────────────────────────────────────
 function CategoryDetailSheet({
   detail,
+  hierarchy,
+  analytics,
   range,
   dimension,
   analyticsInput,
   totalExpense,
+  totalIncome,
   hidden,
   onClose,
 }: {
   detail: CategoryDetail | null;
+  hierarchy: CategoryHierarchy;
+  analytics: ReportAnalytics;
   range: { start: Date; end: Date };
   dimension: Dimension;
   analyticsInput: ReportAnalyticsInput;
   totalExpense: number;
+  totalIncome: number;
   hidden: boolean;
   onClose: () => void;
 }) {
   const palette = useSheetPalette();
+  const catColors = useCategoryColors();
   const { locale } = useLocalePreference();
-  const categoryIds = detail?.categoryIds?.length ? detail.categoryIds : detail ? [detail.id] : [];
+  const [selectedChild, setSelectedChild] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const isOther = detail?.id === EXPENSE_CATEGORY_OTHER_ID && !selectedGroup;
+  const groupId = selectedGroup ?? detail?.id;
+  const isGroup = !!groupId && !!hierarchy.layoutById.get(groupId)?.is_group;
+  const type = detail?.type ?? 'expense';
+  const groupIds = detail
+    ? (selectedGroup ? [selectedGroup] : detail.categoryIds?.length ? detail.categoryIds : [detail.id]).flatMap((id) =>
+        categoryDescendantIds(id, hierarchy),
+      )
+    : [];
+  const allowedIds = analyticsInput.categoryIds.length
+    ? groupIds.filter((id) => analyticsInput.categoryIds.includes(id))
+    : groupIds;
+  const categoryIds = selectedChild ? [selectedChild] : allowedIds;
+  const childRows = groupId
+    ? type === 'expense'
+      ? analytics.expenseCategoryChildren
+          .filter((item) => item.parentId === groupId && item.currentAmount > 0)
+          .map((item) => ({ id: item.categoryId, amount: item.currentAmount }))
+      : analytics.incomeCategoryChildren
+          .filter((item) => item.parentId === groupId && item.amount > 0)
+          .map((item) => ({ id: item.categoryId, amount: item.amount }))
+    : [];
+  const otherRows = isOther
+    ? analytics.expenseCategories
+        .filter((item) => detail?.categoryIds?.includes(item.categoryId) && item.currentAmount > 0)
+        .map((item) => ({ id: item.categoryId, amount: item.currentAmount }))
+    : [];
+  const parentAmount = childRows.reduce((sum, item) => sum + item.amount, 0);
+  const selectedCategory = selectedChild ? hierarchy.byId.get(selectedChild) : undefined;
+  const selectedGroupCategory = selectedGroup ? hierarchy.byId.get(selectedGroup) : undefined;
+  const detailName =
+    selectedChild === groupId
+      ? t('category.unspecified')
+      : selectedCategory
+        ? displayCategoryName(selectedCategory.name, selectedCategory.is_system)
+        : selectedGroupCategory
+          ? displayCategoryName(selectedGroupCategory.name, selectedGroupCategory.is_system)
+          : (detail?.name ?? '');
   const detailQ = useCategoryDetail(
     detail
       ? {
@@ -3197,6 +3307,8 @@ function CategoryDetailSheet({
           end: analyticsInput.end,
           historyStart: analyticsInput.historyStart,
           categoryIds,
+          memberIds: analyticsInput.memberIds,
+          type,
         }
       : null,
   );
@@ -3219,7 +3331,8 @@ function CategoryDetailSheet({
     return series.map((item) => ({ label: item.label, expense: item.expense }));
   }, [firstPage?.days, dimension, range, locale]);
 
-  const share = totalExpense > 0 ? Math.round((periodExpense / totalExpense) * 100) : 0;
+  const denominator = selectedChild ? parentAmount : type === 'income' ? totalIncome : totalExpense;
+  const share = denominator > 0 ? Math.round((periodExpense / denominator) * 100) : 0;
   const days = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
   const dailyAvg = Math.round(periodExpense / days);
   const maxGroupAmount = Math.max(1, ...noteGroups.map((item) => item.amount));
@@ -3228,115 +3341,196 @@ function CategoryDetailSheet({
     <PageSheet visible={!!detail} onClose={onClose}>
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
-          <SheetHeader title={detail?.name ?? ''} />
-          <ScrollView contentContainerStyle={styles.sheetContent}>
-            <View style={[styles.detailSummaryCard, { backgroundColor: palette.card }]}>
-              <Text style={[styles.detailSummaryLabel, { color: palette.textSecondary }]}>
-                {t('report.periodCatExpense', { name: detail?.name ?? '' })}
-              </Text>
-              <Text style={[styles.detailSummaryAmount, { color: palette.expense }]}>
-                {maskAmount(formatAmount(periodExpense, '-'), hidden)}
-              </Text>
-              <Text style={[styles.detailSummaryMeta, { color: palette.textSecondary }]}>
-                {t('report.shareCountAvg', {
-                  pct: share,
-                  count: rows.length,
-                  amount: maskAmount(formatAmount(dailyAvg, ''), hidden),
-                })}
-              </Text>
-            </View>
-
-            <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
-              <View style={styles.cardHeaderRow}>
-                <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>
-                  {t('report.subcategories')}
+          <SheetHeader
+            title={detailName}
+            onBack={
+              selectedChild ? () => setSelectedChild(null) : selectedGroup ? () => setSelectedGroup(null) : undefined
+            }
+          />
+          {detailQ.isLoading ? (
+            <ActivityIndicator />
+          ) : detailQ.isError && !firstPage ? (
+            <ReportLoadErrorState palette={palette} onRetry={() => void detailQ.refetch()} />
+          ) : (
+            <ScrollView contentContainerStyle={styles.sheetContent}>
+              <View style={[styles.detailSummaryCard, { backgroundColor: palette.card }]}>
+                <Text style={[styles.detailSummaryLabel, { color: palette.textSecondary }]}>
+                  {t('category.periodAmount', { name: detailName })}
                 </Text>
-                <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>
-                  {t('report.groupByNote')}
+                <Text
+                  style={[styles.detailSummaryAmount, { color: type === 'income' ? palette.income : palette.expense }]}
+                >
+                  {maskAmount(formatAmount(periodExpense, type === 'income' ? '+' : '-'), hidden)}
+                </Text>
+                <Text style={[styles.detailSummaryMeta, { color: palette.textSecondary }]}>
+                  {t('report.shareCountAvg', {
+                    pct: share,
+                    count: firstPage?.count ?? 0,
+                    amount: maskAmount(formatAmount(dailyAvg, ''), hidden),
+                  })}
                 </Text>
               </View>
-              {noteGroups.length === 0 ? (
-                <View style={styles.emptyBox}>
-                  <SymbolView name="text.bubble" tintColor={palette.textTertiary} size={34} />
-                  <Text style={{ color: palette.textSecondary }}>{t('report.noGroupable')}</Text>
-                </View>
-              ) : (
-                <View style={styles.detailGroupList}>
-                  {noteGroups.map((item) => (
-                    <View key={item.name} style={styles.detailGroupRow}>
-                      <Text style={[styles.detailGroupName, { color: palette.textPrimary }]} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <View style={[styles.detailGroupTrack, { backgroundColor: palette.base }]}>
+
+              {(isGroup && !selectedChild) || isOther ? (
+                <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
+                  <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>
+                    {isOther ? t('category.otherGroups') : t('category.subcategories')}
+                  </Text>
+                  {(isOther ? otherRows : childRows).map((item) => {
+                    const category = hierarchy.byId.get(item.id);
+                    const name =
+                      !isOther && item.id === groupId
+                        ? t('category.unspecified')
+                        : category
+                          ? displayCategoryName(category.name, category.is_system)
+                          : t('common.uncategorized');
+                    const rowTotal = isOther ? otherRows.reduce((sum, row) => sum + row.amount, 0) : parentAmount;
+                    const colorKey = categoryColorKey(category?.name ?? '', type, category?.color_key);
+                    return (
+                      <Pressable
+                        key={item.id}
+                        accessibilityRole="button"
+                        style={styles.detailGroupRow}
+                        onPress={() => (isOther ? setSelectedGroup(item.id) : setSelectedChild(item.id))}
+                      >
                         <View
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 14,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            backgroundColor: catColors[colorKey],
+                          }}
+                        >
+                          <ExpoImage
+                            source={`sf:${categorySymbol(category?.icon ?? null, type)}`}
+                            tintColor="#FFFFFF"
+                            contentFit="contain"
+                            style={{ width: 15, height: 15 }}
+                          />
+                        </View>
+                        <Text style={[styles.detailGroupName, { color: palette.textPrimary }]}>{name}</Text>
+                        <Text style={[styles.detailGroupAmount, { color: palette.textSecondary }]}>
+                          {rowTotal > 0 ? Math.round((item.amount / rowTotal) * 100) : 0}%
+                        </Text>
+                        <Text
                           style={[
-                            styles.detailGroupFill,
-                            {
-                              backgroundColor: palette.expense,
-                              width: `${Math.max(6, (item.amount / maxGroupAmount) * 100)}%`,
-                            },
+                            styles.detailGroupAmount,
+                            { color: type === 'income' ? palette.income : palette.expense },
                           ]}
-                        />
-                      </View>
-                      <Text style={[styles.detailGroupAmount, { color: palette.expense }]} numberOfLines={1}>
-                        {maskAmount(formatAmount(item.amount, '-'), hidden)}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
-              <View style={styles.cardHeaderRow}>
-                <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>
-                  {t('report.catTrend', { name: detail?.name ?? '' })}
-                </Text>
-                <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>
-                  {t('report.last6Periods')}
-                </Text>
-              </View>
-              <CategoryDetailTrendChart series={trend} palette={palette} />
-            </View>
-
-            <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
-              <View style={styles.cardHeaderRow}>
-                <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>
-                  {t('report.detailTxns')}
-                </Text>
-                <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>
-                  {t('report.allCount', { count: firstPage?.count ?? 0 })}
-                </Text>
-              </View>
-              {rows.length === 0 ? (
-                <View style={styles.emptyBox}>
-                  <SymbolView name="list.bullet.rectangle" tintColor={palette.textTertiary} size={34} />
-                  <Text style={{ color: palette.textSecondary }}>{t('report.emptyCatExpense')}</Text>
+                        >
+                          {maskAmount(formatAmount(item.amount, ''), hidden)}
+                        </Text>
+                        <SymbolView name="chevron.right" tintColor={palette.textSecondary} size={14} />
+                      </Pressable>
+                    );
+                  })}
                 </View>
               ) : (
-                rows.map((txn) => (
-                  <View key={txn.id} style={[styles.detailRow, { borderBottomColor: palette.separator }]}>
-                    <View style={styles.flex}>
-                      <Text style={[styles.detailNote, { color: palette.textPrimary }]} numberOfLines={1}>
-                        {txn.note || t('report.noNote')}
-                      </Text>
-                      <Text style={[styles.detailDate, { color: palette.textSecondary }]}>
-                        {new Date(txn.occurredAt).toLocaleDateString(intlLocale())}
-                      </Text>
-                    </View>
-                    <Text style={[styles.detailAmount, { color: palette.expense }]} numberOfLines={1}>
-                      {maskAmount(formatAmount(txn.amount, '-'), hidden)}
+                <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
+                  <View style={styles.cardHeaderRow}>
+                    <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>
+                      {t('report.groupByNote')}
                     </Text>
                   </View>
-                ))
+                  {noteGroups.length === 0 ? (
+                    <View style={styles.emptyBox}>
+                      <SymbolView name="text.bubble" tintColor={palette.textTertiary} size={34} />
+                      <Text style={{ color: palette.textSecondary }}>{t('report.noGroupable')}</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.detailGroupList}>
+                      {noteGroups.map((item) => (
+                        <View key={item.name} style={styles.detailGroupRow}>
+                          <Text style={[styles.detailGroupName, { color: palette.textPrimary }]} numberOfLines={1}>
+                            {item.name}
+                          </Text>
+                          <View style={[styles.detailGroupTrack, { backgroundColor: palette.base }]}>
+                            <View
+                              style={[
+                                styles.detailGroupFill,
+                                {
+                                  backgroundColor: type === 'income' ? palette.income : palette.expense,
+                                  width: `${Math.max(6, (item.amount / maxGroupAmount) * 100)}%`,
+                                },
+                              ]}
+                            />
+                          </View>
+                          <Text
+                            style={[
+                              styles.detailGroupAmount,
+                              { color: type === 'income' ? palette.income : palette.expense },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {maskAmount(formatAmount(item.amount, type === 'income' ? '+' : '-'), hidden)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
               )}
-              {detailQ.hasNextPage ? (
-                <Pressable style={styles.detailLoadMore} onPress={() => detailQ.fetchNextPage()}>
-                  <Text style={{ color: palette.accent }}>{t('common.loadMore')}</Text>
-                </Pressable>
+
+              {type === 'expense' ? (
+                <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
+                  <View style={styles.cardHeaderRow}>
+                    <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>
+                      {t('report.catTrend', { name: detailName })}
+                    </Text>
+                    <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>
+                      {t('report.last6Periods')}
+                    </Text>
+                  </View>
+                  <CategoryDetailTrendChart series={trend} palette={palette} />
+                </View>
               ) : null}
-            </View>
-          </ScrollView>
+
+              {(!isGroup && !isOther) || selectedChild ? (
+                <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
+                  <View style={styles.cardHeaderRow}>
+                    <Text style={[styles.detailSectionTitle, { color: palette.textPrimary }]}>
+                      {t('report.detailTxns')}
+                    </Text>
+                    <Text style={[styles.detailSectionMeta, { color: palette.textSecondary }]}>
+                      {t('report.allCount', { count: firstPage?.count ?? 0 })}
+                    </Text>
+                  </View>
+                  {rows.length === 0 ? (
+                    <View style={styles.emptyBox}>
+                      <SymbolView name="list.bullet.rectangle" tintColor={palette.textTertiary} size={34} />
+                      <Text style={{ color: palette.textSecondary }}>{t('report.emptyCatExpense')}</Text>
+                    </View>
+                  ) : (
+                    rows.map((txn) => (
+                      <View key={txn.id} style={[styles.detailRow, { borderBottomColor: palette.separator }]}>
+                        <View style={styles.flex}>
+                          <Text style={[styles.detailNote, { color: palette.textPrimary }]} numberOfLines={1}>
+                            {txn.note || t('report.noNote')}
+                          </Text>
+                          <Text style={[styles.detailDate, { color: palette.textSecondary }]}>
+                            {new Date(txn.occurredAt).toLocaleDateString(intlLocale())}
+                          </Text>
+                        </View>
+                        <Text
+                          style={[styles.detailAmount, { color: type === 'income' ? palette.income : palette.expense }]}
+                          numberOfLines={1}
+                        >
+                          {maskAmount(formatAmount(txn.amount, type === 'income' ? '+' : '-'), hidden)}
+                        </Text>
+                      </View>
+                    ))
+                  )}
+                  {detailQ.hasNextPage ? (
+                    <Pressable style={styles.detailLoadMore} onPress={() => detailQ.fetchNextPage()}>
+                      <Text style={{ color: palette.accent }}>{t('common.loadMore')}</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
+            </ScrollView>
+          )}
         </SafeAreaView>
       </View>
     </PageSheet>

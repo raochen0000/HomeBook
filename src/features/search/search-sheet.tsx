@@ -42,7 +42,8 @@ import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import {
   fetchTransaction,
-  useCategories,
+  useAllCategories,
+  useCategoryLayout,
   useFamilyMembers,
   useMyFamily,
   useMyProfile,
@@ -59,6 +60,13 @@ import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { RecordSheet } from '@/features/record/record-sheet';
 import { alertOk, categorySearchNames, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
+import {
+  buildCategoryHierarchy,
+  categoryDescendantIds,
+  categoryPath,
+  matchingCategoryIds,
+  type CategoryHierarchy,
+} from '@/lib/category-hierarchy';
 import { clockTime, dayKey, humanDay, signForType } from '@/lib/format';
 import { memberDisplayName } from '@/lib/member-name';
 import {
@@ -149,7 +157,12 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const { locale } = useLocalePreference();
   const catColors = useCategoryColors();
 
-  const catsQ = useCategories();
+  const catsQ = useAllCategories();
+  const layoutQ = useCategoryLayout();
+  const hierarchy = useMemo(
+    () => buildCategoryHierarchy(catsQ.data ?? [], layoutQ.data ?? []),
+    [catsQ.data, layoutQ.data],
+  );
   const membersQ = useFamilyMembers();
   const familyQ = useMyFamily();
   const profileQ = useMyProfile();
@@ -222,17 +235,14 @@ function SearchBody({ onClose }: { onClose: () => void }) {
 
   const searchInput = useMemo(() => {
     void locale;
-    if (!valid || !hasCurrentQuery) return null;
+    if (!valid || !hasCurrentQuery || !catsQ.isSuccess || !layoutQ.isSuccess) return null;
     const keywordLower = deferredFilters.keyword.trim().toLowerCase();
-    const keywordCategoryIds = keywordLower
-      ? (catsQ.data ?? [])
-          .filter((category) =>
-            categorySearchNames(category.name, category.is_system).some((name) =>
-              name.toLowerCase().includes(keywordLower),
-            ),
-          )
-          .map((category) => category.id)
-      : [];
+    const keywordCategoryIds = matchingCategoryIds(
+      keywordLower,
+      hierarchy,
+      (category) => categorySearchNames(category.name, category.is_system),
+      t('category.unspecified'),
+    );
     const keywordRecorderIds = keywordLower
       ? (membersQ.data ?? [])
           .filter(
@@ -261,7 +271,17 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       amountMin: minCents,
       amountMax: maxCents,
     };
-  }, [valid, hasCurrentQuery, deferredFilters, catsQ.data, membersQ.data, myId, locale]);
+  }, [
+    valid,
+    hasCurrentQuery,
+    deferredFilters,
+    catsQ.isSuccess,
+    layoutQ.isSuccess,
+    membersQ.data,
+    myId,
+    locale,
+    hierarchy,
+  ]);
   const searchQ = useSearchTransactions(searchInput);
 
   const { groups } = useMemo(() => {
@@ -283,6 +303,12 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     const map = new Map<string, ResultGroup>();
     for (const txn of rows) {
       const cat = catById.get(txn.categoryId);
+      const layout = hierarchy.layoutById.get(txn.categoryId);
+      const parent = layout?.parent_category_id
+        ? catById.get(layout.parent_category_id)
+        : layout?.is_group
+          ? cat
+          : null;
       const ttype = txn.type;
       const isSavings = txn.source !== 'normal';
       // 储蓄类在备注行单独标注，金额不并入合计口径（已在 lib/search.ts 处理）。
@@ -304,7 +330,8 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       group.totalCents += ttype === 'income' ? txn.amount : -txn.amount;
       group.rows.push({
         id: txn.id,
-        title: categoryNameById.get(txn.categoryId) ?? uncategorized,
+        title: layout?.is_group ? t('category.unspecified') : (categoryNameById.get(txn.categoryId) ?? uncategorized),
+        categoryParent: parent ? displayCategoryName(parent.name, parent.is_system) : undefined,
         note,
         symbol: categorySymbol(cat?.icon ?? null, ttype),
         iconColor: catColors[categoryColorKey(cat?.name ?? '', ttype, cat?.color_key)],
@@ -317,7 +344,18 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       });
     }
     return { groups: Array.from(map.values()) };
-  }, [searchQ.data, catsQ.data, membersQ.data, profileQ.data, myId, avatarFiles, catColors, palette, categoryNameById]);
+  }, [
+    searchQ.data,
+    catsQ.data,
+    membersQ.data,
+    profileQ.data,
+    myId,
+    avatarFiles,
+    catColors,
+    palette,
+    categoryNameById,
+    hierarchy,
+  ]);
 
   const categories = catsQ.data ?? [];
   const members = membersQ.data ?? [];
@@ -398,12 +436,29 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     : types.has('income')
       ? t('record.income')
       : t('search.type');
-  const categoryLabel =
-    categoryIds.size > 0
-      ? summarizeSelectedLabels(
-          categories.filter((c) => categoryIds.has(c.id)).map((c) => displayCategoryName(c.name, c.is_system)),
-        )
-      : t('search.category');
+  const selectedCategoryLabels: string[] = [];
+  const summarizedIds = new Set<string>();
+  for (const category of categories) {
+    if (!hierarchy.layoutById.get(category.id)?.is_group) continue;
+    const ids = categoryDescendantIds(category.id, hierarchy);
+    if (ids.every((id) => categoryIds.has(id))) {
+      selectedCategoryLabels.push(displayCategoryName(category.name, category.is_system));
+      ids.forEach((id) => summarizedIds.add(id));
+    }
+  }
+  for (const category of categories) {
+    if (categoryIds.has(category.id) && !summarizedIds.has(category.id)) {
+      selectedCategoryLabels.push(
+        categoryPath(
+          category.id,
+          hierarchy,
+          (item) => displayCategoryName(item.name, item.is_system),
+          t('category.unspecified'),
+        ) ?? displayCategoryName(category.name, category.is_system),
+      );
+    }
+  }
+  const categoryLabel = categoryIds.size > 0 ? summarizeSelectedLabels(selectedCategoryLabels) : t('search.category');
   const memberLabel =
     recorderIds.size > 0
       ? summarizeSelectedLabels(
@@ -502,8 +557,21 @@ function SearchBody({ onClose }: { onClose: () => void }) {
           <InvalidFiltersEmptyState />
         ) : presentation === 'history' ? (
           <HistoryCloud history={history} onPick={setKeyword} />
-        ) : presentation === 'skeleton' || searchQ.isLoading ? (
+        ) : presentation === 'skeleton' || searchQ.isLoading || catsQ.isLoading || layoutQ.isLoading ? (
           <SearchResultsSkeleton />
+        ) : catsQ.isError || layoutQ.isError || searchQ.isError ? (
+          <View style={styles.center}>
+            <Text style={{ color: palette.textSecondary }}>{t('search.loadFailed')}</Text>
+            <Pressable
+              onPress={() => {
+                void catsQ.refetch();
+                void layoutQ.refetch();
+                void searchQ.refetch();
+              }}
+            >
+              <Text style={{ color: palette.accent }}>{t('common.retry')}</Text>
+            </Pressable>
+          </View>
         ) : groups.length === 0 ? (
           <NoResultEmpty filtersActive={filtersActive} onClearFilters={clearFilters} />
         ) : (
@@ -539,6 +607,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         setCustomTo={setCustomTo}
         dateError={errors.date}
         categories={categories}
+        hierarchy={hierarchy}
         categoryIds={categoryIds}
         setCategoryIds={setCategoryIds}
         members={members}
@@ -946,6 +1015,7 @@ type DropdownProps = {
   setCustomTo: (d: Date) => void;
   dateError: boolean;
   categories: { id: string; name: string; is_system: boolean }[];
+  hierarchy: CategoryHierarchy;
   categoryIds: Set<string>;
   setCategoryIds: (s: Set<string>) => void;
   members: { id: string; nickname: string; departed: boolean }[];
@@ -1013,6 +1083,7 @@ function FilterDropdown(props: DropdownProps) {
 function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
   const palette = usePalette();
   useLocalePreference();
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const {
     kind,
     types,
@@ -1027,6 +1098,7 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
     setCustomTo,
     dateError,
     categories,
+    hierarchy,
     categoryIds,
     setCategoryIds,
     members,
@@ -1119,15 +1191,76 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
           onPress={() => onFilterChange(() => setCategoryIds(new Set()))}
           disabled={filterControlsLocked}
         />
-        {categories.map((c) => (
-          <OptionRow
-            key={c.id}
-            label={displayCategoryName(c.name, c.is_system)}
-            active={categoryIds.has(c.id)}
-            onPress={() => toggle(categoryIds, setCategoryIds, c.id)}
-            disabled={filterControlsLocked}
-          />
-        ))}
+        {categories
+          .filter((category) => !hierarchy.layoutById.get(category.id)?.parent_category_id)
+          .map((c) => {
+            const isGroup = !!hierarchy.layoutById.get(c.id)?.is_group;
+            const ids = isGroup ? categoryDescendantIds(c.id, hierarchy) : [c.id];
+            const selected = ids.filter((id) => categoryIds.has(id)).length;
+            const expanded = expandedGroups.has(c.id);
+            const selectGroup = () =>
+              onFilterChange(() => {
+                const next = new Set(categoryIds);
+                const remove = ids.every((id) => next.has(id));
+                for (const id of ids) {
+                  if (remove) next.delete(id);
+                  else next.add(id);
+                }
+                setCategoryIds(next);
+              });
+            return (
+              <View key={c.id}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {isGroup ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={displayCategoryName(c.name, c.is_system)}
+                      accessibilityState={{ expanded }}
+                      style={{ padding: Space[3] }}
+                      onPress={() => {
+                        const next = new Set(expandedGroups);
+                        if (expanded) next.delete(c.id);
+                        else next.add(c.id);
+                        setExpandedGroups(next);
+                      }}
+                    >
+                      <SymbolView
+                        name={expanded ? 'chevron.down' : 'chevron.right'}
+                        tintColor={palette.textSecondary}
+                        size={15}
+                      />
+                    </Pressable>
+                  ) : null}
+                  <View style={styles.flex}>
+                    <OptionRow
+                      label={`${displayCategoryName(c.name, c.is_system)}${isGroup && selected > 0 && selected < ids.length ? ` (${t('category.partial')})` : ''}`}
+                      active={selected === ids.length}
+                      onPress={isGroup ? selectGroup : () => toggle(categoryIds, setCategoryIds, c.id)}
+                      disabled={filterControlsLocked}
+                    />
+                  </View>
+                </View>
+                {isGroup && expanded
+                  ? ids.map((id) => {
+                      const child = hierarchy.byId.get(id);
+                      if (!child) return null;
+                      const name =
+                        id === c.id ? t('category.unspecified') : displayCategoryName(child.name, child.is_system);
+                      return (
+                        <View key={id} style={{ paddingLeft: Space[6] }}>
+                          <OptionRow
+                            label={name}
+                            active={categoryIds.has(id)}
+                            onPress={() => toggle(categoryIds, setCategoryIds, id)}
+                            disabled={filterControlsLocked}
+                          />
+                        </View>
+                      );
+                    })
+                  : null}
+              </View>
+            );
+          })}
       </ScrollView>
     );
   }

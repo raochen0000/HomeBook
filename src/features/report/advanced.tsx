@@ -7,7 +7,7 @@
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Defs, G, Line, Path, Pattern, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
@@ -587,10 +587,12 @@ export function IncomeStructureCard({
   slices,
   palette,
   hidden,
+  onOpenCategory,
 }: {
   slices: IncomeSlice[];
   palette: Palette;
   hidden?: boolean;
+  onOpenCategory?: (slice: IncomeSlice) => void;
 }) {
   if (slices.length === 0) return null;
   const total = slices.reduce((s, x) => s + x.amount, 0);
@@ -613,7 +615,7 @@ export function IncomeStructureCard({
           return (
             <View key={s.id}>
               {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
-              <View style={styles.momRow}>
+              <Pressable style={styles.momRow} accessibilityRole="button" onPress={() => onOpenCategory?.(s)}>
                 <View style={[styles.dot, { backgroundColor: s.color }]}>
                   <SymbolView name={s.symbol as Sym} tintColor="#FFFFFF" size={15} />
                 </View>
@@ -625,7 +627,7 @@ export function IncomeStructureCard({
                 <ThemedText style={[styles.itemAmount, { color: palette.income }]}>
                   {maskAmount(formatAmount(s.amount, ''), !!hidden)}
                 </ThemedText>
-              </View>
+              </Pressable>
             </View>
           );
         })}

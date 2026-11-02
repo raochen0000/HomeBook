@@ -19,6 +19,7 @@ export const FAMILY_LIVE_QUERY_KEYS = [
   ['savings_entries'],
   ['categories'],
   queryKeys.hiddenCategories,
+  queryKeys.categoryLayout,
   queryKeys.recurringRules,
   queryKeys.notifications,
 ] as const;

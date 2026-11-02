@@ -11,7 +11,7 @@ import { useMemo, useState } from 'react';
 import { Alert, View } from 'react-native';
 
 import {
-  useCategories,
+  useAllCategories,
   useDeleteRecurringRule,
   useGenerateDueRecurring,
   useMyFamily,
@@ -34,7 +34,7 @@ export default function RecurringScreen() {
   useLocalePreference();
   const catColors = useCategoryColors();
   const rulesQ = useRecurringRules();
-  const catsQ = useCategories();
+  const catsQ = useAllCategories();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
   const updateM = useUpdateRecurringRule();

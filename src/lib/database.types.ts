@@ -293,6 +293,33 @@ export type Database = {
           },
         ];
       };
+      family_category_layout: {
+        Row: {
+          family_id: string;
+          category_id: string;
+          parent_category_id: string | null;
+          is_group: boolean;
+          legacy_entry: boolean;
+          created_at: string;
+        };
+        Insert: {
+          family_id: string;
+          category_id: string;
+          parent_category_id?: string | null;
+          is_group?: boolean;
+          legacy_entry?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          family_id?: string;
+          category_id?: string;
+          parent_category_id?: string | null;
+          is_group?: boolean;
+          legacy_entry?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       family_hidden_categories: {
         Row: {
           category_id: string;
@@ -1086,6 +1113,46 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      create_hierarchical_category: {
+        Args: {
+          p_family_id: string;
+          p_name: string;
+          p_icon: string;
+          p_type: string;
+          p_color_key: string;
+          p_parent_category_id?: string | null;
+          p_is_group?: boolean;
+        };
+        Returns: Database['public']['Tables']['categories']['Row'];
+      };
+      get_category_move_impact: {
+        Args: { p_family_id: string; p_category_id: string; p_parent_id: string | null; p_period: string };
+        Returns: Json;
+      };
+      save_family_budget: {
+        Args: {
+          p_family_id: string;
+          p_period: string;
+          p_total_amount: number;
+          p_alert_enabled: boolean;
+          p_categories: Json;
+        };
+        Returns: undefined;
+      };
+      get_report_category_detail_v2: {
+        Args: {
+          p_start: string;
+          p_end: string;
+          p_history_start: string;
+          p_category_ids: string[];
+          p_member_ids: string[];
+          p_type: string;
+          p_cursor_occurred_at?: string | null;
+          p_cursor_id?: string | null;
+          p_page_size?: number;
+        };
+        Returns: Json;
+      };
       claim_due_push_notifications: {
         Args: { p_claim_token: string; p_limit?: number };
         Returns: {

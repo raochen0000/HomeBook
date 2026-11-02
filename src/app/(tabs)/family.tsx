@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   useBudget,
   useBudgetProgress,
-  useCategories,
+  useAllCategories,
   useCreateFamily,
   useDissolveFamily,
   useFamilyActivity,
@@ -71,7 +71,7 @@ export default function FamilyScreen() {
   const membershipsQ = useMemberships();
   const ledgerMembersQ = useFamilyMembers();
   const activityQ = useFamilyActivity();
-  const categoriesQ = useCategories();
+  const categoriesQ = useAllCategories();
   const budgetQ = useBudget(period);
   const budgetProgressQ = useBudgetProgress(period);
   const savingsQ = useSavingsGoals();

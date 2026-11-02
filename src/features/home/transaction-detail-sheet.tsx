@@ -10,13 +10,14 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useCategories, useFamilyMembers, useMyProfile, type Transaction } from '@/api';
+import { useAllCategories, useCategoryLayout, useFamilyMembers, useMyProfile, type Transaction } from '@/api';
 import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, useCategoryColors, usePalette } from '@/constants/design';
 import { displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { i18n } from '@/i18n/instance';
 import { fromI18nLanguage, INTL_LOCALE } from '@/i18n/locale';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
+import { buildCategoryHierarchy, categoryPath } from '@/lib/category-hierarchy';
 import { clockTime, formatAmount, signForType } from '@/lib/format';
 import { memberDisplayName } from '@/lib/member-name';
 
@@ -86,7 +87,8 @@ function Body({
   useLocalePreference();
   const insets = useSafeAreaInsets();
   const catColors = useCategoryColors();
-  const categoriesQ = useCategories();
+  const categoriesQ = useAllCategories();
+  const layoutQ = useCategoryLayout();
   const membersQ = useFamilyMembers();
   const profileQ = useMyProfile();
 
@@ -111,6 +113,19 @@ function Body({
 
   const ttype = (txn.type === 'income' ? 'income' : 'expense') as 'income' | 'expense';
   const cat = (categoriesQ.data ?? []).find((c) => c.id === txn.category_id) ?? null;
+  const hierarchy = buildCategoryHierarchy(categoriesQ.data ?? [], layoutQ.data ?? []);
+  const path = categoryPath(
+    txn.category_id,
+    hierarchy,
+    (category) => displayCategoryName(category.name, category.is_system),
+    t('category.unspecified'),
+  );
+  const pathSeparator =
+    path &&
+    (hierarchy.layoutById.get(txn.category_id)?.is_group ||
+      hierarchy.layoutById.get(txn.category_id)?.parent_category_id)
+      ? path.indexOf(' / ')
+      : -1;
   const members = membersQ.data ?? [];
   const myId = profileQ.data?.id;
   const memberOf = (id: string) => members.find((member) => member.id === id);
@@ -177,8 +192,15 @@ function Body({
               />
             </View>
             <View style={styles.headText}>
-              <Text style={[styles.catName, { color: palette.textPrimary }]} numberOfLines={1}>
-                {cat ? displayCategoryName(cat.name, cat.is_system) : t('common.uncategorized')}
+              <Text style={[styles.catName, { color: palette.textPrimary }]} numberOfLines={2}>
+                {pathSeparator >= 0 && path ? (
+                  <>
+                    <Text style={{ color: palette.textSecondary }}>{path.slice(0, pathSeparator + 3)}</Text>
+                    {path.slice(pathSeparator + 3)}
+                  </>
+                ) : (
+                  (path ?? t('common.uncategorized'))
+                )}
               </Text>
               <Text style={[styles.typeTag, { color: palette.textSecondary }]}>
                 {ttype === 'income' ? t('record.income') : t('record.expense')}

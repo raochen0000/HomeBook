@@ -8,18 +8,25 @@
 import { Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
 import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Fragment, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  fetchCategoryMoveImpact,
   useArchiveCategory,
+  useBudget,
+  useBudgetProgress,
   useCategories,
+  useCategoryLayout,
   useCreateCategory,
+  useEnableCategoryGroup,
   useHiddenCategoryIds,
   useHideSystemCategory,
   useMyFamily,
   useMyProfile,
+  useMoveCategory,
+  useRecurringRules,
   useUnhideSystemCategory,
   useUpdateCategory,
   type Category,
@@ -35,6 +42,7 @@ import {
   customCategoryColorKey,
   DEFAULT_CUSTOM_CATEGORY_COLOR,
 } from '@/lib/category-style';
+import { currentPeriodInTimeZone, formatAmount } from '@/lib/format';
 
 type SymbolName = Extract<SymbolViewProps['name'], string>;
 type IconGroup = { title: string; icons: readonly SymbolName[] };
@@ -259,7 +267,11 @@ const DEFAULT_EXPENSE_ICON = 'gamecontroller.fill';
 const DEFAULT_INCOME_ICON = 'dollarsign.circle.fill';
 const CATEGORY_NAME_MAX_LENGTH = 6;
 
-type ViewState = { mode: 'list' } | { mode: 'new'; type: CategoryType } | { mode: 'edit'; category: Category };
+type ViewState =
+  | { mode: 'list' }
+  | { mode: 'new'; type: CategoryType; parentId?: string; isGroup?: boolean }
+  | { mode: 'edit'; category: Category }
+  | { mode: 'move'; category: Category };
 
 /** 兜底分类不可隐藏，保证记账时每种类型至少有一个可选分类。 */
 const PROTECTED_SYSTEM_NAMES = new Set(['其他支出', '其他收入']);
@@ -278,6 +290,7 @@ function Body() {
   const [view, setView] = useState<ViewState>({ mode: 'list' });
 
   // 单壳内切换「列表 / 编辑器」，不再嵌套第二层 pageSheet（DESIGN §9.9：pageSheet 不叠加）。
+  if (view.mode === 'move') return <MoveCategory category={view.category} onBack={() => setView({ mode: 'list' })} />;
   if (view.mode !== 'list') {
     return <Editor view={view} onBack={() => setView({ mode: 'list' })} />;
   }
@@ -290,33 +303,132 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
   useLocalePreference();
   const profileQ = useMyProfile();
   const familyQ = useMyFamily();
+  const period = currentPeriodInTimeZone(familyQ.data?.timezone);
+  const budgetQ = useBudget(period);
+  const progressQ = useBudgetProgress(period);
+  const recurringQ = useRecurringRules();
   const catsQ = useCategories();
+  const layoutQ = useCategoryLayout();
   const hiddenQ = useHiddenCategoryIds();
   const archiveM = useArchiveCategory();
   const hideM = useHideSystemCategory();
   const unhideM = useUnhideSystemCategory();
+  const enableGroupM = useEnableCategoryGroup();
 
   const isOwner = !!familyQ.data && familyQ.data.owner_user_id === profileQ.data?.id;
   const familyId = familyQ.data?.id;
   const hidden = hiddenQ.data ?? new Set<string>();
   const [type, setType] = useState<CategoryType>('expense');
+  const layoutById = useMemo(
+    () => new Map((layoutQ.data ?? []).map((item) => [item.category_id, item])),
+    [layoutQ.data],
+  );
 
   const { system, custom } = useMemo(() => {
-    const list = (catsQ.data ?? []).filter((c) => c.type === type && !c.name.startsWith('储蓄·'));
+    const list = (catsQ.data ?? []).filter(
+      (c) => c.type === type && !c.name.startsWith('储蓄·') && !layoutById.get(c.id)?.parent_category_id,
+    );
     return {
       system: list.filter((c) => c.is_system),
       custom: list.filter((c) => !c.is_system),
     };
-  }, [catsQ.data, type]);
+  }, [catsQ.data, type, layoutById]);
+
+  const canShowImpact = () => {
+    if (budgetQ.isSuccess && recurringQ.isSuccess && layoutQ.isSuccess) return true;
+    Alert.alert(t('account.saveFailed'), t('category.loadBeforeChange'), [
+      {
+        text: t('common.retry'),
+        onPress: () => {
+          void layoutQ.refetch();
+          void budgetQ.refetch();
+          void recurringQ.refetch();
+        },
+      },
+      { text: t('common.cancel'), style: 'cancel' },
+    ]);
+    return false;
+  };
+
+  const impactMessage = (category: Category, action: 'archive' | 'hide') => {
+    const children = (layoutQ.data ?? []).filter((item) => item.parent_category_id === category.id);
+    const visibleChildren = children.filter((item) =>
+      (catsQ.data ?? []).some((child) => child.id === item.category_id && !hidden.has(child.id)),
+    );
+    const affectedIds = new Set([category.id, ...children.map((item) => item.category_id)]);
+    const rules = (recurringQ.data ?? []).filter((rule) => rule.enabled && affectedIds.has(rule.category_id));
+    const budget = budgetQ.data?.categories.find((item) => item.category_id === category.id);
+    const messages: string[] = [];
+    if (layoutById.get(category.id)?.is_group)
+      messages.push(t('category.impactChildren', { count: visibleChildren.length }));
+    if (budget)
+      messages.push(
+        t(action === 'archive' ? 'category.impactBudgetArchived' : 'category.impactBudgetHidden', {
+          amount: formatAmount(budget.amount, ''),
+        }),
+      );
+    if (rules.length > 0) messages.push(t('category.impactRecurring', { count: rules.length }));
+    return messages.length ? `\n${messages.join('\n')}` : '';
+  };
+
+  const addChild = (c: Category) => {
+    if (!familyId) return;
+    const openEditor = () => setView({ mode: 'new', type, parentId: c.id });
+    if (layoutById.get(c.id)?.is_group) {
+      openEditor();
+      return;
+    }
+    if (!layoutQ.isSuccess || !budgetQ.isSuccess || !progressQ.isSuccess) {
+      Alert.alert(t('account.saveFailed'), t('category.loadBeforeChange'), [
+        {
+          text: t('common.retry'),
+          onPress: () => {
+            void layoutQ.refetch();
+            void budgetQ.refetch();
+            void progressQ.refetch();
+          },
+        },
+        { text: t('common.cancel'), style: 'cancel' },
+      ]);
+      return;
+    }
+    const budget = budgetQ.data?.categories.find((item) => item.category_id === c.id);
+    if (budget && !isOwner) {
+      Alert.alert(t('category.ownerOnlyDisable'), t('category.moveOwnerBudget'), alertOk());
+      return;
+    }
+    const budgetInfo = budget
+      ? `\n${t('category.groupBudgetInfo', { budget: formatAmount(budget.amount, ''), used: formatAmount(progressQ.data?.byCategory.get(c.id) ?? 0, '') })}`
+      : '';
+    Alert.alert(
+      t('category.makeGroupTitle', { name: displayCategoryName(c.name, c.is_system) }),
+      `${t('category.makeGroupBody')}${budgetInfo}`,
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('category.makeGroup'),
+          onPress: async () => {
+            try {
+              await enableGroupM.mutateAsync({ familyId, categoryId: c.id });
+              openEditor();
+            } catch (error) {
+              Alert.alert(t('account.saveFailed'), error instanceof Error ? error.message : String(error), alertOk());
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const onArchive = (c: Category) => {
     if (!isOwner) {
       Alert.alert(t('category.ownerOnlyDisable'), t('category.ownerOnlyDisableBody'), alertOk());
       return;
     }
+    if (!canShowImpact()) return;
     Alert.alert(
       t('category.disableTitle'),
-      t('category.disableBody', { name: displayCategoryName(c.name, c.is_system) }),
+      `${t('category.disableBody', { name: displayCategoryName(c.name, c.is_system) })}${impactMessage(c, 'archive')}`,
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
@@ -357,30 +469,57 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
       void run(); // 恢复显示无需确认
       return;
     }
-    Alert.alert(t('category.hideTitle'), t('category.hideBody', { name: displayCategoryName(c.name, c.is_system) }), [
-      { text: t('common.cancel'), style: 'cancel' },
-      { text: t('common.hide'), style: 'destructive', onPress: () => void run() },
-    ]);
+    if (!canShowImpact()) return;
+    Alert.alert(
+      t('category.hideTitle'),
+      `${t('category.hideBody', { name: displayCategoryName(c.name, c.is_system) })}${impactMessage(c, 'hide')}`,
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('common.hide'), style: 'destructive', onPress: () => void run() },
+      ],
+    );
   };
 
-  const renderRow = (c: Category, editable: boolean) => {
+  const renderRow = (c: Category, editable: boolean, child = false) => {
     const color = catColors[categoryColorKey(c.name, type, c.color_key)];
     const isHidden = c.is_system && hidden.has(c.id);
     const isProtected = c.is_system && PROTECTED_SYSTEM_NAMES.has(c.name);
     return (
-      <Pressable
-        key={c.id}
-        style={styles.row}
-        disabled={!editable}
-        onPress={editable ? () => setView({ mode: 'edit', category: c }) : undefined}
-      >
-        <View style={[styles.iconDot, { backgroundColor: color, opacity: isHidden ? 0.4 : 1 }]}>
-          <SymbolView name={(c.icon ?? 'circle.fill') as SymbolViewProps['name']} tintColor="#FFFFFF" size={17} />
-        </View>
-        <Text style={[styles.rowName, { color: palette.textPrimary, opacity: isHidden ? 0.4 : 1 }]}>
-          {displayCategoryName(c.name, c.is_system)}
-        </Text>
-        <View style={styles.flex} />
+      <View key={c.id} style={styles.row}>
+        <Pressable
+          style={styles.categoryMain}
+          disabled={!editable}
+          onPress={editable ? () => setView({ mode: 'edit', category: c }) : undefined}
+        >
+          <View style={[styles.iconDot, { backgroundColor: color, opacity: isHidden ? 0.4 : 1 }]}>
+            <SymbolView name={(c.icon ?? 'circle.fill') as SymbolViewProps['name']} tintColor="#FFFFFF" size={17} />
+          </View>
+          <Text style={[styles.rowName, { color: palette.textPrimary, opacity: isHidden ? 0.4 : 1 }]}>
+            {displayCategoryName(c.name, c.is_system)}
+          </Text>
+        </Pressable>
+        {!child && !isHidden ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('category.addChild')}
+            hitSlop={10}
+            onPress={() => addChild(c)}
+            style={styles.archiveBtn}
+          >
+            <SymbolView name="plus" tintColor={palette.accent} size={18} />
+          </Pressable>
+        ) : null}
+        {!layoutById.get(c.id)?.is_group && !isHidden && !isProtected ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('category.move')}
+            hitSlop={10}
+            onPress={() => setView({ mode: 'move', category: c })}
+            style={styles.archiveBtn}
+          >
+            <SymbolView name="arrow.right.arrow.left" tintColor={palette.textSecondary} size={16} />
+          </Pressable>
+        ) : null}
         {c.is_system ? (
           isProtected ? (
             <Text style={[styles.sysTag, { color: palette.textTertiary }]}>{t('category.system')}</Text>
@@ -402,9 +541,46 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
             <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
           </>
         )}
-      </Pressable>
+      </View>
     );
   };
+
+  const renderTree = (category: Category) => {
+    const children = (catsQ.data ?? []).filter((item) => layoutById.get(item.id)?.parent_category_id === category.id);
+    return (
+      <Fragment key={category.id}>
+        {renderRow(category, !category.is_system)}
+        {children.map((child) => (
+          <View key={child.id} style={{ paddingLeft: Space[5] }}>
+            {renderRow(child, !child.is_system, true)}
+          </View>
+        ))}
+        {layoutById.get(category.id)?.is_group && children.length === 0 ? (
+          <Text style={{ color: palette.textSecondary, paddingLeft: Space[6], paddingBottom: Space[2] }}>
+            {t('category.groupEmpty')}
+          </Text>
+        ) : null}
+      </Fragment>
+    );
+  };
+
+  if (catsQ.isLoading || layoutQ.isLoading || hiddenQ.isLoading) return <ActivityIndicator />;
+  if (catsQ.isError || layoutQ.isError || hiddenQ.isError)
+    return (
+      <View style={styles.root}>
+        <SheetHeader title={t('category.title')} />
+        <Pressable
+          style={styles.content}
+          onPress={() => {
+            void catsQ.refetch();
+            void layoutQ.refetch();
+            void hiddenQ.refetch();
+          }}
+        >
+          <Text style={{ color: palette.accent }}>{t('common.retry')}</Text>
+        </Pressable>
+      </View>
+    );
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
@@ -427,31 +603,25 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
         <ScrollView contentContainerStyle={styles.content}>
           {/* 新增 */}
           <Pressable
-            onPress={() => setView({ mode: 'new', type })}
+            onPress={() => setView({ mode: 'new', type, isGroup: true })}
             style={[styles.addRow, { backgroundColor: palette.card }]}
           >
             <View style={[styles.iconDot, { backgroundColor: palette.accent }]}>
               <SymbolView name="plus" tintColor={palette.onAccent} size={17} weight="semibold" />
             </View>
-            <Text style={[styles.rowName, { color: palette.accent }]}>
-              {type === 'expense' ? t('category.addExpense') : t('category.addIncome')}
-            </Text>
+            <Text style={[styles.rowName, { color: palette.accent }]}>{t('category.addGroup')}</Text>
           </Pressable>
 
           {custom.length > 0 ? (
             <View style={styles.group}>
               <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('category.custom')}</Text>
-              <View style={[styles.card, { backgroundColor: palette.card }]}>
-                {custom.map((c) => renderRow(c, true))}
-              </View>
+              <View style={[styles.card, { backgroundColor: palette.card }]}>{custom.map(renderTree)}</View>
             </View>
           ) : null}
 
           <View style={styles.group}>
             <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('category.systemPreset')}</Text>
-            <View style={[styles.card, { backgroundColor: palette.card }]}>
-              {system.map((c) => renderRow(c, false))}
-            </View>
+            <View style={[styles.card, { backgroundColor: palette.card }]}>{system.map(renderTree)}</View>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -459,13 +629,104 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
   );
 }
 
+function MoveCategory({ category, onBack }: { category: Category; onBack: () => void }) {
+  const palette = useSheetPalette();
+  const familyQ = useMyFamily();
+  const profileQ = useMyProfile();
+  const catsQ = useCategories();
+  const layoutQ = useCategoryLayout();
+  const hiddenQ = useHiddenCategoryIds();
+  const moveM = useMoveCategory();
+  const [checking, setChecking] = useState(false);
+  const currentParent =
+    (layoutQ.data ?? []).find((item) => item.category_id === category.id)?.parent_category_id ?? null;
+  const groups = (catsQ.data ?? []).filter(
+    (item) =>
+      item.type === category.type &&
+      !hiddenQ.data?.has(item.id) &&
+      (layoutQ.data ?? []).some((row) => row.category_id === item.id && row.is_group),
+  );
+  const choose = async (parentId: string | null) => {
+    const familyId = familyQ.data?.id;
+    if (!familyId || parentId === currentParent || checking) return;
+    setChecking(true);
+    let message = t('category.moveConfirmBody');
+    try {
+      const impact = await fetchCategoryMoveImpact(
+        familyId,
+        category.id,
+        parentId,
+        currentPeriodInTimeZone(familyQ.data?.timezone),
+      );
+      if (impact.hasOwnBudget) {
+        Alert.alert(t('category.moveConfirmTitle'), t('category.moveOwnBudget'), alertOk());
+        return;
+      }
+      if (impact.hasAffectedBudget && familyQ.data?.owner_user_id !== profileQ.data?.id) {
+        Alert.alert(t('category.ownerOnlyDisable'), t('category.moveOwnerBudget'), alertOk());
+        return;
+      }
+      if (impact.sourceBudget !== null)
+        message += `\n${t('category.moveBudgetChange', { name: currentParent ? displayCategoryName(catsQ.data?.find((c) => c.id === currentParent)?.name ?? '', catsQ.data?.find((c) => c.id === currentParent)?.is_system ?? false) : displayCategoryName(category.name, category.is_system), before: formatAmount(impact.sourceUsed, ''), after: formatAmount(Math.max(0, impact.sourceUsed - impact.categoryUsed), '') })}`;
+      if (impact.targetBudget !== null)
+        message += `\n${t('category.moveBudgetChange', { name: displayCategoryName(catsQ.data?.find((c) => c.id === parentId)?.name ?? '', catsQ.data?.find((c) => c.id === parentId)?.is_system ?? false), before: formatAmount(impact.targetUsed, ''), after: formatAmount(impact.targetUsed + impact.categoryUsed, '') })}`;
+    } catch (error) {
+      Alert.alert(t('account.saveFailed'), error instanceof Error ? error.message : String(error), alertOk());
+      return;
+    } finally {
+      setChecking(false);
+    }
+    Alert.alert(t('category.moveConfirmTitle'), message, [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('category.move'),
+        onPress: async () => {
+          try {
+            await moveM.mutateAsync({ familyId, categoryId: category.id, parentId });
+            onBack();
+          } catch (error) {
+            Alert.alert(t('account.saveFailed'), error instanceof Error ? error.message : String(error), alertOk());
+          }
+        },
+      },
+    ]);
+  };
+  return (
+    <View style={[styles.root, { backgroundColor: palette.base }]}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
+        <SheetHeader title={t('category.moveTitle')} onBack={onBack} />
+        <ScrollView contentContainerStyle={styles.content}>
+          {currentParent ? (
+            <Pressable style={styles.row} onPress={() => void choose(null)}>
+              <Text style={{ color: palette.textPrimary }}>{t('category.moveStandalone')}</Text>
+            </Pressable>
+          ) : null}
+          {groups.map((group) => (
+            <Pressable
+              key={group.id}
+              disabled={group.id === currentParent || moveM.isPending || checking}
+              style={styles.row}
+              onPress={() => void choose(group.id)}
+            >
+              <Text style={{ color: palette.textPrimary }}>{displayCategoryName(group.name, group.is_system)}</Text>
+              {group.id === currentParent ? <SymbolView name="checkmark" tintColor={palette.accent} size={17} /> : null}
+            </Pressable>
+          ))}
+          {groups.length === 0 ? <Text style={{ color: palette.textSecondary }}>{t('category.noGroups')}</Text> : null}
+        </ScrollView>
+      </SafeAreaView>
+    </View>
+  );
+}
+
 // ── 新增 / 编辑 ───────────────────────────────────────────────────────────────
-function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; onBack: () => void }) {
+function Editor({ view, onBack }: { view: Extract<ViewState, { mode: 'new' | 'edit' }>; onBack: () => void }) {
   const palette = useSheetPalette();
   useLocalePreference();
   const catColors = useCategoryColors();
   const familyQ = useMyFamily();
   const catsQ = useCategories();
+  const layoutQ = useCategoryLayout();
   const createM = useCreateCategory();
   const updateM = useUpdateCategory();
 
@@ -490,29 +751,60 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
       Alert.alert(t('category.tooLongTitle'), t('category.nameTooLong', { max: CATEGORY_NAME_MAX_LENGTH }), alertOk());
       return;
     }
-    // 同类型同名查重（排除自身），与历史/系统分类不冲突。
-    const dup = (catsQ.data ?? []).some(
-      (c) => c.type === type && c.name === trimmed && c.status === 'active' && (!isEdit || c.id !== view.category.id),
-    );
+    const parentId = isEdit
+      ? ((layoutQ.data ?? []).find((item) => item.category_id === view.category.id)?.parent_category_id ?? null)
+      : (view.parentId ?? null);
+    // Only siblings must have distinct names; different parents may use the same name.
+    const dup =
+      (!isEdit || trimmed !== view.category.name) &&
+      (catsQ.data ?? []).some(
+        (c) =>
+          c.type === type &&
+          c.name === trimmed &&
+          c.status === 'active' &&
+          (!isEdit || c.id !== view.category.id) &&
+          ((layoutQ.data ?? []).find((item) => item.category_id === c.id)?.parent_category_id ?? null) === parentId,
+      );
     if (dup) {
       Alert.alert(t('category.existsTitle'), t('category.exists', { name: trimmed }), alertOk());
       return;
     }
-    try {
-      if (isEdit) {
-        await updateM.mutateAsync({ id: view.category.id, name: trimmed, icon, color_key: colorKey });
-      } else {
-        const fid = familyQ.data?.id;
-        if (!fid) {
-          Alert.alert(t('category.cannotCreate'), t('category.noFamily'), alertOk());
-          return;
+    const persist = async () => {
+      try {
+        if (isEdit) {
+          await updateM.mutateAsync({ id: view.category.id, name: trimmed, icon, color_key: colorKey });
+        } else {
+          const fid = familyQ.data?.id;
+          if (!fid) {
+            Alert.alert(t('category.cannotCreate'), t('category.noFamily'), alertOk());
+            return;
+          }
+          await createM.mutateAsync({
+            family_id: fid,
+            name: trimmed,
+            icon,
+            type,
+            color_key: colorKey,
+            parent_category_id: view.parentId,
+            is_group: view.isGroup,
+          });
         }
-        await createM.mutateAsync({ family_id: fid, name: trimmed, icon, type, color_key: colorKey });
+        onBack();
+      } catch (e) {
+        Alert.alert(t('account.saveFailed'), (e as Error).message ?? String(e), alertOk());
       }
-      onBack();
-    } catch (e) {
-      Alert.alert(t('account.saveFailed'), (e as Error).message ?? String(e), alertOk());
-    }
+    };
+    const sameNameElsewhere =
+      parentId &&
+      (catsQ.data ?? []).some(
+        (c) => c.type === type && c.name === trimmed && c.id !== (isEdit ? view.category.id : null),
+      );
+    if (sameNameElsewhere) {
+      Alert.alert(t('category.existsTitle'), t('category.duplicateHint'), [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('common.save'), onPress: () => void persist() },
+      ]);
+    } else await persist();
   };
 
   const renderIconChoice = (ic: SymbolName) => {
@@ -614,10 +906,18 @@ function Editor({ view, onBack }: { view: Exclude<ViewState, { mode: 'list' }>; 
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 显式保存型：返回 + ✓（DESIGN §9.9） */}
         <SheetHeader
-          title={isEdit ? t('category.edit') : t('category.add')}
+          title={
+            isEdit
+              ? t('category.edit')
+              : view.isGroup
+                ? t('category.addGroup')
+                : view.parentId
+                  ? t('category.addChild')
+                  : t('category.add')
+          }
           onBack={onBack}
           onConfirm={handleSave}
-          confirmDisabled={!trimmed || nameTooLong || saving}
+          confirmDisabled={!trimmed || nameTooLong || saving || !layoutQ.isSuccess}
         />
 
         <View style={styles.editorContent}>
@@ -707,6 +1007,7 @@ const styles = StyleSheet.create({
     paddingVertical: Space[3],
   },
   iconDot: { width: 32, height: 32, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
+  categoryMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Space[3] },
   rowName: { fontSize: 16, fontWeight: '500' },
   sysTag: { fontSize: 13 },
   archiveBtn: { padding: Space[1] },
