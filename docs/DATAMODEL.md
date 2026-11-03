@@ -361,7 +361,7 @@ erDiagram
 
 ### 5.9 RECURRING_TRANSACTION / RECURRING_RUN（定时收支 · PRD §18 自定义能力）
 
-> **家庭共享**的日、月、年自动记账规则，RLS 复用 `private.is_family_member`。生成的流水记入家庭账本，记账人使用规则的 `recorder_user_id`。服务端每分钟处理到期规则，截止日按北京时间 6:00 判断；客户端保留当前家庭补记 RPC。周期和到期日唯一约束防止并发和频率切换造成重复。
+> **家庭共享**的日、月、年自动记账规则，RLS 复用 `private.is_family_member`。生成的流水记入家庭账本，记账人使用规则的 `recorder_user_id`。服务端每分钟处理到期规则，按所选北京时间判断到期；客户端保留当前家庭补记 RPC。周期和到期日唯一约束防止并发和频率切换造成重复。
 
 **RECURRING_TRANSACTION（规则）**
 
@@ -375,10 +375,11 @@ erDiagram
 | `note`                      | text      |                                        | 备注（如「工资」「Apple Music」）                                    |
 | `recorder_user_id`          | UUID      | FK→USER, not null                      | 生成流水的记账人 = 规则创建者                                        |
 | `created_by`                | UUID      | FK→USER, not null                      | 规则创建者（RLS insert 校验 = auth.uid()）                           |
-| `day_of_month`              | int       | not null                               | 月频率限 1–28；年频率为所选月的有效日期；日频率固定为 1              |
+| `day_of_month`              | int       | not null                               | 月频率限 1–31，短月按月末；年频率为所选月的有效日期；日频率固定为 1  |
 | `month_of_year`             | int       | 年频率为 1–12，其他频率为 null         | 每年记账月份，2 月 29 日在平年按 2 月 28 日                          |
 | `frequency`                 | text      | not null, default `monthly`            | `daily` / `monthly` / `yearly`                                       |
 | `start_date`                | date      | not null                               | 起始日期（含）；日、年新规则由服务端落北京时间次日，月规则保留原语义 |
+| `scheduled_minute`          | int       | not null, default 360                  | 北京时间零点起的分钟数，范围 0–1439                                  |
 | `next_due_date`             | date      | not null                               | 下一待处理到期日，供定时任务批量查询                                 |
 | `end_date`                  | date      |                                        | 可选结束（含）；null = 长期有效                                      |
 | `enabled`                   | bool      | not null, default true                 | 关闭 = 暂停自动记账（不删规则）                                      |

@@ -112,7 +112,7 @@ export default function RecurringScreen() {
                       <VStack alignment="leading" spacing={Space[1]}>
                         <Text modifiers={[font({ size: 16 }), foregroundColor(palette.textPrimary)]}>{title}</Text>
                         <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>
-                          {`${schedule} · `}
+                          {`${schedule} ${String(Math.floor(rule.scheduled_minute / 60)).padStart(2, '0')}:${String(rule.scheduled_minute % 60).padStart(2, '0')} · `}
                           <Text modifiers={[font({ size: 13 }), foregroundColor(amountColor)]}>{amount}</Text>
                         </Text>
                       </VStack>

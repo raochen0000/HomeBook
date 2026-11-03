@@ -775,6 +775,7 @@ export type Database = {
           next_due_date: string;
           note: string | null;
           recorder_user_id: string;
+          scheduled_minute: number;
           start_date: string;
           type: string;
           updated_at: string;
@@ -794,6 +795,7 @@ export type Database = {
           next_due_date?: string;
           note?: string | null;
           recorder_user_id: string;
+          scheduled_minute?: number;
           start_date: string;
           type: string;
           updated_at?: string;
@@ -813,6 +815,7 @@ export type Database = {
           next_due_date?: string;
           note?: string | null;
           recorder_user_id?: string;
+          scheduled_minute?: number;
           start_date?: string;
           type?: string;
           updated_at?: string;

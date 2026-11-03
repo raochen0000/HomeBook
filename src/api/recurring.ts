@@ -23,6 +23,7 @@ export type NewRecurringRule = Pick<
   | 'note'
   | 'recorder_user_id'
   | 'created_by'
+  | 'scheduled_minute'
   | 'day_of_month'
   | 'month_of_year'
   | 'frequency'
@@ -38,6 +39,7 @@ export type EditRecurringRule = {
   category_id?: string;
   note?: string | null;
   recorder_user_id?: string;
+  scheduled_minute?: number;
   day_of_month?: number;
   month_of_year?: number | null;
   frequency?: RecurringFrequency;

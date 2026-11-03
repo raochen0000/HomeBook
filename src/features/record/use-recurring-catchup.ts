@@ -3,7 +3,7 @@
  * generate_due_recurring_transactions() RPC，补记缺失的到期流水（服务端幂等，多设备安全）。
  *
  * 后台定时任务是主要生成途径；此 RPC 是前台补记和旧版客户端兼容路径。按天节流
- * 减少重复请求；服务端以同一期和同一天去重，并且不会在北京时间 6 点前生成当天的流水。
+ * 减少重复请求；服务端以同一期和同一天去重，并且不会在所选北京时间之前生成当天的流水。
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';

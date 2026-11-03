@@ -3,8 +3,16 @@
  * 原生 pageSheet 壳 + 支出/收入分段 + 大号金额 + 自定义键盘 + 分类横滑 + 记账人（户主可选）。
  * 支持每天、每月和每年；每日新规则的起始日期由服务端按北京时间确定。
  */
-import { Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
-import { accessibilityLabel, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
+import { BottomSheet, Group, Host, Picker, RNHostView, Text as UIText } from '@expo/ui/swift-ui';
+import {
+  accessibilityLabel,
+  ignoreSafeArea,
+  labelsHidden,
+  pickerStyle,
+  presentationBackground,
+  presentationDetents,
+  tag,
+} from '@expo/ui/swift-ui/modifiers';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
 import {
@@ -36,7 +44,7 @@ import { PageSheet } from '@/components/page-sheet';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import { buildCategoryHierarchy, categoryPath, selectableCategories } from '@/lib/category-hierarchy';
+import { buildCategoryHierarchy, categoryPath, selectableRecordCategories } from '@/lib/category-hierarchy';
 
 type TxnType = 'expense' | 'income';
 
@@ -114,6 +122,9 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   const [monthOfYear, setMonthOfYear] = useState<number>(editing?.month_of_year ?? 1);
   const [recorderUserId, setRecorderUserId] = useState(editing?.recorder_user_id ?? recorderId);
   const [memberOpen, setMemberOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleMounted, setScheduleMounted] = useState(false);
+  const [scheduledMinute, setScheduledMinute] = useState(editing?.scheduled_minute ?? 360);
 
   const members = membersQ.data ?? [];
   const showRecorder = members.some((m) => m.userId === recorderId && m.role === 'owner');
@@ -124,14 +135,21 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
     [categoriesQ.data, layoutQ.data],
   );
   const categories = useMemo<Category[]>(
-    () => selectableCategories(hierarchy, type, hiddenQ.data ?? new Set<string>(), editing?.category_id),
+    () => selectableRecordCategories(hierarchy, type, hiddenQ.data ?? new Set<string>(), editing?.category_id),
     [hierarchy, hiddenQ.data, type, editing?.category_id],
   );
 
+  const keepingOriginalGroup =
+    !!editing &&
+    categoryId === editing.category_id &&
+    type === editing.type &&
+    hierarchy.layoutById.get(editing.category_id)?.is_group === true;
+
   const effectiveCategoryId = useMemo(() => {
+    if (keepingOriginalGroup) return categoryId;
     if (categoryId && categories.some((c) => c.id === categoryId)) return categoryId;
     return categories[0]?.id ?? null;
-  }, [categoryId, categories]);
+  }, [categoryId, categories, keepingOriginalGroup]);
 
   const cents = rawToCents(raw);
   const canSave =
@@ -145,7 +163,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   const amountColor = type === 'expense' ? palette.expense : palette.income;
   const sign = type === 'expense' ? '-' : '+';
   const parts = displayParts(raw);
-  const daysInMonth = frequency === 'monthly' ? 28 : new Date(2000, monthOfYear, 0).getDate();
+  const daysInMonth = frequency === 'monthly' ? 31 : new Date(2000, monthOfYear, 0).getDate();
   const selectedDay = Math.min(dayOfMonth, daysInMonth);
 
   const press = (k: string) => {
@@ -175,6 +193,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
           note: note || null,
           recorder_user_id: recorderUserId,
           frequency,
+          scheduled_minute: scheduledMinute,
           month_of_year: frequency === 'yearly' ? monthOfYear : null,
           day_of_month: frequency === 'daily' ? 1 : selectedDay,
         });
@@ -188,6 +207,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
           category_id: effectiveCategoryId,
           note: note || null,
           frequency,
+          scheduled_minute: scheduledMinute,
           month_of_year: frequency === 'yearly' ? monthOfYear : null,
           day_of_month: frequency === 'daily' ? 1 : selectedDay,
           start_date: firstOfCurrentMonth(),
@@ -238,9 +258,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
             maxWidth: 56,
           }}
         >
-          {hierarchy.layoutById.get(c.id)?.is_group
-            ? t('category.unspecifiedPicker', { name: displayCategoryName(c.name, c.is_system) })
-            : displayCategoryName(c.name, c.is_system)}
+          {displayCategoryName(c.name, c.is_system)}
         </Text>
       </Pressable>
     );
@@ -287,6 +305,9 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
           <View style={styles.catHeader}>
             <Text style={[styles.catHeaderLabel, { color: palette.textSecondary }]}>{t('record.category')}</Text>
           </View>
+          {keepingOriginalGroup ? (
+            <Text style={{ color: palette.textSecondary, fontSize: 12 }}>{t('record.legacyCategoryKept')}</Text>
+          ) : null}
           {categoriesQ.isLoading ? (
             <View style={styles.catLoading}>
               <ActivityIndicator />
@@ -304,86 +325,28 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
 
           {divider}
 
-          {/* 定时频率 */}
-          <View style={styles.rowInner}>
-            <SymbolView name="repeat" tintColor={palette.textTertiary} size={16} />
+          <Pressable
+            style={styles.rowInner}
+            onPress={() => {
+              setScheduleMounted(true);
+              setScheduleOpen(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={`${t('record.recurringFrequency')}: ${frequency === 'daily' ? t('record.recurringDaily') : frequency === 'monthly' ? t('common.everyMonthDay', { day: selectedDay }) : t('record.recurringYearlyOn', { month: monthOfYear, day: selectedDay })} ${formatScheduleTime(scheduledMinute)}`}
+          >
+            <SymbolView name="calendar" tintColor={palette.textTertiary} size={16} />
             <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.recurringFrequency')}</Text>
             <View style={styles.rowSpacer} />
-            <Host matchContents style={styles.dayHost}>
-              <Picker
-                modifiers={[pickerStyle('menu'), labelsHidden(), accessibilityLabel(t('record.recurringFrequency'))]}
-                selection={frequency}
-                onSelectionChange={(value) => {
-                  if (value === 'daily' || value === 'monthly' || value === 'yearly') setFrequency(value);
-                }}
-              >
-                <UIText modifiers={[tag('daily')]}>{t('record.recurringDaily')}</UIText>
-                <UIText modifiers={[tag('monthly')]}>{t('record.recurringMonthly')}</UIText>
-                <UIText modifiers={[tag('yearly')]}>{t('record.recurringYearly')}</UIText>
-              </Picker>
-            </Host>
-          </View>
-
-          {frequency !== 'daily' ? divider : null}
-
-          {/* 每月记账日 / 每年记账日期 */}
-          {frequency !== 'daily' ? (
-            <View style={styles.rowInner}>
-              <SymbolView name="calendar" tintColor={palette.textTertiary} size={16} />
-              <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>
-                {frequency === 'monthly' ? t('record.monthlyDay') : t('record.yearlyDay')}
-              </Text>
-              <View style={styles.rowSpacer} />
-              {frequency === 'yearly' ? (
-                <Host matchContents style={styles.dayHost}>
-                  <Picker
-                    modifiers={[pickerStyle('menu'), labelsHidden(), accessibilityLabel(t('record.recurringMonth'))]}
-                    selection={String(monthOfYear)}
-                    onSelectionChange={(value) => {
-                      const month = Number(value);
-                      if (Number.isInteger(month) && month >= 1 && month <= 12) setMonthOfYear(month);
-                    }}
-                  >
-                    {Array.from({ length: 12 }, (_, i) => (
-                      <UIText key={i} modifiers={[tag(String(i + 1))]}>
-                        {t('common.monthShort', { month: i + 1 })}
-                      </UIText>
-                    ))}
-                  </Picker>
-                </Host>
-              ) : null}
-              <Host matchContents style={styles.dayHost}>
-                <Picker
-                  modifiers={[
-                    pickerStyle('menu'),
-                    labelsHidden(),
-                    accessibilityLabel(frequency === 'yearly' ? t('record.recurringDay') : t('record.monthlyDay')),
-                  ]}
-                  selection={String(selectedDay)}
-                  onSelectionChange={(value) => {
-                    const day = Number(value);
-                    if (Number.isInteger(day) && day >= 1 && day <= daysInMonth) setDayOfMonth(day);
-                  }}
-                >
-                  {Array.from({ length: daysInMonth }, (_, i) => (
-                    <UIText key={i} modifiers={[tag(String(i + 1))]}>
-                      {t('common.dayOfMonth', { day: i + 1 })}
-                    </UIText>
-                  ))}
-                </Picker>
-              </Host>
-            </View>
-          ) : null}
-
-          {frequency === 'daily' && (!editing || editing.frequency !== 'daily') ? (
-            <Text style={[styles.scheduleHint, { color: palette.textSecondary }]}>
-              {t('record.recurringDailyStart')}
+            <Text style={[styles.infoValue, { color: palette.info }]} numberOfLines={1}>
+              {frequency === 'daily'
+                ? t('record.recurringDaily')
+                : frequency === 'monthly'
+                  ? t('common.everyMonthDay', { day: selectedDay })
+                  : t('record.recurringYearlyOn', { month: monthOfYear, day: selectedDay })}{' '}
+              {formatScheduleTime(scheduledMinute)}
             </Text>
-          ) : null}
-          {frequency === 'yearly' && monthOfYear === 2 && selectedDay === 29 ? (
-            <Text style={[styles.scheduleHint, { color: palette.textSecondary }]}>{t('record.recurringLeapYear')}</Text>
-          ) : null}
-
+            <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
+          </Pressable>
           {divider}
 
           {/* 备注 */}
@@ -455,6 +418,26 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
         </View>
       </ScrollView>
 
+      {scheduleMounted ? (
+        <SchedulePickerSheet
+          visible={scheduleOpen}
+          frequency={frequency}
+          day={selectedDay}
+          month={monthOfYear}
+          minute={scheduledMinute}
+          showDailyStart={!editing || editing.frequency !== 'daily'}
+          onClose={() => setScheduleOpen(false)}
+          onDismiss={() => setScheduleMounted(false)}
+          onDone={(nextFrequency, nextDay, nextMonth, nextMinute) => {
+            setFrequency(nextFrequency);
+            setDayOfMonth(nextDay);
+            setMonthOfYear(nextMonth);
+            setScheduledMinute(nextMinute);
+            setScheduleOpen(false);
+          }}
+        />
+      ) : null}
+
       <MemberPickerSheet
         visible={showRecorder && memberOpen}
         members={members}
@@ -466,6 +449,135 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
         onClose={() => setMemberOpen(false)}
       />
     </View>
+  );
+}
+
+function formatScheduleTime(minute: number): string {
+  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+}
+
+function SchedulePickerSheet({
+  visible,
+  frequency,
+  day,
+  month,
+  minute,
+  showDailyStart,
+  onClose,
+  onDismiss,
+  onDone,
+}: {
+  visible: boolean;
+  frequency: RecurringFrequency;
+  day: number;
+  month: number;
+  minute: number;
+  showDailyStart: boolean;
+  onClose: () => void;
+  onDismiss: () => void;
+  onDone: (frequency: RecurringFrequency, day: number, month: number, minute: number) => void;
+}) {
+  const palette = useSheetPalette();
+  const insets = useSafeAreaInsets();
+  const [draftFrequency, setDraftFrequency] = useState(frequency);
+  const [draftDay, setDraftDay] = useState(day);
+  const [draftMonth, setDraftMonth] = useState(month);
+  const [hour, setHour] = useState(Math.floor(minute / 60));
+  const [minutePart, setMinutePart] = useState(minute % 60);
+  const maxDay = draftFrequency === 'yearly' ? new Date(2000, draftMonth, 0).getDate() : 31;
+  const effectiveDay = Math.min(draftDay, maxDay);
+  const wheel = (
+    value: number,
+    count: number,
+    minimum: number,
+    label: string,
+    suffix: string,
+    setValue: (value: number) => void,
+  ) => (
+    <Host style={styles.wheelHost}>
+      <Picker
+        selection={String(value)}
+        modifiers={[pickerStyle('wheel'), labelsHidden(), accessibilityLabel(label)]}
+        onSelectionChange={(selected) => {
+          const n = Number(selected);
+          if (Number.isInteger(n) && n >= minimum && n < minimum + count) setValue(n);
+        }}
+      >
+        {Array.from({ length: count }, (_, i) => (
+          <UIText
+            key={i}
+            modifiers={[tag(String(i + minimum))]}
+          >{`${String(i + minimum).padStart(minimum === 0 ? 2 : 1, '0')}${suffix}`}</UIText>
+        ))}
+      </Picker>
+    </Host>
+  );
+  return (
+    <Host style={styles.sheetAnchor}>
+      <BottomSheet
+        isPresented={visible}
+        onDismiss={onDismiss}
+        onIsPresentedChange={(visible) => {
+          if (!visible) onClose();
+        }}
+      >
+        <Group modifiers={[presentationDetents([{ fraction: 0.6 }]), presentationBackground(palette.base)]}>
+          <Group modifiers={[ignoreSafeArea({ regions: 'container', edges: 'bottom' })]}>
+            <RNHostView>
+              <View
+                style={[
+                  styles.scheduleSheet,
+                  { backgroundColor: palette.base, paddingBottom: Math.max(Space[5], insets.bottom - Space[4]) },
+                ]}
+              >
+                <Text style={[styles.scheduleTitle, { color: palette.textPrimary }]}>{t('record.scheduleTitle')}</Text>
+                <Host style={styles.scheduleSegmentHost}>
+                  <Picker
+                    selection={draftFrequency}
+                    modifiers={[pickerStyle('segmented'), accessibilityLabel(t('record.recurringFrequency'))]}
+                    onSelectionChange={(value) => {
+                      if (value === 'daily' || value === 'monthly' || value === 'yearly') setDraftFrequency(value);
+                    }}
+                  >
+                    <UIText modifiers={[tag('daily')]}>{t('record.recurringDaily')}</UIText>
+                    <UIText modifiers={[tag('monthly')]}>{t('record.recurringMonthly')}</UIText>
+                    <UIText modifiers={[tag('yearly')]}>{t('record.recurringYearly')}</UIText>
+                  </Picker>
+                </Host>
+                <View style={styles.wheels}>
+                  {draftFrequency === 'yearly'
+                    ? wheel(draftMonth, 12, 1, t('record.recurringMonth'), t('record.monthUnit'), setDraftMonth)
+                    : null}
+                  {draftFrequency !== 'daily'
+                    ? wheel(effectiveDay, maxDay, 1, t('record.recurringDay'), t('record.dayUnit'), setDraftDay)
+                    : null}
+                  {wheel(hour, 24, 0, t('record.hourLabel'), t('record.hourUnit'), setHour)}
+                  {wheel(minutePart, 60, 0, t('record.minuteLabel'), t('record.minuteUnit'), setMinutePart)}
+                </View>
+                <View style={styles.scheduleFooter}>
+                  <Text style={[styles.scheduleHint, { color: palette.textSecondary }]}>
+                    {draftFrequency === 'daily' && showDailyStart
+                      ? t('record.recurringDailyStart', { time: formatScheduleTime(hour * 60 + minutePart) })
+                      : draftFrequency === 'monthly' && effectiveDay >= 29
+                        ? t('record.recurringMonthEnd')
+                        : draftFrequency === 'yearly' && draftMonth === 2 && effectiveDay === 29
+                          ? t('record.recurringLeapYear')
+                          : t('record.recurringTimezone')}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    style={[styles.scheduleDone, { backgroundColor: palette.info }]}
+                    onPress={() => onDone(draftFrequency, effectiveDay, draftMonth, hour * 60 + minutePart)}
+                  >
+                    <Text style={styles.scheduleDoneText}>{t('common.done')}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </RNHostView>
+          </Group>
+        </Group>
+      </BottomSheet>
+    </Host>
   );
 }
 
@@ -543,7 +655,21 @@ const styles = StyleSheet.create({
   noteInput: { flex: 1, fontSize: 15, padding: 0 },
   infoLabel: { fontSize: 15 },
   infoValue: { fontSize: 15 },
-  scheduleHint: { fontSize: 12, lineHeight: 17, paddingLeft: Space[6], paddingBottom: Space[2] },
+  scheduleHint: { fontSize: 13, lineHeight: 18, textAlign: 'center', paddingVertical: Space[3] },
+  sheetAnchor: { width: 1, height: 1 },
+  scheduleSheet: { flex: 1, paddingHorizontal: Space[4], paddingTop: Space[6] },
+  scheduleTitle: { textAlign: 'center', fontSize: 18, fontWeight: '600' },
+  scheduleSegmentHost: { height: 34, marginTop: Space[4] },
+  wheels: { flexDirection: 'row', height: 190, marginTop: Space[3] },
+  wheelHost: { flex: 1, height: 190 },
+  scheduleFooter: { marginTop: 'auto' },
+  scheduleDone: {
+    minHeight: 50,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduleDoneText: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' },
   rowSpacer: { flex: 1 },
   dayHost: { minWidth: 72, minHeight: 28 },
   keypad: { marginTop: Space[5], gap: Space[2] },
