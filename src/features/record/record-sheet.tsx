@@ -8,21 +8,46 @@
  * 布局：固定区（抓手 / 标题 / 支出收入分段 / 大号金额）+ 弹性详情区（分类区可滚动；备注·时间·记账人固定）
  * + 底部 dock（数字键盘 / 保存）。分类始终以完整网格展示，并在详情卡内独立滚动。
  */
-import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
-import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
+import {
+  Button as UIButton,
+  DatePicker,
+  Host,
+  HStack,
+  Image as UIImage,
+  Picker,
+  Popover,
+  Spacer,
+  Text as UIText,
+  VStack,
+} from '@expo/ui/swift-ui';
+import {
+  accessibilityLabel,
+  background,
+  datePickerStyle,
+  environment,
+  frame,
+  labelsHidden,
+  layoutPriority,
+  lineLimit,
+  padding,
+  pickerStyle,
+  shapes,
+  tag,
+  tint,
+  truncationMode,
+} from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Animated,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
   type DimensionValue,
 } from 'react-native';
@@ -37,17 +62,24 @@ import {
   useMemberships,
   useUpdateTransaction,
   type Category,
-  type FamilyMembership,
   type Transaction,
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
+import { ListUserAvatar } from '@/components/list-user-avatar';
 import { playToastHaptic, toast, ToastNotice, type ToastItem } from '@/components/toast';
-import { UserAvatar } from '@/components/user-avatar';
-import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
-import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
+import { Radius, Space, useCategoryColors, useSheetPalette } from '@/constants/design';
+import { useAvatarFiles } from '@/features/home/use-avatar-files';
+import { alertOk, displayCategoryName, INTL_LOCALE, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { buildCategoryHierarchy, categoryPath, selectableRecordCategories } from '@/lib/category-hierarchy';
 
+import {
+  loadCategoryUsage,
+  recentCategoryUsage,
+  recordCategoryUsage,
+  sortCategoriesByUsage,
+  type CategoryUsageEvent,
+} from './category-usage';
 import { isLikelyNetworkError, isSaveAttemptTimeout, SAVE_NETWORK_TIMEOUT_MS, withDeadline } from './save-attempt';
 
 type TxnType = 'expense' | 'income';
@@ -78,8 +110,9 @@ const KEY_ROWS = [
   ['.', '0', '⌫'],
 ] as const;
 
-/** 记账人弹层下拉超过此位移（pt）即关闭，否则回弹。 */
-const MEMBER_PICKER_DISMISS_THRESHOLD = 80;
+// 固定触发区域，使日期 / 时间文字变化时 Popover 锚点保持不变。
+const DATE_TRIGGER_WIDTH = 132;
+const TIME_TRIGGER_WIDTH = 96;
 
 /** 把正在输入的金额字符串拆为「整数（含千分位） + 小数」用于展示。 */
 function displayParts(raw: string): { integer: string; decimal: string; hasDot: boolean } {
@@ -132,7 +165,8 @@ function RecordForm({
   onUpdated,
 }: Omit<RecordSheetProps, 'visible' | 'onDismiss'> & { onUpdated: () => void }) {
   const palette = useSheetPalette();
-  useLocalePreference();
+  const { locale } = useLocalePreference();
+  const { fontScale } = useWindowDimensions();
   const catColors = useCategoryColors();
 
   const categoriesQ = useAllCategories();
@@ -175,12 +209,17 @@ function RecordForm({
   const [occurredAt, setOccurredAt] = useState<Date>(editing?.occurred_at ? new Date(editing.occurred_at) : new Date());
   const [recorderUserId, setRecorderUserId] = useState(editing?.recorder_user_id ?? recorderId);
   const [memberOpen, setMemberOpen] = useState(false);
+  const [dateOpen, setDateOpen] = useState(false);
+  const [timeOpen, setTimeOpen] = useState(false);
+  const [usage, setUsage] = useState<CategoryUsageEvent[]>([]);
+  const [usageLoaded, setUsageLoaded] = useState(false);
   // 分类区可用宽度（实测），用于网格每行 5 个、同一像素宽。
   const [catAreaW, setCatAreaW] = useState(0);
 
   // 同家庭成员；仅户主可查看并切换「记账人」，普通成员默认记到自己名下。
   const members = membersQ.data ?? [];
-  const showRecorder = members.some((m) => m.userId === recorderId && m.role === 'owner');
+  const avatarFiles = useAvatarFiles(members.map((member) => ({ id: member.userId, avatar_url: member.avatarUrl })));
+  const showRecorder = members.length > 1 && members.some((m) => m.userId === recorderId && m.role === 'owner');
   const recorderName = members.find((m) => m.userId === recorderUserId)?.nickname ?? t('common.me');
 
   // 可手动选择的分类：当前类型 + 排除储蓄类系统分类（储蓄走专门入口，PRD 口径）+ 排除本家庭隐藏的系统分类。
@@ -191,9 +230,29 @@ function RecordForm({
     [categoriesQ.data, layoutQ.data],
   );
   const categories = useMemo<Category[]>(
-    () => selectableRecordCategories(hierarchy, type, hiddenQ.data ?? new Set<string>(), editing?.category_id),
-    [hierarchy, hiddenQ.data, type, editing?.category_id],
+    () =>
+      sortCategoriesByUsage(
+        selectableRecordCategories(hierarchy, type, hiddenQ.data ?? new Set<string>(), editing?.category_id),
+        usage,
+        type,
+      ),
+    [hierarchy, hiddenQ.data, type, editing?.category_id, usage],
   );
+
+  useEffect(() => {
+    let active = true;
+    void loadCategoryUsage(familyId, recorderId)
+      .then((events) => {
+        if (active) setUsage(events);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setUsageLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [familyId, recorderId]);
 
   useEffect(() => {
     let active = true;
@@ -226,8 +285,10 @@ function RecordForm({
     return categories.find((c) => c.is_system && c.name === (type === 'expense' ? '其他支出' : '其他收入'))?.id ?? null;
   }, [categoryId, categories, keepingOriginalGroup, recent, type]);
 
-  // 每行 5 个；按实测宽度均分。
-  const catItemW = catAreaW > 0 ? catAreaW / 5 : 64;
+  // 常规宽度每行 5 个；窄屏减少列数，避免选中外环互相重叠。
+  const catColumns = catAreaW > 0 ? Math.max(1, Math.min(5, Math.floor(catAreaW / 60))) : 5;
+  const catItemW = catAreaW > 0 ? catAreaW / catColumns : 64;
+  const toolbarHeight = Math.max(48, Math.ceil(48 * fontScale));
 
   const cents = rawToCents(raw);
   const categoriesReady = categoriesQ.isSuccess && layoutQ.isSuccess && hiddenQ.isSuccess;
@@ -292,6 +353,16 @@ function RecordForm({
         SAVE_NETWORK_TIMEOUT_MS,
       );
       if (!mountedRef.current) return;
+      if (recorderUserId === recorderId) {
+        const savedAt = Date.now();
+        if (usageLoaded) {
+          setUsage((events) => [
+            ...recentCategoryUsage(events, savedAt),
+            { categoryId: effectiveCategoryId, type, savedAt },
+          ]);
+        }
+        void recordCategoryUsage(familyId, recorderId, effectiveCategoryId, type).catch(() => {});
+      }
       setRecent((previous) => ({ ...previous, [type]: effectiveCategoryId }));
       void AsyncStorage.setItem(`homebook:last-category:${familyId}:${recorderId}:${type}`, effectiveCategoryId).catch(
         () => {},
@@ -360,19 +431,20 @@ function RecordForm({
             });
         }}
       >
-        <View
-          style={[
-            styles.catCircle,
-            { backgroundColor: color, opacity: active ? 1 : 0.55 },
-            active && { borderWidth: 2, borderColor: palette.textPrimary },
-          ]}
-        >
-          <SymbolView name={categorySymbol(c.icon, type) as SymbolViewProps['name']} tintColor="#FFFFFF" size={22} />
+        <View style={[styles.catRing, active && { borderColor: palette.accent, borderWidth: 2 }]}>
+          <View style={[styles.catCircle, { backgroundColor: color, opacity: active ? 1 : 0.78 }]}>
+            <SymbolView name={categorySymbol(c.icon, type) as SymbolViewProps['name']} tintColor="#FFFFFF" size={22} />
+          </View>
+          {active ? (
+            <View style={[styles.catCheck, { backgroundColor: palette.accent, borderColor: palette.card }]}>
+              <SymbolView name="checkmark" tintColor="#FFFFFF" size={10} />
+            </View>
+          ) : null}
         </View>
         <Text
           numberOfLines={2}
           style={{
-            color: active ? palette.textPrimary : palette.textSecondary,
+            color: active ? palette.accent : palette.textSecondary,
             fontSize: 12,
             fontWeight: active ? '600' : '400',
             maxWidth: 56,
@@ -385,6 +457,16 @@ function RecordForm({
   };
 
   const divider = <View style={[styles.divider, { backgroundColor: palette.separator }]} />;
+  const dateLabel = new Intl.DateTimeFormat(INTL_LOCALE[locale], {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).format(occurredAt);
+  const timeLabel = new Intl.DateTimeFormat(INTL_LOCALE[locale], {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(occurredAt);
 
   // 详情卡（分类/备注/时间/记账人）。分类始终完整网格展示，且仅分类区在卡内纵向滚动。
   const detailCardNode = (
@@ -396,7 +478,7 @@ function RecordForm({
 
       {/* 分类：完整网格；只在此区域滚动，备注／时间／记账人保持可见。 */}
       <View style={styles.catArea} onLayout={(e) => setCatAreaW(e.nativeEvent.layout.width)}>
-        {categoriesQ.isLoading || layoutQ.isLoading || hiddenQ.isLoading ? (
+        {categoriesQ.isLoading || layoutQ.isLoading || hiddenQ.isLoading || !usageLoaded ? (
           <View style={styles.catLoading}>
             <ActivityIndicator />
           </View>
@@ -440,34 +522,146 @@ function RecordForm({
 
       {divider}
 
-      {/* 时间：原生 DatePicker（compact，点击弹原生日期/时间选择） */}
-      <View style={styles.rowInner}>
-        <SymbolView name="clock" tintColor={palette.textTertiary} size={16} />
-        <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.time')}</Text>
-        <View style={styles.rowSpacer} />
-        <Host matchContents style={styles.dateHost}>
-          <DatePicker
-            selection={occurredAt}
-            displayedComponents={['date', 'hourAndMinute']}
-            onDateChange={setOccurredAt}
-            modifiers={[datePickerStyle('compact'), labelsHidden()]}
-          />
+      {/* 日期、时间和记录人靠左排列，分别打开原生 popover。 */}
+      <View style={styles.toolbar}>
+        <Host style={[styles.toolbarHost, { height: toolbarHeight }]}>
+          <HStack spacing={Space[1]} alignment="center">
+            <HStack modifiers={[layoutPriority(1)]}>
+              <Popover isPresented={dateOpen} onIsPresentedChange={setDateOpen}>
+                <Popover.Trigger>
+                  <UIButton
+                    label={dateLabel}
+                    systemImage="calendar"
+                    onPress={() => {
+                      setTimeOpen(false);
+                      setMemberOpen(false);
+                      setDateOpen(true);
+                    }}
+                    modifiers={[
+                      padding({ horizontal: 8, vertical: 4 }),
+                      frame({ width: DATE_TRIGGER_WIDTH }),
+                      background(palette.cardPill, shapes.capsule()),
+                      frame({ minHeight: 44 }),
+                      tint(palette.accent),
+                      accessibilityLabel(`${t('dates.date')}: ${dateLabel}`),
+                    ]}
+                  />
+                </Popover.Trigger>
+                <Popover.Content>
+                  <VStack spacing={8} modifiers={[padding({ all: 16 }), frame({ width: 300 })]}>
+                    <DatePicker
+                      selection={occurredAt}
+                      displayedComponents={['date']}
+                      onDateChange={setOccurredAt}
+                      modifiers={[
+                        datePickerStyle('graphical'),
+                        labelsHidden(),
+                        environment('locale', INTL_LOCALE[locale]),
+                        accessibilityLabel(t('dates.date')),
+                      ]}
+                    />
+                  </VStack>
+                </Popover.Content>
+              </Popover>
+            </HStack>
+            <HStack modifiers={[layoutPriority(1)]}>
+              <Popover isPresented={timeOpen} onIsPresentedChange={setTimeOpen}>
+                <Popover.Trigger>
+                  <UIButton
+                    label={timeLabel}
+                    systemImage="clock"
+                    onPress={() => {
+                      setDateOpen(false);
+                      setMemberOpen(false);
+                      setTimeOpen(true);
+                    }}
+                    modifiers={[
+                      padding({ horizontal: 8, vertical: 4 }),
+                      frame({ width: TIME_TRIGGER_WIDTH }),
+                      background(palette.cardPill, shapes.capsule()),
+                      frame({ minHeight: 44 }),
+                      tint(palette.accent),
+                      accessibilityLabel(`${t('record.time')}: ${timeLabel}`),
+                    ]}
+                  />
+                </Popover.Trigger>
+                <Popover.Content>
+                  <VStack spacing={8} modifiers={[padding({ all: 16 }), frame({ width: 220 })]}>
+                    <DatePicker
+                      selection={occurredAt}
+                      displayedComponents={['hourAndMinute']}
+                      onDateChange={setOccurredAt}
+                      modifiers={[
+                        datePickerStyle('wheel'),
+                        labelsHidden(),
+                        environment('locale', INTL_LOCALE[locale]),
+                        accessibilityLabel(t('record.time')),
+                      ]}
+                    />
+                  </VStack>
+                </Popover.Content>
+              </Popover>
+            </HStack>
+            {showRecorder ? (
+              <Popover isPresented={memberOpen} onIsPresentedChange={setMemberOpen}>
+                <Popover.Trigger>
+                  <UIButton
+                    onPress={() => {
+                      setDateOpen(false);
+                      setTimeOpen(false);
+                      setMemberOpen(true);
+                    }}
+                    modifiers={[
+                      padding({ horizontal: 8, vertical: 4 }),
+                      background(palette.cardPill, shapes.capsule()),
+                      frame({ minHeight: 44 }),
+                      tint(palette.accent),
+                      accessibilityLabel(`${t('record.recorder')}: ${recorderName}`),
+                    ]}
+                  >
+                    <HStack spacing={4} alignment="center">
+                      <ListUserAvatar uri={avatarFiles.get(recorderUserId) ?? null} nickname={recorderName} size={22} />
+                      <UIText modifiers={[lineLimit(1), truncationMode('tail')]}>{recorderName}</UIText>
+                    </HStack>
+                  </UIButton>
+                </Popover.Trigger>
+                <Popover.Content>
+                  <VStack alignment="leading" spacing={4} modifiers={[padding({ all: 10 }), frame({ width: 220 })]}>
+                    {members.map((member) => {
+                      const active = member.userId === recorderUserId;
+                      return (
+                        <UIButton
+                          key={member.id}
+                          onPress={() => {
+                            setRecorderUserId(member.userId);
+                            setMemberOpen(false);
+                          }}
+                          modifiers={[
+                            frame({ minHeight: 48, maxWidth: 200, alignment: 'leading' }),
+                            accessibilityLabel(`${member.nickname}${active ? t('category.selected') : ''}`),
+                          ]}
+                        >
+                          <HStack spacing={10} alignment="center">
+                            <ListUserAvatar
+                              uri={avatarFiles.get(member.userId) ?? null}
+                              nickname={member.nickname}
+                              size={32}
+                            />
+                            <UIText>{member.nickname}</UIText>
+                            <Spacer minLength={0} />
+                            {active ? <UIImage systemName="checkmark" color={palette.accent} size={16} /> : null}
+                          </HStack>
+                        </UIButton>
+                      );
+                    })}
+                  </VStack>
+                </Popover.Content>
+              </Popover>
+            ) : null}
+            <Spacer minLength={0} />
+          </HStack>
         </Host>
       </View>
-
-      {/* 记账人：仅户主可选择 */}
-      {showRecorder ? (
-        <>
-          {divider}
-          <Pressable style={styles.rowInner} onPress={() => setMemberOpen(true)}>
-            <SymbolView name="person.crop.circle" tintColor={palette.textTertiary} size={16} />
-            <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.recorder')}</Text>
-            <View style={styles.rowSpacer} />
-            <Text style={[styles.infoValue, { color: palette.textSecondary }]}>{recorderName}</Text>
-            <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
-          </Pressable>
-        </>
-      ) : null}
     </View>
   );
 
@@ -546,114 +740,10 @@ function RecordForm({
         </Pressable>
       </View>
 
-      {/* 记账人选择（底部 sheet） */}
-      {showRecorder && memberOpen ? (
-        <MemberPickerSheet
-          visible
-          members={members}
-          selectedUserId={recorderUserId}
-          onSelect={(uid) => {
-            setRecorderUserId(uid);
-            setMemberOpen(false);
-          }}
-          onClose={() => setMemberOpen(false)}
-        />
-      ) : null}
-
       {continueToast ? (
         <ToastNotice key={continueToast.id} item={continueToast} top={Space[8]} onHide={() => setContinueToast(null)} />
       ) : null}
     </View>
-  );
-}
-
-/** 记账人选择：从底部弹出的成员列表（无「添加其它成员」入口）。 */
-function MemberPickerSheet({
-  visible,
-  members,
-  selectedUserId,
-  onSelect,
-  onClose,
-}: {
-  visible: boolean;
-  members: FamilyMembership[];
-  selectedUserId: string;
-  onSelect: (userId: string) => void;
-  onClose: () => void;
-}) {
-  const palette = usePalette();
-  useLocalePreference();
-  const [translateY] = useState(() => new Animated.Value(0));
-  const dragStartY = useRef(0);
-  const currentDragY = useRef(0);
-
-  useLayoutEffect(() => {
-    if (visible) translateY.setValue(0);
-  }, [translateY, visible]);
-
-  const closeWithDrag = useCallback(() => {
-    Animated.timing(translateY, { toValue: 600, duration: 180, useNativeDriver: true }).start(onClose);
-  }, [onClose, translateY]);
-
-  const finishDrag = () => {
-    if (currentDragY.current > MEMBER_PICKER_DISMISS_THRESHOLD) closeWithDrag();
-    else Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
-  };
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-      onShow={() => translateY.setValue(0)}
-    >
-      <View style={styles.backdrop}>
-        {/* 遮罩独立为弹层的同级节点，避免与抓手 responder 竞争触摸事件。 */}
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <Animated.View
-          style={[
-            styles.memberSheet,
-            { backgroundColor: palette.elevated, paddingBottom: Space[4], transform: [{ translateY }] },
-          ]}
-        >
-          <View
-            style={styles.memberGrabberArea}
-            onStartShouldSetResponder={() => true}
-            onMoveShouldSetResponder={() => true}
-            onResponderGrant={(event) => {
-              dragStartY.current = event.nativeEvent.pageY;
-              currentDragY.current = 0;
-            }}
-            onResponderMove={(event) => {
-              const dy = Math.max(0, event.nativeEvent.pageY - dragStartY.current);
-              currentDragY.current = dy;
-              translateY.setValue(dy);
-            }}
-            onResponderRelease={finishDrag}
-            onResponderTerminate={finishDrag}
-          >
-            <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
-          </View>
-          <View style={styles.memberHeader}>
-            <Text style={[styles.memberTitle, { color: palette.textPrimary }]}>{t('record.recorder')}</Text>
-          </View>
-          {members.map((m) => {
-            const active = m.userId === selectedUserId;
-            return (
-              <Pressable key={m.id} style={styles.memberRow} onPress={() => onSelect(m.userId)}>
-                <UserAvatar avatarUrl={m.avatarUrl} nickname={m.nickname} size={32} />
-                <Text style={[styles.memberName, { color: palette.textPrimary }]} numberOfLines={1}>
-                  {m.nickname}
-                </Text>
-                <View style={styles.rowSpacer} />
-                {active ? <SymbolView name="checkmark" tintColor={palette.info} size={18} /> : null}
-              </Pressable>
-            );
-          })}
-        </Animated.View>
-      </View>
-    </Modal>
   );
 }
 
@@ -685,20 +775,29 @@ const styles = StyleSheet.create({
   catArea: { flex: 1, minHeight: 0 },
   catScroll: { flex: 1 },
   catLoading: { height: 80, alignItems: 'center', justifyContent: 'center' },
-  // 完整网格：每行 5 个（itemW=实测宽/5），rowGap 保持分类项的可点间距。
+  // 完整网格按实测宽度均分，窄屏时自动减少列数。
   catGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: Space[3], paddingVertical: Space[2] },
   catItem: { alignItems: 'center', gap: Space[1] },
+  catRing: { width: 58, height: 58, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
   catCircle: { width: 52, height: 52, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
+  catCheck: {
+    position: 'absolute',
+    right: -1,
+    bottom: -1,
+    width: 18,
+    height: 18,
+    borderRadius: Radius.full,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: Space[6] },
   rowInner: { flexDirection: 'row', alignItems: 'center', gap: Space[2], paddingVertical: Space[3], minHeight: 48 },
   noteInput: { flex: 1, fontSize: 15, padding: 0 },
-  infoLabel: { fontSize: 15 },
-  infoValue: { fontSize: 15 },
-  rowSpacer: { flex: 1 },
-  // matchContents 让 host 贴合原生 DatePicker 胶囊尺寸；minWidth/minHeight 仅作初次测量前的兜底。
-  dateHost: { minWidth: 130, minHeight: 28 },
-  // pageSheet 已处理安全区；额外 18pt 只用于避开大屏 sheet 的圆角/手势边缘，不重复占用 Home Indicator 高度。
-  bottomDock: { paddingTop: Space[2], paddingBottom: Space[5] },
+  toolbar: { flexDirection: 'row', alignItems: 'center', gap: Space[2], minHeight: 48 },
+  toolbarHost: { flex: 1, minWidth: 0 },
+  // pageSheet 自带安全区，额外留白用于避免按钮与底部圆角贴合。
+  bottomDock: { paddingTop: Space[2], paddingBottom: Space[8] },
   keypad: { gap: Space[2] },
   keyRow: { flexDirection: 'row', gap: Space[2] },
   key: {
@@ -715,23 +814,4 @@ const styles = StyleSheet.create({
   keyText: { fontSize: 26, fontWeight: '500', fontVariant: ['tabular-nums'] },
   save: { height: 50, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center', marginTop: Space[3] },
   saveText: { fontSize: 17, fontWeight: '600' },
-  // 记账人底部 sheet
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
-  memberSheet: {
-    borderTopLeftRadius: Radius.lg,
-    borderTopRightRadius: Radius.lg,
-    paddingHorizontal: Space[4],
-    overflow: 'hidden',
-    alignItems: 'stretch',
-  },
-  memberGrabberArea: { alignItems: 'center', justifyContent: 'center', paddingTop: Space[2], paddingBottom: Space[1] },
-  memberHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Space[3],
-  },
-  memberTitle: { fontSize: 16, fontWeight: '600' },
-  memberRow: { flexDirection: 'row', alignItems: 'center', gap: Space[3], paddingVertical: Space[3] },
-  memberName: { flexShrink: 1, fontSize: 16, fontWeight: '500' },
 });
