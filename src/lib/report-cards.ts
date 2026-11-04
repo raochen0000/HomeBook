@@ -76,16 +76,8 @@ export const DEFAULT_SCOPE_CARD_ORDER: Record<ReportScope, ReportCardId[]> = {
     'top_expenses',
     'insights',
   ],
-  income: ['overview', 'income_trend', 'income_structure', 'income_target', 'more_stats', 'insights'],
-  balance: [
-    'overview',
-    'income_expense',
-    'balance_waterfall',
-    'savings_rate',
-    'savings_goals',
-    'more_stats',
-    'insights',
-  ],
+  income: ['overview', 'income_trend', 'income_structure', 'income_target', 'insights'],
+  balance: ['overview', 'income_expense', 'balance_waterfall', 'savings_rate', 'savings_goals', 'insights'],
 };
 
 export type ScopeCardLayout = {

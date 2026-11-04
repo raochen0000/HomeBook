@@ -50,6 +50,7 @@ import {
   type TopItem,
 } from '@/features/report/advanced';
 import { Donut } from '@/features/report/donut';
+import { MoreStatsEntryCard, MoreStatsSheet } from '@/features/report/more-stats-ui';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
 import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
@@ -71,7 +72,6 @@ import {
   balanceRate,
   equalPeriodIncomeExpenseSeries,
   incomeExpenseSeries,
-  inRange,
   periodRange,
   shiftAnchor,
   type Dimension,
@@ -83,24 +83,11 @@ type CatSlice = { id: string; name: string; amount: number; color: string; symbo
 type CategoryDetail = { id: string; name: string; categoryIds?: string[]; type?: 'expense' | 'income' };
 type DisplayCatSlice = CatSlice & { categoryIds?: string[] };
 type Member = { id: string; name: string; amount: number; count: number };
-type ReportDay = {
-  date: string;
-  incomeAmount: number;
-  expenseAmount: number;
-  incomeNormalAmount: number;
-  expenseNormalAmount: number;
-};
 const EXPENSE_CATEGORY_TOP_COUNT = 5;
 const EXPENSE_CATEGORY_OTHER_ID = '__other__';
 type ReportFilters = { memberIds: string[]; categoryIds: string[] };
 type IncomeTargets = { annual: number; custom: number; activeRatio: number };
 type FinancialInsight = { title: string; body: string; action: string; tone: 'ok' | 'warn' | 'danger' };
-type HeatmapScope = ReportScope;
-
-const HEATMAP_COLUMN_GAP = 1;
-const HEATMAP_ROW_GAP = 2;
-const HEATMAP_MIN_CELL_SIZE = 3;
-const HEATMAP_FALLBACK_CELL_SIZE = 5;
 
 const REPORT_SCOPES: { key: ReportScope; labelKey: string }[] = [
   { key: 'expense', labelKey: 'record.expense' },
@@ -114,16 +101,6 @@ const DIMENSIONS: { key: Dimension; labelKey: string }[] = [
   { key: 'year', labelKey: 'dates.dimYear' },
   { key: 'custom', labelKey: 'dates.dimCustom' },
 ];
-
-const WEEKDAY_KEYS = [
-  'dates.weekdaySun',
-  'dates.weekdayMon',
-  'dates.weekdayTue',
-  'dates.weekdayWed',
-  'dates.weekdayThu',
-  'dates.weekdayFri',
-  'dates.weekdaySat',
-] as const;
 
 function intlLocale(): string {
   return INTL_LOCALE[fromI18nLanguage(i18n.language)];
@@ -283,7 +260,6 @@ export default function ReportScreen() {
     if (dimension !== 'custom') return periodRange(dimension, shiftAnchor(dimension, anchor, -1));
     return previousEqualRange(range.start, range.end);
   }, [dimension, anchor, range]);
-  const statsYearRange = useMemo(() => periodRange('year', range.start), [range.start]);
   const isCurrent = useMemo(() => {
     if (dimension !== 'custom') {
       return (
@@ -306,8 +282,7 @@ export default function ReportScreen() {
     } else {
       from = periodRange(dimension, shiftAnchor(dimension, anchor, -(HISTORY_PERIODS - 1))).start;
     }
-    const statsFrom = statsYearRange.start;
-    const historyStart = new Date(Math.min(from.getTime(), statsFrom.getTime()));
+    const historyStart = from;
     return {
       start: localDateKey(range.start),
       end: localDateKey(range.end),
@@ -316,7 +291,7 @@ export default function ReportScreen() {
       memberIds: filters.memberIds,
       categoryIds: filters.categoryIds,
     };
-  }, [dimension, anchor, range, prevRange, statsYearRange, filters]);
+  }, [dimension, anchor, range, prevRange, filters]);
   const reportQ = useReportAnalytics(analyticsInput);
   const reportData = reportQ.data;
   const filteredCount = reportData?.summary.transactionCount ?? 0;
@@ -520,9 +495,9 @@ export default function ReportScreen() {
   );
   const commonStatsCard = (
     <MoreStatsEntryCard
-      scope={scope}
       days={reportData?.days ?? []}
-      range={statsYearRange}
+      range={range}
+      today={todayInFamilyTimeZone}
       palette={palette}
       hidden={privacy}
       onPress={() => setMoreStatsOpen(true)}
@@ -633,7 +608,7 @@ export default function ReportScreen() {
         onOpenCategory={(item) => setDetail({ id: item.id, name: item.name, type: 'income' })}
       />
     ),
-    more_stats: commonStatsCard,
+    more_stats: null,
   };
 
   const balanceCards: Partial<Record<ReportCardId, ReactNode>> = {
@@ -673,7 +648,7 @@ export default function ReportScreen() {
         onOpen={() => setSavingsOpen(true)}
       />
     ),
-    more_stats: commonStatsCard,
+    more_stats: null,
   };
   const scopeCards = scope === 'expense' ? expenseCards : scope === 'income' ? incomeCards : balanceCards;
 
@@ -856,9 +831,10 @@ export default function ReportScreen() {
       />
       <MoreStatsSheet
         visible={moreStatsOpen}
-        scope={scope}
-        range={statsYearRange}
+        range={range}
         days={reportData?.days ?? []}
+        dimension={dimension}
+        today={todayInFamilyTimeZone}
         hidden={privacy}
         onClose={() => setMoreStatsOpen(false)}
       />
@@ -1744,289 +1720,6 @@ function FinancialInsightsDetailSheet({
         </SafeAreaView>
       </View>
     </PageSheet>
-  );
-}
-
-function MoreStatsSheet({
-  visible,
-  scope,
-  range,
-  days,
-  hidden,
-  onClose,
-}: {
-  visible: boolean;
-  scope: HeatmapScope;
-  range: { start: Date; end: Date };
-  days: ReportDay[];
-  hidden: boolean;
-  onClose: () => void;
-}) {
-  const palette = useSheetPalette();
-  return (
-    <PageSheet visible={visible} onClose={onClose}>
-      <View style={[styles.root, { backgroundColor: palette.base }]}>
-        <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
-          <SheetHeader title={t('report.moreStats')} />
-          <ScrollView contentContainerStyle={styles.sheetContent}>
-            <MoreStatsCard scope={scope} days={days} range={range} palette={palette} hidden={hidden} />
-          </ScrollView>
-        </SafeAreaView>
-      </View>
-    </PageSheet>
-  );
-}
-
-function MoreStatsEntryCard({
-  scope,
-  days,
-  range,
-  palette,
-  hidden,
-  onPress,
-}: {
-  scope: HeatmapScope;
-  days: ReportDay[];
-  range: { start: Date; end: Date };
-  palette: ReturnType<typeof usePalette>;
-  hidden: boolean;
-  onPress: () => void;
-}) {
-  const stats = buildMoreStats(days, range, scope);
-  return (
-    <Pressable
-      style={[styles.card, styles.statsEntryCard, { backgroundColor: palette.card }]}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={t('report.moreStatsA11y', {
-        year: range.start.getFullYear(),
-        days: stats.recordDays,
-      })}
-    >
-      <View style={[styles.statsEntryIcon, { backgroundColor: palette.cardPill }]}>
-        <SymbolView name="calendar.badge.clock" tintColor={palette.accent} size={22} />
-      </View>
-      <View style={styles.flex}>
-        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-          {t('report.moreStats')}
-        </ThemedText>
-        <ThemedText style={[styles.statsEntryText, { color: palette.textSecondary }]}>
-          {t('report.moreStatsSub', { year: range.start.getFullYear() })}
-        </ThemedText>
-        <ThemedText style={[styles.statsEntryMeta, { color: palette.textSecondary }]}>
-          {t('report.recordedDailyAvg', {
-            days: stats.recordDays,
-            amount: maskAmount(formatAmount(stats.dailyAvg, ''), hidden),
-          })}
-        </ThemedText>
-      </View>
-      <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={16} />
-    </Pressable>
-  );
-}
-
-function buildMoreStats(days: ReportDay[], range: { start: Date; end: Date }, scope: HeatmapScope) {
-  const weekday = new Array<number>(7).fill(0);
-  const byDate = new Map<string, number>();
-  let weekend = 0;
-  let workday = 0;
-  let total = 0;
-  let rows = 0;
-  for (const item of days) {
-    const date = new Date(`${item.date}T12:00:00.000Z`);
-    if (!inRange(date.toISOString(), range.start, range.end)) continue;
-    const amount =
-      scope === 'expense'
-        ? item.expenseNormalAmount
-        : scope === 'income'
-          ? item.incomeNormalAmount
-          : item.incomeAmount - item.expenseAmount;
-    if (amount === 0) continue;
-    const day = date.getDay();
-    const key = localDateKey(date);
-    const heatAmount = scope === 'balance' ? Math.max(0, amount) : amount;
-    weekday[day] += amount;
-    byDate.set(key, (byDate.get(key) ?? 0) + heatAmount);
-    total += amount;
-    rows += 1;
-    if (day === 0 || day === 6) weekend += amount;
-    else workday += amount;
-  }
-  const rangeDays = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
-  return {
-    rows,
-    weekday,
-    byDate,
-    heatDays: buildYearHeatDays(range.start.getFullYear(), byDate),
-    weekend,
-    workday,
-    total,
-    recordDays: byDate.size,
-    dailyAvg: Math.round(total / Math.max(1, byDate.size)),
-    completeness: Math.round((byDate.size / rangeDays) * 100),
-  };
-}
-
-function buildYearHeatDays(year: number, byDate: Map<string, number>) {
-  const start = new Date(year, 0, 1);
-  const end = new Date(year + 1, 0, 1);
-  const leading = start.getDay();
-  const totalDays = Math.ceil((end.getTime() - start.getTime()) / 86400000);
-  const totalCells = Math.ceil((leading + totalDays) / 7) * 7;
-  return Array.from({ length: totalCells }, (_, index) => {
-    const dayOffset = index - leading;
-    if (dayOffset < 0 || dayOffset >= totalDays) return null;
-    const date = addDays(start, dayOffset);
-    const key = localDateKey(date);
-    return { key, amount: byDate.get(key) ?? 0 };
-  });
-}
-
-function MoreStatsCard({
-  scope,
-  days,
-  range,
-  palette,
-  hidden,
-}: {
-  scope: HeatmapScope;
-  days: ReportDay[];
-  range: { start: Date; end: Date };
-  palette: ReturnType<typeof usePalette>;
-  hidden: boolean;
-}) {
-  const [heatmapWidth, setHeatmapWidth] = useState(0);
-  const stats = useMemo(() => buildMoreStats(days, range, scope), [days, range, scope]);
-  const max = Math.max(1, ...stats.weekday.map((value) => Math.abs(value)));
-  const heatMax = Math.max(1, ...stats.heatDays.map((item) => item?.amount ?? 0));
-  const weekdayLabels = WEEKDAY_KEYS.map((key) => t(key));
-  const topWeekdayIndex = stats.weekday.reduce(
-    (maxIndex, amount, index) => (amount > stats.weekday[maxIndex] ? index : maxIndex),
-    0,
-  );
-  const heatRows = Array.from({ length: 7 }, (_, rowIndex) =>
-    Array.from(
-      { length: Math.ceil(stats.heatDays.length / 7) },
-      (_, colIndex) => stats.heatDays[colIndex * 7 + rowIndex] ?? null,
-    ),
-  );
-  const heatColumnCount = heatRows[0]?.length ?? 0;
-  const heatCellSize =
-    heatmapWidth > 0 && heatColumnCount > 0
-      ? Math.max(HEATMAP_MIN_CELL_SIZE, (heatmapWidth - HEATMAP_COLUMN_GAP * (heatColumnCount - 1)) / heatColumnCount)
-      : HEATMAP_FALLBACK_CELL_SIZE;
-  const scopeTitle =
-    scope === 'income' ? t('record.income') : scope === 'balance' ? t('report.balance') : t('record.expense');
-  const heatColor = scope === 'income' ? palette.income : scope === 'balance' ? palette.info : palette.expense;
-
-  return (
-    <View style={[styles.card, styles.moreStatsCard, { backgroundColor: palette.card }]}>
-      <View style={styles.cardHeaderRow}>
-        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-          {t('report.moreStats')}
-        </ThemedText>
-        <ThemedText style={[styles.chartMeta, { color: palette.textSecondary }]}>
-          {t('report.completeness', { pct: stats.completeness })}
-        </ThemedText>
-      </View>
-      <View style={styles.statsMetricRow}>
-        <StatsMetric
-          label={t('report.recordDays')}
-          value={t('report.recordDaysValue', { count: stats.byDate.size })}
-          palette={palette}
-        />
-        <StatsMetric
-          label={t('report.dailyAvg', { scope: scopeTitle })}
-          value={maskAmount(formatAmount(stats.dailyAvg, ''), hidden)}
-          palette={palette}
-        />
-        <StatsMetric label={t('report.peakWeekday')} value={weekdayLabels[topWeekdayIndex]} palette={palette} />
-      </View>
-      <View style={[styles.heatPanel, { backgroundColor: palette.base }]}>
-        <View style={styles.heatPanelHeader}>
-          <Text style={[styles.heatTitle, { color: palette.textPrimary }]}>
-            {t('report.heatTitle', { year: range.start.getFullYear(), scope: scopeTitle })}
-          </Text>
-          <View style={styles.heatLegend}>
-            <Text style={[styles.heatLegendText, { color: palette.textSecondary }]}>{t('report.heatLess')}</Text>
-            {[0.25, 0.5, 0.75, 1].map((opacity) => (
-              <View key={opacity} style={[styles.heatLegendCell, { backgroundColor: heatColor, opacity }]} />
-            ))}
-            <Text style={[styles.heatLegendText, { color: palette.textSecondary }]}>{t('report.heatMore')}</Text>
-          </View>
-        </View>
-        <View
-          accessibilityLabel={t('report.heatmapA11y', { scope: scopeTitle })}
-          style={styles.heatRows}
-          onLayout={(event) => setHeatmapWidth(event.nativeEvent.layout.width)}
-        >
-          {heatRows.map((row, rowIndex) => (
-            <View key={rowIndex} style={styles.heatWeekRow}>
-              {row.map((item, colIndex) => (
-                <View
-                  key={item?.key ?? `empty-${rowIndex}-${colIndex}`}
-                  style={[
-                    styles.heatCell,
-                    {
-                      width: heatCellSize,
-                      height: heatCellSize,
-                      borderRadius: Math.max(1, Math.floor(heatCellSize / 4)),
-                      backgroundColor: item && item.amount > 0 ? heatColor : palette.card,
-                      opacity: item == null ? 0 : item.amount > 0 ? 0.25 + (item.amount / heatMax) * 0.75 : 1,
-                    },
-                  ]}
-                />
-              ))}
-            </View>
-          ))}
-        </View>
-      </View>
-      <View style={styles.weekdayRows}>
-        {weekdayLabels.map((label, index) => (
-          <View key={index} style={styles.weekdayRow}>
-            <Text style={[styles.weekdayLabel, { color: palette.textSecondary }]}>{label}</Text>
-            <View style={[styles.weekdayTrack, { backgroundColor: palette.base }]}>
-              <View
-                style={[
-                  styles.weekdayFill,
-                  { width: `${(Math.abs(stats.weekday[index]) / max) * 100}%`, backgroundColor: heatColor },
-                ]}
-              />
-            </View>
-            <Text style={[styles.weekdayAmount, { color: palette.textPrimary }]}>
-              {maskAmount(formatAmount(stats.weekday[index], signForNet(stats.weekday[index])), hidden)}
-            </Text>
-          </View>
-        ))}
-      </View>
-      <Text style={[styles.moreStatsMeta, { color: palette.textSecondary }]}>
-        {t('report.weekdayWeekend', {
-          workday: maskAmount(formatAmount(stats.workday, signForNet(stats.workday)), hidden),
-          weekend: maskAmount(formatAmount(stats.weekend, signForNet(stats.weekend)), hidden),
-          scope: scopeTitle,
-          rows: stats.rows,
-        })}
-      </Text>
-    </View>
-  );
-}
-
-function StatsMetric({
-  label,
-  value,
-  palette,
-}: {
-  label: string;
-  value: string;
-  palette: ReturnType<typeof usePalette>;
-}) {
-  return (
-    <View style={[styles.statsMetric, { backgroundColor: palette.base }]}>
-      <Text style={[styles.statsMetricLabel, { color: palette.textSecondary }]}>{label}</Text>
-      <Text style={[styles.statsMetricValue, { color: palette.textPrimary }]} numberOfLines={1} adjustsFontSizeToFit>
-        {value}
-      </Text>
-    </View>
   );
 }
 
@@ -4214,8 +3907,8 @@ const styles = StyleSheet.create({
   heatLegend: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   heatLegendText: { fontSize: 11 },
   heatLegendCell: { width: 8, height: 8, borderRadius: 2 },
-  heatRows: { gap: HEATMAP_ROW_GAP },
-  heatWeekRow: { flexDirection: 'row', gap: HEATMAP_COLUMN_GAP },
+  heatRows: { gap: 2 },
+  heatWeekRow: { flexDirection: 'row', gap: 1 },
   heatCell: {},
   weekdayRows: { gap: Space[2] },
   weekdayRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },

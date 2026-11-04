@@ -57,16 +57,10 @@ describe('resolveScopeCardLayout', () => {
     expect(layout.order[0]).toBe('overview');
     expect(layout.order[1]).toBe('income_trend');
     expect(layout.visible[0]).toBe('overview');
-    expect(layout.hidden).toContain('more_stats');
+    expect(layout.hidden).not.toContain('more_stats');
+    expect(layout.order).not.toContain('more_stats');
     expect(layout.hidden).not.toContain('overview');
-    expect(layout.order).toEqual([
-      'overview',
-      'income_trend',
-      'income_structure',
-      'income_target',
-      'more_stats',
-      'insights',
-    ]);
+    expect(layout.order).toEqual(['overview', 'income_trend', 'income_structure', 'income_target', 'insights']);
   });
 
   it('round-trips an edited layout', () => {
