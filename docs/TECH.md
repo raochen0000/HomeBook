@@ -173,7 +173,7 @@ git --version
 ### 7.0 决策背景
 
 - **市场范围**：只服务海外用户，不要求中国大陆无 VPN 可达。
-- **迁移路径**：当前无真实用户，选择 `SUPABASE_CLOUD_MIGRATION_RUNBOOK.md` 的路径 A；从 Cloud 空项目重放 migration，不迁移测试账号、测试业务数据和测试图片。
+- **迁移路径**：采用路径 A，从 Cloud 空项目重建，不迁移源端测试账号、测试业务数据和测试图片。
 - **套餐基线**：先使用 Free。Free 的容量、日志、备份与低活跃暂停风险必须监控，不能把免费套餐视为生产 SLA。
 - **兼容原则**：数据库业务结构仍以标准 Postgres + RLS + RPC 为核心；Cloud 管理的 `auth`、`storage`、`realtime` schema 不得按自托管方式盲目覆盖。
 
@@ -244,7 +244,7 @@ git --version
 
 ### 7.7 迁移与演进路径
 
-- 按 `SUPABASE_CLOUD_MIGRATION_RUNBOOK.md` 逐阶段执行，只有完成证据与退出条件后才勾选。
+- Supabase Cloud 迁移已完成；后续数据库变更继续使用版本化 migration 并验证授权与恢复能力。
 - 当前路径 A 不迁源端测试数据；目标 Cloud schema 必须能从仓库 migration 独立重建。
 - 推送先保持行为等价再迁 Edge/Cron；不要在同一次切换中同时替换数据库、Auth、推送算法和发布流程。
 - 未来如恢复国际短信、双区域或多项目数据同步，必须作为新的产品与架构变更评估，不在首版迁移中预埋复杂路由。
@@ -389,7 +389,7 @@ supabase/                 # 后端工程（与客户端同仓或独立仓）
 - §13 后端接口契约（DTO / 错误码 / 同步协议：pull 增量 + push 队列）—— 与后端实现对齐后补充
 - §14 本地 DB Schema（WatermelonDB）与 Repository / SyncEngine 设计明细
 - ~~§15 数据库迁移与 RLS / RPC 清单（建表约束 + policy + 核心 RPC 函数骨架）~~ —— **已落地，见 §7.8 与 `supabase/migrations/`**（流转类 RPC 待补）
-- ~~§16 阿里云基座落地细则~~ —— 已由 `SUPABASE_CLOUD_MIGRATION_RUNBOOK.md` 的 Cloud 路径 A 取代；阿里云文档仅保留历史恢复用途
+- ~~§16 阿里云基座落地细则~~ —— 已由 Supabase Cloud 方案取代
 - §17 CI/CD（迁移自动化、Edge Functions 部署、pgTAP、EAS Build、灰度发布）
 - §18 测试策略（单元 / 组件 / E2E：Jest + React Native Testing Library + Maestro + pgTAP）
 - §19 性能与包体积优化
