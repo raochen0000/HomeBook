@@ -22,7 +22,7 @@ const NAME_TO_COLOR: Record<string, CategoryColorKey> = {
   理财: 'incomeGeneric',
 };
 
-/** 自定义分类可选的 24 色；顺序交错冷暖色，方便在 6 × 4 网格中一眼区分。展示名用 `t('categoryColors.' + key)`。 */
+/** 自定义分类的系统配色；同时保留已有分类使用的颜色令牌。 */
 export const CUSTOM_CATEGORY_COLORS = [
   { key: 'food' },
   { key: 'transit' },
@@ -53,6 +53,15 @@ export const CUSTOM_CATEGORY_COLORS = [
 export type CustomCategoryColorKey = (typeof CUSTOM_CATEGORY_COLORS)[number]['key'];
 
 export const DEFAULT_CUSTOM_CATEGORY_COLOR: CustomCategoryColorKey = 'entertainment';
+
+/** 新分类按名称稳定分配预设色，保存后名称变更不再影响颜色。 */
+export function automaticCategoryColorKey(name: string): CustomCategoryColorKey {
+  const normalized = name.trim();
+  if (!normalized) return DEFAULT_CUSTOM_CATEGORY_COLOR;
+  let hash = 0;
+  for (const character of normalized) hash = (Math.imul(hash, 31) + (character.codePointAt(0) ?? 0)) >>> 0;
+  return CUSTOM_CATEGORY_COLORS[hash % CUSTOM_CATEGORY_COLORS.length].key;
+}
 
 const CUSTOM_CATEGORY_COLOR_KEY_SET = new Set<string>(CUSTOM_CATEGORY_COLORS.map(({ key }) => key));
 
