@@ -1,11 +1,27 @@
 /**
  * 定时收支编辑面板（PRD §18 自定义能力）。复用记账面板（record-sheet）的视觉语言：
- * 原生 pageSheet 壳 + 支出/收入分段 + 大号金额 + 自定义键盘 + 分类横滑 + 记账人（户主可选）。
+ * 原生 pageSheet 壳 + 支出/收入分段 + 大号金额 + 自定义键盘 + 分类网格 + 记账人（户主可选）。
  * 支持每天、每月和每年；每日新规则的起始日期由服务端按北京时间确定。
  */
-import { BottomSheet, Group, Host, Picker, RNHostView, Text as UIText } from '@expo/ui/swift-ui';
+import {
+  BottomSheet,
+  Button as UIButton,
+  Group,
+  Host,
+  HStack,
+  Picker,
+  RNHostView,
+  ScrollView as UIScrollView,
+  Text as UIText,
+} from '@expo/ui/swift-ui';
 import {
   accessibilityLabel,
+  background,
+  fixedSize,
+  frame,
+  padding,
+  shapes,
+  tint,
   ignoreSafeArea,
   labelsHidden,
   pickerStyle,
@@ -18,13 +34,13 @@ import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -36,15 +52,16 @@ import {
   useMemberships,
   useUpdateRecurringRule,
   type Category,
-  type FamilyMembership,
   type RecurringFrequency,
   type RecurringRule,
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
-import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
+import { Radius, Space, useCategoryColors, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { buildCategoryHierarchy, categoryPath, selectableRecordCategories } from '@/lib/category-hierarchy';
+
+import { MemberPopover } from './member-popover';
 
 type TxnType = 'expense' | 'income';
 
@@ -86,7 +103,7 @@ function firstOfCurrentMonth(): string {
 
 export function RecurringSheet({ visible, onClose, familyId, recorderId, editing, onSaved }: RecurringSheetProps) {
   return (
-    <PageSheet visible={visible} onClose={onClose}>
+    <PageSheet visible={visible} onClose={onClose} allowSwipeDismissal>
       <RecurringForm
         familyId={familyId}
         recorderId={recorderId}
@@ -102,6 +119,8 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   const palette = useSheetPalette();
   useLocalePreference();
   const catColors = useCategoryColors();
+  const { fontScale } = useWindowDimensions();
+  const [catAreaW, setCatAreaW] = useState(0);
 
   const categoriesQ = useAllCategories();
   const layoutQ = useCategoryLayout();
@@ -127,8 +146,9 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   const [scheduledMinute, setScheduledMinute] = useState(editing?.scheduled_minute ?? 360);
 
   const members = membersQ.data ?? [];
-  const showRecorder = members.some((m) => m.userId === recorderId && m.role === 'owner');
-  const recorderName = members.find((m) => m.userId === recorderUserId)?.nickname ?? t('common.me');
+  const showRecorder = members.length > 1 && members.some((m) => m.userId === recorderId && m.role === 'owner');
+  const catColumns = catAreaW > 0 ? Math.max(1, Math.min(5, Math.floor(catAreaW / 60))) : 5;
+  const catItemW = catAreaW > 0 ? catAreaW / catColumns : 64;
 
   const hierarchy = useMemo(
     () => buildCategoryHierarchy(categoriesQ.data ?? [], layoutQ.data ?? []),
@@ -165,6 +185,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   const parts = displayParts(raw);
   const daysInMonth = frequency === 'monthly' ? 31 : new Date(2000, monthOfYear, 0).getDate();
   const selectedDay = Math.min(dayOfMonth, daysInMonth);
+  const scheduleLabel = `${frequency === 'daily' ? t('record.recurringDaily') : frequency === 'monthly' ? t('common.everyMonthDay', { day: selectedDay }) : t('record.recurringYearlyOn', { month: monthOfYear, day: selectedDay })} ${formatScheduleTime(scheduledMinute)}`;
 
   const press = (k: string) => {
     setRaw((prev) => {
@@ -227,7 +248,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
     return (
       <Pressable
         key={c.id}
-        style={styles.catItem}
+        style={[styles.catItem, { width: catItemW }]}
         accessibilityRole="radio"
         accessibilityState={{ selected: active }}
         accessibilityLabel={
@@ -240,19 +261,20 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
         }
         onPress={() => setCategoryId(c.id)}
       >
-        <View
-          style={[
-            styles.catCircle,
-            { backgroundColor: color, opacity: active ? 1 : 0.55 },
-            active && { borderWidth: 2, borderColor: palette.textPrimary },
-          ]}
-        >
-          <SymbolView name={categorySymbol(c.icon, type) as SymbolViewProps['name']} tintColor="#FFFFFF" size={22} />
+        <View style={[styles.catRing, active && { borderColor: palette.accent, borderWidth: 2 }]}>
+          <View style={[styles.catCircle, { backgroundColor: color, opacity: active ? 1 : 0.78 }]}>
+            <SymbolView name={categorySymbol(c.icon, type) as SymbolViewProps['name']} tintColor="#FFFFFF" size={22} />
+          </View>
+          {active ? (
+            <View style={[styles.catCheck, { backgroundColor: palette.accent, borderColor: palette.card }]}>
+              <SymbolView name="checkmark" tintColor="#FFFFFF" size={10} />
+            </View>
+          ) : null}
         </View>
         <Text
-          numberOfLines={1}
+          numberOfLines={2}
           style={{
-            color: active ? palette.textPrimary : palette.textSecondary,
+            color: active ? palette.accent : palette.textSecondary,
             fontSize: 12,
             fontWeight: active ? '600' : '400',
             maxWidth: 56,
@@ -267,8 +289,8 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   const divider = <View style={[styles.divider, { backgroundColor: palette.separator }]} />;
 
   return (
-    <View style={[styles.root, { backgroundColor: palette.base }]}>
-      <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    <View style={[styles.root, { backgroundColor: palette.base }]} onAccessibilityEscape={onClose}>
+      <View style={styles.formArea}>
         <View style={styles.grabberWrap}>
           <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
         </View>
@@ -300,91 +322,94 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
           {parts.hasDot ? <Text style={[styles.amountDec, { color: amountColor }]}>{`.${parts.decimal}`}</Text> : null}
         </View>
 
-        {/* 详情卡：分类 / 记账日 / 备注 / 记账人 */}
-        <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
-          <View style={styles.catHeader}>
-            <Text style={[styles.catHeaderLabel, { color: palette.textSecondary }]}>{t('record.category')}</Text>
-          </View>
-          {keepingOriginalGroup ? (
-            <Text style={{ color: palette.textSecondary, fontSize: 12 }}>{t('record.legacyCategoryKept')}</Text>
-          ) : null}
-          {categoriesQ.isSuccess &&
-          layoutQ.isSuccess &&
-          hiddenQ.isSuccess &&
-          categories.length === 0 &&
-          !keepingOriginalGroup ? (
-            <Text style={{ color: palette.textSecondary }}>{t('record.noSubcategories')}</Text>
-          ) : null}
-          {categoriesQ.isLoading ? (
-            <View style={styles.catLoading}>
-              <ActivityIndicator />
+        <View style={styles.middleFlex}>
+          <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
+            <View style={styles.catArea} onLayout={(event) => setCatAreaW(event.nativeEvent.layout.width)}>
+              {categoriesQ.isLoading || layoutQ.isLoading || hiddenQ.isLoading ? (
+                <View style={styles.catLoading}>
+                  <ActivityIndicator />
+                </View>
+              ) : !categoriesQ.isSuccess || !layoutQ.isSuccess || !hiddenQ.isSuccess ? (
+                <Pressable
+                  onPress={() => {
+                    void categoriesQ.refetch();
+                    void layoutQ.refetch();
+                    void hiddenQ.refetch();
+                  }}
+                  accessibilityRole="button"
+                >
+                  <Text style={{ color: palette.textSecondary }}>{t('common.retry')}</Text>
+                </Pressable>
+              ) : (
+                <ScrollView
+                  style={styles.catScroll}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {keepingOriginalGroup ? (
+                    <Text style={{ color: palette.textSecondary, fontSize: 12, paddingVertical: Space[2] }}>
+                      {t('record.legacyCategoryKept')}
+                    </Text>
+                  ) : null}
+                  {categories.length === 0 && !keepingOriginalGroup ? (
+                    <Text style={{ color: palette.textSecondary }}>{t('record.noSubcategories')}</Text>
+                  ) : null}
+                  <View style={styles.catGrid}>{categories.map(renderCat)}</View>
+                </ScrollView>
+              )}
             </View>
-          ) : (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.catRow}
-              keyboardShouldPersistTaps="handled"
-            >
-              {categories.map(renderCat)}
-            </ScrollView>
-          )}
-
-          {divider}
-
-          <Pressable
-            style={styles.rowInner}
-            onPress={() => {
-              setScheduleMounted(true);
-              setScheduleOpen(true);
-            }}
-            accessibilityRole="button"
-            accessibilityLabel={`${t('record.recurringFrequency')}: ${frequency === 'daily' ? t('record.recurringDaily') : frequency === 'monthly' ? t('common.everyMonthDay', { day: selectedDay }) : t('record.recurringYearlyOn', { month: monthOfYear, day: selectedDay })} ${formatScheduleTime(scheduledMinute)}`}
-          >
-            <SymbolView name="calendar" tintColor={palette.textTertiary} size={16} />
-            <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.recurringFrequency')}</Text>
-            <View style={styles.rowSpacer} />
-            <Text style={[styles.infoValue, { color: palette.info }]} numberOfLines={1}>
-              {frequency === 'daily'
-                ? t('record.recurringDaily')
-                : frequency === 'monthly'
-                  ? t('common.everyMonthDay', { day: selectedDay })
-                  : t('record.recurringYearlyOn', { month: monthOfYear, day: selectedDay })}{' '}
-              {formatScheduleTime(scheduledMinute)}
-            </Text>
-            <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
-          </Pressable>
-          {divider}
-
-          {/* 备注 */}
-          <View style={styles.rowInner}>
-            <SymbolView name="pencil" tintColor={palette.textTertiary} size={16} />
-            <TextInput
-              style={[styles.noteInput, { color: palette.textPrimary }]}
-              placeholder={t('record.recurringNotePlaceholder')}
-              placeholderTextColor={palette.textTertiary}
-              value={note}
-              onChangeText={setNote}
-              maxLength={50}
-              returnKeyType="done"
-            />
+            {divider}
+            <View style={styles.rowInner}>
+              <SymbolView name="pencil" tintColor={palette.textTertiary} size={16} />
+              <TextInput
+                style={[styles.noteInput, { color: palette.textPrimary }]}
+                placeholder={t('record.recurringNotePlaceholder')}
+                placeholderTextColor={palette.textTertiary}
+                value={note}
+                onChangeText={setNote}
+                maxLength={50}
+                returnKeyType="done"
+              />
+            </View>
+            {divider}
+            <View style={styles.toolbar}>
+              <Host style={[styles.toolbarHost, { height: Math.max(48, Math.ceil(48 * fontScale)) }]}>
+                <UIScrollView axes="horizontal" showsIndicators>
+                  <HStack spacing={Space[1]} alignment="center">
+                    <UIButton
+                      label={scheduleLabel}
+                      systemImage="calendar"
+                      onPress={() => {
+                        setMemberOpen(false);
+                        setScheduleMounted(true);
+                        setScheduleOpen(true);
+                      }}
+                      modifiers={[
+                        padding({ horizontal: 8, vertical: 4 }),
+                        background(palette.cardPill, shapes.capsule()),
+                        frame({ minHeight: 44 }),
+                        tint(palette.accent),
+                        fixedSize({ horizontal: true, vertical: false }),
+                        accessibilityLabel(`${t('record.recurringFrequency')}: ${scheduleLabel}`),
+                      ]}
+                    />
+                    {showRecorder ? (
+                      <MemberPopover
+                        members={members}
+                        selectedUserId={recorderUserId}
+                        open={memberOpen}
+                        onOpenChange={setMemberOpen}
+                        onSelect={setRecorderUserId}
+                      />
+                    ) : null}
+                  </HStack>
+                </UIScrollView>
+              </Host>
+            </View>
           </View>
-
-          {/* 记账人：仅户主可选 */}
-          {showRecorder ? (
-            <>
-              {divider}
-              <Pressable style={styles.rowInner} onPress={() => setMemberOpen(true)}>
-                <SymbolView name="person.crop.circle" tintColor={palette.textTertiary} size={16} />
-                <Text style={[styles.infoLabel, { color: palette.textPrimary }]}>{t('record.recorder')}</Text>
-                <View style={styles.rowSpacer} />
-                <Text style={[styles.infoValue, { color: palette.textSecondary }]}>{recorderName}</Text>
-                <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
-              </Pressable>
-            </>
-          ) : null}
         </View>
-
+      </View>
+      <View style={styles.bottomDock}>
         {/* 数字键盘 */}
         <View style={styles.keypad}>
           {KEY_ROWS.map((row, ri) => (
@@ -406,24 +431,18 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
           ))}
         </View>
 
-        {/* 取消 / 保存 */}
-        <View style={styles.actions}>
-          <Pressable style={[styles.cancel, { borderColor: palette.separator }]} onPress={onClose}>
-            <Text style={[styles.cancelText, { color: palette.textSecondary }]}>{t('common.cancel')}</Text>
-          </Pressable>
-          <Pressable
-            disabled={!canSave}
-            onPress={handleSave}
-            style={[styles.save, { backgroundColor: palette.ink, opacity: canSave ? 1 : 0.35 }]}
-          >
-            {saving ? (
-              <ActivityIndicator color={palette.onInk} />
-            ) : (
-              <Text style={[styles.saveText, { color: palette.onInk }]}>{t('common.save')}</Text>
-            )}
-          </Pressable>
-        </View>
-      </ScrollView>
+        <Pressable
+          disabled={!canSave}
+          onPress={handleSave}
+          style={[styles.save, { backgroundColor: palette.ink, opacity: canSave ? 1 : 0.35 }]}
+        >
+          {saving ? (
+            <ActivityIndicator color={palette.onInk} />
+          ) : (
+            <Text style={[styles.saveText, { color: palette.onInk }]}>{t('common.save')}</Text>
+          )}
+        </Pressable>
+      </View>
 
       {scheduleMounted ? (
         <SchedulePickerSheet
@@ -444,17 +463,6 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
           }}
         />
       ) : null}
-
-      <MemberPickerSheet
-        visible={showRecorder && memberOpen}
-        members={members}
-        selectedUserId={recorderUserId}
-        onSelect={(uid) => {
-          setRecorderUserId(uid);
-          setMemberOpen(false);
-        }}
-        onClose={() => setMemberOpen(false)}
-      />
     </View>
   );
 }
@@ -588,80 +596,44 @@ function SchedulePickerSheet({
   );
 }
 
-/** 记账人选择：从底部弹出的成员列表（与 record-sheet 同款）。 */
-function MemberPickerSheet({
-  visible,
-  members,
-  selectedUserId,
-  onSelect,
-  onClose,
-}: {
-  visible: boolean;
-  members: FamilyMembership[];
-  selectedUserId: string;
-  onSelect: (userId: string) => void;
-  onClose: () => void;
-}) {
-  const palette = usePalette();
-  useLocalePreference();
-  const insets = useSafeAreaInsets();
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable
-          style={[styles.memberSheet, { backgroundColor: palette.elevated, paddingBottom: insets.bottom + Space[3] }]}
-          onPress={() => {}}
-        >
-          <View style={[styles.grabber, { backgroundColor: palette.separator, marginTop: Space[2] }]} />
-          <View style={styles.memberHeader}>
-            <View style={styles.memberHeaderSide} />
-            <Text style={[styles.memberTitle, { color: palette.textPrimary }]}>{t('record.recorder')}</Text>
-            <Pressable style={styles.memberHeaderSide} hitSlop={8} onPress={onClose}>
-              <SymbolView name="xmark" tintColor={palette.textTertiary} size={16} />
-            </Pressable>
-          </View>
-          {members.map((m) => {
-            const active = m.userId === selectedUserId;
-            return (
-              <Pressable key={m.id} style={styles.memberRow} onPress={() => onSelect(m.userId)}>
-                <SymbolView name="person.crop.circle.fill" tintColor={palette.textTertiary} size={32} />
-                <Text style={[styles.memberName, { color: palette.textPrimary }]} numberOfLines={1}>
-                  {m.nickname}
-                </Text>
-                <View style={styles.rowSpacer} />
-                {active ? <SymbolView name="checkmark" tintColor={palette.info} size={18} /> : null}
-              </Pressable>
-            );
-          })}
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1, paddingHorizontal: Space[4], paddingTop: Space[2] },
   grabberWrap: { alignItems: 'center', paddingBottom: Space[1] },
   grabber: { width: 36, height: 5, borderRadius: Radius.full, alignSelf: 'center' },
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: Space[1] },
+  formArea: { flex: 1, minHeight: 0 },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: Space[3] },
   topTitle: { fontSize: 17, fontWeight: '600' },
   segmentHost: { height: 34, marginTop: Space[2] },
   amountRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', paddingVertical: Space[5] },
   amountSign: { fontSize: 28, fontWeight: '700', fontVariant: ['tabular-nums'] },
   amountInt: { fontSize: 48, fontWeight: '700', fontVariant: ['tabular-nums'] },
   amountDec: { fontSize: 28, fontWeight: '400', fontVariant: ['tabular-nums'] },
-  detailCard: { borderRadius: Radius.lg, paddingHorizontal: Space[4] },
-  catHeader: { paddingTop: Space[3], paddingBottom: Space[1] },
-  catHeaderLabel: { fontSize: 13, fontWeight: '600' },
+  middleFlex: { flex: 1, minHeight: 0 },
+  detailCard: { flex: 1, minHeight: 0, borderRadius: Radius.lg, paddingHorizontal: Space[4] },
+  catArea: { flex: 1, minHeight: 0 },
+  catScroll: { flex: 1 },
+  catGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: Space[3], paddingVertical: Space[2] },
+  catRing: { width: 58, height: 58, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
+  catCheck: {
+    position: 'absolute',
+    right: -1,
+    bottom: -1,
+    width: 18,
+    height: 18,
+    borderRadius: Radius.full,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toolbar: { flexDirection: 'row', alignItems: 'center', minHeight: 48 },
+  toolbarHost: { flex: 1, minWidth: 0 },
+  bottomDock: { paddingTop: Space[2], paddingBottom: Space[8] },
   catLoading: { height: 80, alignItems: 'center', justifyContent: 'center' },
-  catRow: { paddingVertical: Space[2], gap: Space[3] },
-  catItem: { alignItems: 'center', gap: Space[1], width: 60 },
+  catItem: { alignItems: 'center', gap: Space[1] },
   catCircle: { width: 52, height: 52, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: Space[6] },
   rowInner: { flexDirection: 'row', alignItems: 'center', gap: Space[2], paddingVertical: Space[3], minHeight: 48 },
   noteInput: { flex: 1, fontSize: 15, padding: 0 },
-  infoLabel: { fontSize: 15 },
-  infoValue: { fontSize: 15 },
   scheduleHint: { fontSize: 13, lineHeight: 18, textAlign: 'center', paddingVertical: Space[3] },
   sheetAnchor: { width: 1, height: 1 },
   scheduleSheet: { flex: 1, paddingHorizontal: Space[4], paddingTop: Space[6] },
@@ -677,9 +649,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scheduleDoneText: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' },
-  rowSpacer: { flex: 1 },
-  dayHost: { minWidth: 72, minHeight: 28 },
-  keypad: { marginTop: Space[5], gap: Space[2] },
+  keypad: { gap: Space[2] },
   keyRow: { flexDirection: 'row', gap: Space[2] },
   key: {
     flex: 1,
@@ -693,33 +663,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
   },
   keyText: { fontSize: 26, fontWeight: '500', fontVariant: ['tabular-nums'] },
-  actions: { flexDirection: 'row', gap: Space[3], marginTop: Space[3], marginBottom: Space[6] },
-  cancel: {
-    width: 100,
-    height: 50,
-    borderRadius: Radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cancelText: { fontSize: 17, fontWeight: '500' },
-  save: { flex: 1, height: 50, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
+  save: { height: 50, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center', marginTop: Space[3] },
   saveText: { fontSize: 17, fontWeight: '600' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
-  memberSheet: {
-    borderTopLeftRadius: Radius.lg,
-    borderTopRightRadius: Radius.lg,
-    paddingHorizontal: Space[4],
-    alignItems: 'stretch',
-  },
-  memberHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Space[3],
-  },
-  memberHeaderSide: { width: 24, alignItems: 'flex-end' },
-  memberTitle: { fontSize: 16, fontWeight: '600' },
-  memberRow: { flexDirection: 'row', alignItems: 'center', gap: Space[3], paddingVertical: Space[3] },
-  memberName: { flexShrink: 1, fontSize: 16, fontWeight: '500' },
 });

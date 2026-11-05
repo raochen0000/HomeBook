@@ -13,12 +13,11 @@ import {
   DatePicker,
   Host,
   HStack,
-  Image as UIImage,
   Picker,
   Popover,
-  Spacer,
   Text as UIText,
   VStack,
+  ScrollView as UIScrollView,
 } from '@expo/ui/swift-ui';
 import {
   accessibilityLabel,
@@ -27,14 +26,11 @@ import {
   environment,
   frame,
   labelsHidden,
-  layoutPriority,
-  lineLimit,
   padding,
   pickerStyle,
   shapes,
   tag,
   tint,
-  truncationMode,
 } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
@@ -65,10 +61,8 @@ import {
   type Transaction,
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
-import { ListUserAvatar } from '@/components/list-user-avatar';
 import { playToastHaptic, toast, ToastNotice, type ToastItem } from '@/components/toast';
 import { Radius, Space, useCategoryColors, useSheetPalette } from '@/constants/design';
-import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { alertOk, displayCategoryName, INTL_LOCALE, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { buildCategoryHierarchy, categoryPath, selectableRecordCategories } from '@/lib/category-hierarchy';
@@ -80,6 +74,7 @@ import {
   sortCategoriesByUsage,
   type CategoryUsageEvent,
 } from './category-usage';
+import { MemberPopover } from './member-popover';
 import { isLikelyNetworkError, isSaveAttemptTimeout, SAVE_NETWORK_TIMEOUT_MS, withDeadline } from './save-attempt';
 
 type TxnType = 'expense' | 'income';
@@ -133,6 +128,7 @@ export function RecordSheet({ visible, onClose, onDismiss, familyId, recorderId,
   return (
     <PageSheet
       visible={visible}
+      allowSwipeDismissal
       onClose={onClose}
       onDismiss={() => {
         const showUpdated = updateToastPending.current;
@@ -218,9 +214,7 @@ function RecordForm({
 
   // 同家庭成员；仅户主可查看并切换「记账人」，普通成员默认记到自己名下。
   const members = membersQ.data ?? [];
-  const avatarFiles = useAvatarFiles(members.map((member) => ({ id: member.userId, avatar_url: member.avatarUrl })));
   const showRecorder = members.length > 1 && members.some((m) => m.userId === recorderId && m.role === 'owner');
-  const recorderName = members.find((m) => m.userId === recorderUserId)?.nickname ?? t('common.me');
 
   // 可手动选择的分类：当前类型 + 排除储蓄类系统分类（储蓄走专门入口，PRD 口径）+ 排除本家庭隐藏的系统分类。
   // 仅显示当前 Tab 类型——支出 Tab 不混入收入分类，反之亦然。
@@ -471,11 +465,6 @@ function RecordForm({
   // 详情卡（分类/备注/时间/记账人）。分类始终完整网格展示，且仅分类区在卡内纵向滚动。
   const detailCardNode = (
     <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
-      {/* 分类标题 */}
-      <View style={styles.catHeader}>
-        <Text style={[styles.catHeaderLabel, { color: palette.textSecondary }]}>{t('record.category')}</Text>
-      </View>
-
       {/* 分类：完整网格；只在此区域滚动，备注／时间／记账人保持可见。 */}
       <View style={styles.catArea} onLayout={(e) => setCatAreaW(e.nativeEvent.layout.width)}>
         {categoriesQ.isLoading || layoutQ.isLoading || hiddenQ.isLoading || !usageLoaded ? (
@@ -528,148 +517,108 @@ function RecordForm({
       {/* 日期、时间和记录人靠左排列，分别打开原生 popover。 */}
       <View style={styles.toolbar}>
         <Host style={[styles.toolbarHost, { height: toolbarHeight }]}>
-          <HStack spacing={Space[1]} alignment="center">
-            <HStack modifiers={[layoutPriority(1)]}>
-              <Popover isPresented={dateOpen} onIsPresentedChange={setDateOpen}>
-                <Popover.Trigger>
-                  <UIButton
-                    label={dateLabel}
-                    systemImage="calendar"
-                    onPress={() => {
-                      setTimeOpen(false);
-                      setMemberOpen(false);
-                      setDateOpen(true);
-                    }}
-                    modifiers={[
-                      padding({ horizontal: 8, vertical: 4 }),
-                      frame({ width: DATE_TRIGGER_WIDTH }),
-                      background(palette.cardPill, shapes.capsule()),
-                      frame({ minHeight: 44 }),
-                      tint(palette.accent),
-                      accessibilityLabel(`${t('dates.date')}: ${dateLabel}`),
-                    ]}
-                  />
-                </Popover.Trigger>
-                <Popover.Content>
-                  <VStack spacing={8} modifiers={[padding({ all: 16 }), frame({ width: 300 })]}>
-                    <DatePicker
-                      selection={occurredAt}
-                      displayedComponents={['date']}
-                      onDateChange={setOccurredAt}
+          <UIScrollView axes="horizontal" showsIndicators>
+            <HStack spacing={Space[1]} alignment="center">
+              <HStack>
+                <Popover isPresented={dateOpen} onIsPresentedChange={setDateOpen}>
+                  <Popover.Trigger>
+                    <UIButton
+                      label={dateLabel}
+                      systemImage="calendar"
+                      onPress={() => {
+                        setTimeOpen(false);
+                        setMemberOpen(false);
+                        setDateOpen(true);
+                      }}
                       modifiers={[
-                        datePickerStyle('graphical'),
-                        labelsHidden(),
-                        environment('locale', INTL_LOCALE[locale]),
-                        accessibilityLabel(t('dates.date')),
+                        padding({ horizontal: 8, vertical: 4 }),
+                        frame({ width: Math.ceil(DATE_TRIGGER_WIDTH * Math.max(1, fontScale)) }),
+                        background(palette.cardPill, shapes.capsule()),
+                        frame({ minHeight: 44 }),
+                        tint(palette.accent),
+                        accessibilityLabel(`${t('dates.date')}: ${dateLabel}`),
                       ]}
                     />
-                  </VStack>
-                </Popover.Content>
-              </Popover>
-            </HStack>
-            <HStack modifiers={[layoutPriority(1)]}>
-              <Popover isPresented={timeOpen} onIsPresentedChange={setTimeOpen}>
-                <Popover.Trigger>
-                  <UIButton
-                    label={timeLabel}
-                    systemImage="clock"
-                    onPress={() => {
-                      setDateOpen(false);
-                      setMemberOpen(false);
-                      setTimeOpen(true);
-                    }}
-                    modifiers={[
-                      padding({ horizontal: 8, vertical: 4 }),
-                      frame({ width: TIME_TRIGGER_WIDTH }),
-                      background(palette.cardPill, shapes.capsule()),
-                      frame({ minHeight: 44 }),
-                      tint(palette.accent),
-                      accessibilityLabel(`${t('record.time')}: ${timeLabel}`),
-                    ]}
-                  />
-                </Popover.Trigger>
-                <Popover.Content>
-                  <VStack spacing={8} modifiers={[padding({ all: 16 }), frame({ width: 220 })]}>
-                    <DatePicker
-                      selection={occurredAt}
-                      displayedComponents={['hourAndMinute']}
-                      onDateChange={setOccurredAt}
+                  </Popover.Trigger>
+                  <Popover.Content>
+                    <VStack spacing={8} modifiers={[padding({ all: 16 }), frame({ width: 300 })]}>
+                      <DatePicker
+                        selection={occurredAt}
+                        displayedComponents={['date']}
+                        onDateChange={setOccurredAt}
+                        modifiers={[
+                          datePickerStyle('graphical'),
+                          labelsHidden(),
+                          environment('locale', INTL_LOCALE[locale]),
+                          accessibilityLabel(t('dates.date')),
+                        ]}
+                      />
+                    </VStack>
+                  </Popover.Content>
+                </Popover>
+              </HStack>
+              <HStack>
+                <Popover isPresented={timeOpen} onIsPresentedChange={setTimeOpen}>
+                  <Popover.Trigger>
+                    <UIButton
+                      label={timeLabel}
+                      systemImage="clock"
+                      onPress={() => {
+                        setDateOpen(false);
+                        setMemberOpen(false);
+                        setTimeOpen(true);
+                      }}
                       modifiers={[
-                        datePickerStyle('wheel'),
-                        labelsHidden(),
-                        environment('locale', INTL_LOCALE[locale]),
-                        accessibilityLabel(t('record.time')),
+                        padding({ horizontal: 8, vertical: 4 }),
+                        frame({ width: Math.ceil(TIME_TRIGGER_WIDTH * Math.max(1, fontScale)) }),
+                        background(palette.cardPill, shapes.capsule()),
+                        frame({ minHeight: 44 }),
+                        tint(palette.accent),
+                        accessibilityLabel(`${t('record.time')}: ${timeLabel}`),
                       ]}
                     />
-                  </VStack>
-                </Popover.Content>
-              </Popover>
-            </HStack>
-            {showRecorder ? (
-              <Popover isPresented={memberOpen} onIsPresentedChange={setMemberOpen}>
-                <Popover.Trigger>
-                  <UIButton
-                    onPress={() => {
+                  </Popover.Trigger>
+                  <Popover.Content>
+                    <VStack spacing={8} modifiers={[padding({ all: 16 }), frame({ width: 220 })]}>
+                      <DatePicker
+                        selection={occurredAt}
+                        displayedComponents={['hourAndMinute']}
+                        onDateChange={setOccurredAt}
+                        modifiers={[
+                          datePickerStyle('wheel'),
+                          labelsHidden(),
+                          environment('locale', INTL_LOCALE[locale]),
+                          accessibilityLabel(t('record.time')),
+                        ]}
+                      />
+                    </VStack>
+                  </Popover.Content>
+                </Popover>
+              </HStack>
+              {showRecorder ? (
+                <MemberPopover
+                  members={members}
+                  selectedUserId={recorderUserId}
+                  open={memberOpen}
+                  onOpenChange={(open) => {
+                    if (open) {
                       setDateOpen(false);
                       setTimeOpen(false);
-                      setMemberOpen(true);
-                    }}
-                    modifiers={[
-                      padding({ horizontal: 8, vertical: 4 }),
-                      background(palette.cardPill, shapes.capsule()),
-                      frame({ minHeight: 44 }),
-                      tint(palette.accent),
-                      accessibilityLabel(`${t('record.recorder')}: ${recorderName}`),
-                    ]}
-                  >
-                    <HStack spacing={4} alignment="center">
-                      <ListUserAvatar uri={avatarFiles.get(recorderUserId) ?? null} nickname={recorderName} size={22} />
-                      <UIText modifiers={[lineLimit(1), truncationMode('tail')]}>{recorderName}</UIText>
-                    </HStack>
-                  </UIButton>
-                </Popover.Trigger>
-                <Popover.Content>
-                  <VStack alignment="leading" spacing={4} modifiers={[padding({ all: 10 }), frame({ width: 220 })]}>
-                    {members.map((member) => {
-                      const active = member.userId === recorderUserId;
-                      return (
-                        <UIButton
-                          key={member.id}
-                          onPress={() => {
-                            setRecorderUserId(member.userId);
-                            setMemberOpen(false);
-                          }}
-                          modifiers={[
-                            frame({ minHeight: 48, maxWidth: 200, alignment: 'leading' }),
-                            accessibilityLabel(`${member.nickname}${active ? t('category.selected') : ''}`),
-                          ]}
-                        >
-                          <HStack spacing={10} alignment="center">
-                            <ListUserAvatar
-                              uri={avatarFiles.get(member.userId) ?? null}
-                              nickname={member.nickname}
-                              size={32}
-                            />
-                            <UIText>{member.nickname}</UIText>
-                            <Spacer minLength={0} />
-                            {active ? <UIImage systemName="checkmark" color={palette.accent} size={16} /> : null}
-                          </HStack>
-                        </UIButton>
-                      );
-                    })}
-                  </VStack>
-                </Popover.Content>
-              </Popover>
-            ) : null}
-            <Spacer minLength={0} />
-          </HStack>
+                    }
+                    setMemberOpen(open);
+                  }}
+                  onSelect={setRecorderUserId}
+                />
+              ) : null}
+            </HStack>
+          </UIScrollView>
         </Host>
       </View>
     </View>
   );
 
   return (
-    <View style={[styles.root, { backgroundColor: palette.base }]}>
+    <View style={[styles.root, { backgroundColor: palette.base }]} onAccessibilityEscape={onClose}>
       <View style={styles.formArea}>
         {/* 居中抓手（替代「取消」：拖拽 / 下滑收起，由 pageSheet 原生处理） */}
         <View style={styles.grabberWrap}>
@@ -767,14 +716,6 @@ const styles = StyleSheet.create({
   amountDec: { fontSize: 28, fontWeight: '400', fontVariant: ['tabular-nums'] },
   middleFlex: { flex: 1, minHeight: 0 },
   detailCard: { flex: 1, minHeight: 0, borderRadius: Radius.lg, paddingHorizontal: Space[4] },
-  catHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: Space[3],
-    paddingBottom: Space[1],
-  },
-  catHeaderLabel: { fontSize: 13, fontWeight: '600' },
   catArea: { flex: 1, minHeight: 0 },
   catScroll: { flex: 1 },
   catLoading: { height: 80, alignItems: 'center', justifyContent: 'center' },
