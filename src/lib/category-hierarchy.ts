@@ -97,7 +97,7 @@ export function selectableCategories(
     });
 }
 
-/** New manual entries can use children or ungrouped categories, never a parent. */
+/** New entries can only use second-level categories. */
 export function selectableRecordCategories(
   hierarchy: CategoryHierarchy,
   type: 'expense' | 'income',
@@ -105,6 +105,6 @@ export function selectableRecordCategories(
   editingId?: string | null,
 ): Category[] {
   return selectableCategories(hierarchy, type, hidden, editingId).filter(
-    (category) => !hierarchy.layoutById.get(category.id)?.is_group,
+    (category) => !!hierarchy.layoutById.get(category.id)?.parent_category_id,
   );
 }

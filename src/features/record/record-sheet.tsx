@@ -275,14 +275,14 @@ function RecordForm({
     !!editing &&
     categoryId === editing.category_id &&
     type === editing.type &&
-    hierarchy.layoutById.get(editing.category_id)?.is_group === true;
+    !hierarchy.layoutById.get(editing.category_id)?.parent_category_id;
 
   // 用户选择优先；否则使用本人最近分类，首次或失效时回退到对应的「其他」。
   const effectiveCategoryId = useMemo(() => {
     if (keepingOriginalGroup) return categoryId;
     if (categoryId && categories.some((c) => c.id === categoryId)) return categoryId;
     if (recent[type] && categories.some((c) => c.id === recent[type])) return recent[type];
-    return categories.find((c) => c.is_system && c.name === (type === 'expense' ? '其他支出' : '其他收入'))?.id ?? null;
+    return categories[0]?.id ?? null;
   }, [categoryId, categories, keepingOriginalGroup, recent, type]);
 
   // 常规宽度每行 5 个；窄屏减少列数，避免选中外环互相重叠。
@@ -498,6 +498,9 @@ function RecordForm({
               <Text style={{ color: palette.textSecondary, fontSize: 12, paddingVertical: Space[2] }}>
                 {t('record.legacyCategoryKept')}
               </Text>
+            ) : null}
+            {categories.length === 0 && !keepingOriginalGroup ? (
+              <Text style={{ color: palette.textSecondary }}>{t('record.noSubcategories')}</Text>
             ) : null}
             <View style={styles.catGrid}>{categories.map((c) => renderCat(c, catItemW))}</View>
           </ScrollView>

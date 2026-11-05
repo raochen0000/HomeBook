@@ -480,7 +480,7 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
     );
   };
 
-  const renderRow = (c: Category, editable: boolean, child = false) => {
+  const renderRow = (c: Category, editable: boolean, child = false, emptyGroup = false) => {
     const color = catColors[categoryColorKey(c.name, type, c.color_key)];
     const isHidden = c.is_system && hidden.has(c.id);
     const isProtected = c.is_system && PROTECTED_SYSTEM_NAMES.has(c.name);
@@ -494,9 +494,14 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
           <View style={[styles.iconDot, { backgroundColor: color, opacity: isHidden ? 0.4 : 1 }]}>
             <SymbolView name={(c.icon ?? 'circle.fill') as SymbolViewProps['name']} tintColor="#FFFFFF" size={17} />
           </View>
-          <Text style={[styles.rowName, { color: palette.textPrimary, opacity: isHidden ? 0.4 : 1 }]}>
+          <Text style={[styles.rowName, { color: palette.textPrimary, opacity: isHidden ? 0.4 : 1, flexShrink: 1 }]}>
             {displayCategoryName(c.name, c.is_system)}
           </Text>
+          {emptyGroup ? (
+            <Text style={{ color: palette.textSecondary, fontSize: 13, flexShrink: 1 }}>
+              {t('category.groupEmpty')}
+            </Text>
+          ) : null}
         </Pressable>
         {!child && !isHidden ? (
           <Pressable
@@ -549,17 +554,17 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
     const children = (catsQ.data ?? []).filter((item) => layoutById.get(item.id)?.parent_category_id === category.id);
     return (
       <Fragment key={category.id}>
-        {renderRow(category, !category.is_system)}
+        {renderRow(
+          category,
+          !category.is_system,
+          false,
+          !!layoutById.get(category.id)?.is_group && children.length === 0,
+        )}
         {children.map((child) => (
           <View key={child.id} style={{ paddingLeft: Space[5] }}>
             {renderRow(child, !child.is_system, true)}
           </View>
         ))}
-        {layoutById.get(category.id)?.is_group && children.length === 0 ? (
-          <Text style={{ color: palette.textSecondary, paddingLeft: Space[6], paddingBottom: Space[2] }}>
-            {t('category.groupEmpty')}
-          </Text>
-        ) : null}
       </Fragment>
     );
   };

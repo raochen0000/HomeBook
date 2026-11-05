@@ -76,17 +76,12 @@ describe('category hierarchy', () => {
   });
 
   it('never offers a legacy parent in the manual entry picker, even when editing it', () => {
-    expect(selectableRecordCategories(tree, 'expense', new Set()).map((item) => item.id)).toEqual([
-      'breakfast',
-      'travel',
-    ]);
+    expect(selectableRecordCategories(tree, 'expense', new Set()).map((item) => item.id)).toEqual(['breakfast']);
     expect(selectableRecordCategories(tree, 'expense', new Set(), 'food').map((item) => item.id)).toEqual([
       'breakfast',
-      'travel',
     ]);
     expect(selectableRecordCategories(tree, 'expense', new Set(['food']), 'old').map((item) => item.id)).toEqual([
       'old',
-      'travel',
     ]);
   });
 

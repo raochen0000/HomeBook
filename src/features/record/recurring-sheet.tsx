@@ -143,7 +143,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
     !!editing &&
     categoryId === editing.category_id &&
     type === editing.type &&
-    hierarchy.layoutById.get(editing.category_id)?.is_group === true;
+    !hierarchy.layoutById.get(editing.category_id)?.parent_category_id;
 
   const effectiveCategoryId = useMemo(() => {
     if (keepingOriginalGroup) return categoryId;
@@ -307,6 +307,13 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
           </View>
           {keepingOriginalGroup ? (
             <Text style={{ color: palette.textSecondary, fontSize: 12 }}>{t('record.legacyCategoryKept')}</Text>
+          ) : null}
+          {categoriesQ.isSuccess &&
+          layoutQ.isSuccess &&
+          hiddenQ.isSuccess &&
+          categories.length === 0 &&
+          !keepingOriginalGroup ? (
+            <Text style={{ color: palette.textSecondary }}>{t('record.noSubcategories')}</Text>
           ) : null}
           {categoriesQ.isLoading ? (
             <View style={styles.catLoading}>
