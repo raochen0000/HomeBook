@@ -700,7 +700,7 @@ function MoveCategory({ category, onBack }: { category: Category; onBack: () => 
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         <SheetHeader title={t('category.moveTitle')} onBack={onBack} />
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, styles.moveContent]}>
           {currentParent ? (
             <Pressable style={styles.row} onPress={() => void choose(null)}>
               <Text style={{ color: palette.textPrimary }}>{t('category.moveStandalone')}</Text>
@@ -994,6 +994,7 @@ const styles = StyleSheet.create({
   action: { fontSize: 16 },
   segmentHost: { height: 34, marginTop: SHEET_HEADER_HEIGHT, marginHorizontal: Space[4] },
   content: { paddingHorizontal: Space[6], paddingTop: Space[4], paddingBottom: Space[12], gap: Space[5] },
+  moveContent: { paddingTop: SHEET_CONTENT_TOP_PADDING },
   addRow: {
     flexDirection: 'row',
     alignItems: 'center',
