@@ -48,7 +48,6 @@ import { TransactionDetailSheet } from '@/features/home/transaction-detail-sheet
 import { NotificationCenterSheet } from '@/features/notifications/center-sheet';
 import { RecordSheet } from '@/features/record/record-sheet';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
-import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { budgetLevel, daysToMonthEnd } from '@/lib/budget';
@@ -384,6 +383,12 @@ export default function FamilyScreen() {
               </ThemedText>
               <View style={styles.quickRow}>
                 <QuickTile
+                  icon="square.grid.2x2.fill"
+                  title={t('family.categories')}
+                  sub={t('family.categoriesSub')}
+                  onPress={() => setCategoryOpen(true)}
+                />
+                <QuickTile
                   icon="chart.pie.fill"
                   title={t('family.budget')}
                   sub={budgetSub}
@@ -400,19 +405,6 @@ export default function FamilyScreen() {
                   title={t('family.inviteShort')}
                   sub={t('family.inviteSub')}
                   onPress={onInvite}
-                />
-                <QuickTile
-                  icon="bell.fill"
-                  title={t('family.notificationsShort')}
-                  sub={unreadCount > 0 ? t('common.unreadCount', { count: unreadCount }) : t('family.important')}
-                  badge={unreadCount}
-                  onPress={() => setNotifyOpen(true)}
-                />
-                <QuickTile
-                  icon="square.grid.2x2.fill"
-                  title={t('family.categories')}
-                  sub={t('family.categoriesSub')}
-                  onPress={() => setCategoryOpen(true)}
                 />
               </View>
             </View>
@@ -461,7 +453,20 @@ export default function FamilyScreen() {
             onLayout={onHeaderLayout}
           >
             <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('family.title')}</ThemedText>
-            <HeaderSearchButton />
+            <Pressable
+              hitSlop={12}
+              onPress={() => setNotifyOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('family.notifications')}
+              accessibilityHint={unreadCount > 0 ? t('common.unreadCount', { count: unreadCount }) : undefined}
+            >
+              <SymbolView name="bell.fill" tintColor={palette.textPrimary} size={22} />
+              {unreadCount > 0 ? (
+                <View
+                  style={[styles.notificationDot, { backgroundColor: palette.danger, borderColor: palette.base }]}
+                />
+              ) : null}
+            </Pressable>
           </Animated.View>
         </View>
       </View>
@@ -916,18 +921,16 @@ function InviteGuideCard({
   );
 }
 
-// ── 快捷功能瓦片（可选右上角红点角标，用于家庭通知未读数）──
+// ── 快捷功能瓦片 ──
 function QuickTile({
   icon,
   title,
   sub,
-  badge,
   onPress,
 }: {
   icon: SymbolViewProps['name'];
   title: string;
   sub: string;
-  badge?: number;
   onPress: () => void;
 }) {
   const palette = usePalette();
@@ -941,11 +944,6 @@ function QuickTile({
       <ThemedText style={[styles.quickSub, { color: palette.textTertiary }]} numberOfLines={1}>
         {sub}
       </ThemedText>
-      {badge && badge > 0 ? (
-        <View style={[styles.quickBadge, { backgroundColor: palette.danger, borderColor: palette.card }]}>
-          <ThemedText style={styles.quickBadgeText}>{badge > 99 ? '99+' : badge}</ThemedText>
-        </View>
-      ) : null}
     </Pressable>
   );
 }
@@ -1184,19 +1182,15 @@ const styles = StyleSheet.create({
   },
   quickTitle: { fontSize: 13, lineHeight: 16, fontWeight: '600', marginTop: 2, textAlign: 'center' },
   quickSub: { fontSize: 11, lineHeight: 14 },
-  quickBadge: {
+  notificationDot: {
     position: 'absolute',
-    top: 6,
-    right: 6,
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 5,
+    top: -2,
+    right: -2,
+    width: 10,
+    height: 10,
     borderRadius: Radius.full,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderWidth: 1,
   },
-  quickBadgeText: { color: '#FFFFFF', fontSize: 10, lineHeight: 13, fontWeight: '700' },
 
   // 家庭管理
   manageRow: {
