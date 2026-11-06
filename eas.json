@@ -18,7 +18,13 @@
     },
     "production": {
       "autoIncrement": true,
-      "environment": "production"
+      "environment": "production",
+      "ios": {
+        "env": {
+          "EAS_USE_CACHE": "1",
+          "USE_CCACHE": "1"
+        }
+      }
     }
   },
   "submit": {
