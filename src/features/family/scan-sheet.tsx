@@ -14,6 +14,7 @@
  */
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Image } from 'expo-image';
+import { SymbolView } from 'expo-symbols';
 import { useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -243,6 +244,7 @@ function PreviewCard({
   useLocalePreference();
   const avatarTints = useAvatarTints();
   const family = preview.family!;
+  const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
   const banner = impactBanner(preview.impact);
   const blocked = preview.impact === 'blocked_owner';
 
@@ -250,11 +252,24 @@ function PreviewCard({
     <ScrollView contentContainerStyle={styles.previewWrap} keyboardShouldPersistTaps="handled">
       {/* 封面 */}
       <View style={[styles.cover, { backgroundColor: palette.card }]}>
-        {family.cover_url ? (
-          <Image source={family.cover_url} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
-        ) : (
-          <Text style={[styles.coverPlaceholder, { color: palette.textTertiary }]}>{family.name.slice(0, 1)}</Text>
-        )}
+        <View style={[StyleSheet.absoluteFill, styles.coverGradient]} />
+        <SymbolView
+          name="house.fill"
+          tintColor="rgba(255,255,255,0.14)"
+          size={96}
+          style={styles.coverHouse}
+          pointerEvents="none"
+          accessible={false}
+        />
+        {family.cover_url && family.cover_url !== failedCoverUrl ? (
+          <Image
+            source={family.cover_url}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            transition={150}
+            onError={() => setFailedCoverUrl(family.cover_url)}
+          />
+        ) : null}
         {family.avatar_url ? (
           <Image source={family.avatar_url} style={styles.familyAvatar} contentFit="cover" transition={120} />
         ) : (
@@ -390,7 +405,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  coverPlaceholder: { fontSize: 48, fontWeight: '300' },
+  coverGradient: { experimental_backgroundImage: 'linear-gradient(145deg, #3C9FFE, #0169D4)' },
+  coverHouse: { position: 'absolute', top: -8, right: -10 },
   familyAvatar: {
     position: 'absolute',
     top: Space[3],
