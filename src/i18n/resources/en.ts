@@ -451,6 +451,8 @@ const en = {
     filterAll: 'All data',
     filterCount: '{{count}} filters',
     filterA11y: 'Report filters, {{period}}, {{active}} on, {{matched}} entries this period',
+    filterActiveA11y: 'Report filters, filters active',
+    filterInactiveA11y: 'Report filters, no filters active',
     filterHint: 'Filter reports by member or category',
     currentInProgress: 'In progress',
     readinessA11y: 'Still gathering data. {{count}} entries so far; trends improve as you add more.',

@@ -7,8 +7,16 @@
  * / 分类环比 / 成员贡献 / 大额 Top N 仅算「支出 + source=normal」；收入结构仅算 source=normal 收入
  * （均排除储蓄类）。
  */
-import { DatePicker, Host, Picker, Text as UIText } from '@expo/ui/swift-ui';
-import { datePickerStyle, labelsHidden, pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
+import { BottomSheet, DatePicker, Group, Host, Picker, RNHostView, Text as UIText } from '@expo/ui/swift-ui';
+import {
+  datePickerStyle,
+  labelsHidden,
+  pickerStyle,
+  presentationBackground,
+  presentationDetents,
+  presentationDragIndicator,
+  tag,
+} from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter, type Href } from 'expo-router';
@@ -52,7 +60,6 @@ import {
 import { Donut } from '@/features/report/donut';
 import { MoreStatsEntryCard, MoreStatsSheet } from '@/features/report/more-stats-ui';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
-import { HeaderSearchButton } from '@/features/search/search-provider';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { displayCategoryName, i18n, INTL_LOCALE, t, useLocalePreference } from '@/i18n';
 import { fromI18nLanguage } from '@/i18n/locale';
@@ -203,9 +210,9 @@ export default function ReportScreen() {
   const { locale } = useLocalePreference();
   const catColors = useCategoryColors();
   const insets = useSafeAreaInsets();
-  // estimate 必须等于实测头高（paddingTop 8 + 标题 41 + paddingBottom 12），否则裁切框（overflow:hidden）
+  // estimate 必须等于实测头高（paddingTop 6 + 按钮 44 + paddingBottom 10），否则裁切框（overflow:hidden）
   // 偏小会在首帧切掉标题底部。
-  const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 61);
+  const { scrollRef, headerHeight, headerStyle, onHeaderLayout } = useCollapsibleHeader(insets.top + 60);
   const catsQ = useAllCategories();
   const layoutQ = useCategoryLayout();
   const hierarchy = useMemo(
@@ -297,6 +304,7 @@ export default function ReportScreen() {
   const filteredCount = reportData?.summary.transactionCount ?? 0;
   const activeFilters = activeFilterCount(filters);
   const reportLoadFailed = (reportQ.isError && !reportData) || catsQ.isError || layoutQ.isError;
+  const filterUnavailable = catsQ.isLoading || layoutQ.isLoading || catsQ.isError || layoutQ.isError;
 
   useEffect(() => {
     let alive = true;
@@ -762,15 +770,6 @@ export default function ReportScreen() {
               </View>
             </View>
 
-            <ReportFilterBar
-              activeCount={activeFilters}
-              matchedCount={filteredCount}
-              periodLabel={periodText}
-              currentPeriod={isCurrent}
-              palette={palette}
-              onPress={() => setFilterOpen(true)}
-            />
-
             {filteredCount > 0 && filteredCount < 3 ? (
               <ReportDataReadinessCard count={filteredCount} palette={palette} />
             ) : null}
@@ -786,7 +785,27 @@ export default function ReportScreen() {
             onLayout={onHeaderLayout}
           >
             <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('tabs.report')}</ThemedText>
-            <HeaderSearchButton />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t(activeFilters > 0 ? 'report.filterActiveA11y' : 'report.filterInactiveA11y')}
+              accessibilityHint={t('report.filterHint')}
+              accessibilityState={{ disabled: filterUnavailable }}
+              disabled={filterUnavailable}
+              onPress={() => setFilterOpen(true)}
+              style={styles.filterButton}
+            >
+              <SymbolView
+                name="line.3.horizontal.decrease"
+                tintColor={activeFilters > 0 ? palette.accent : palette.textPrimary}
+                size={22}
+              />
+              {activeFilters > 0 ? (
+                <View
+                  pointerEvents="none"
+                  style={[styles.filterButtonDot, { backgroundColor: palette.accent, borderColor: palette.base }]}
+                />
+              ) : null}
+            </Pressable>
           </Animated.View>
         </View>
       </View>
@@ -865,72 +884,6 @@ export default function ReportScreen() {
       <SavingsSheet visible={savingsOpen} onClose={() => setSavingsOpen(false)} />
       <BudgetSheet visible={budgetOpen} onClose={() => setBudgetOpen(false)} />
     </View>
-  );
-}
-
-function ReportFilterBar({
-  activeCount,
-  matchedCount,
-  periodLabel,
-  currentPeriod,
-  palette,
-  onPress,
-}: {
-  activeCount: number;
-  matchedCount: number;
-  periodLabel: string;
-  currentPeriod: boolean;
-  palette: ReturnType<typeof usePalette>;
-  onPress: () => void;
-}) {
-  const active = activeCount > 0;
-  return (
-    <Pressable
-      style={[
-        styles.filterBar,
-        {
-          backgroundColor: active ? palette.card : palette.cardPill,
-          borderColor: active ? palette.accent : palette.separator,
-        },
-      ]}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={t('report.filterA11y', {
-        period: currentPeriod ? t('report.currentPeriodStatus') : t('report.historicalSettled'),
-        active: activeCount,
-        matched: matchedCount,
-      })}
-      accessibilityHint={t('report.filterHint')}
-    >
-      <View style={styles.filterBarLeft}>
-        <View style={[styles.filterIconBadge, { backgroundColor: active ? palette.accent : palette.card }]}>
-          <SymbolView
-            name="line.3.horizontal.decrease"
-            tintColor={active ? palette.onAccent : palette.textSecondary}
-            size={15}
-          />
-        </View>
-        <ThemedText style={[styles.filterBarText, { color: active ? palette.accent : palette.textPrimary }]}>
-          {active ? t('report.filterCount', { count: activeCount }) : t('report.filterAll')}
-        </ThemedText>
-      </View>
-      <View style={styles.filterBarRight}>
-        <View style={[styles.periodStatus, { backgroundColor: currentPeriod ? palette.bannerTint : palette.cardPill }]}>
-          <View
-            style={[styles.periodStatusDot, { backgroundColor: currentPeriod ? palette.info : palette.textTertiary }]}
-          />
-          <ThemedText
-            style={[styles.periodStatusText, { color: currentPeriod ? palette.info : palette.textSecondary }]}
-          >
-            {currentPeriod ? t('report.currentInProgress', { period: periodLabel }) : t('dates.settled')}
-          </ThemedText>
-        </View>
-        <ThemedText style={[styles.filterBarMeta, { color: palette.textSecondary }]}>
-          {t('report.countWithUnit', { count: matchedCount })}
-        </ThemedText>
-        <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
-      </View>
-    </Pressable>
   );
 }
 
@@ -1078,64 +1031,83 @@ function ReportFilterSheet({
   const reset = () => onChange(EMPTY_FILTERS);
 
   return (
-    <PageSheet visible={visible} onClose={onClose}>
-      <View style={[styles.root, { backgroundColor: palette.base }]}>
-        <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
-          <SheetHeader title={t('report.globalFilter')} />
-          <ScrollView contentContainerStyle={styles.sheetContent}>
-            <View style={[styles.filterSummaryCard, { backgroundColor: palette.card }]}>
-              <View style={[styles.filterSummaryIcon, { backgroundColor: palette.cardPill }]}>
-                <SymbolView name="line.3.horizontal.decrease" tintColor={palette.accent} size={18} />
-              </View>
-              <View style={styles.flex}>
-                <Text style={[styles.filterSummaryTitle, { color: palette.textPrimary }]}>
-                  {t('report.filterUnify')}
-                </Text>
-                <Text style={[styles.filterSummaryText, { color: palette.textSecondary }]}>
-                  {t('report.filterUnifyHint')}
-                </Text>
-              </View>
+    <Host style={styles.filterSheetAnchor}>
+      <BottomSheet
+        isPresented={visible}
+        onIsPresentedChange={(presented) => {
+          if (!presented) onClose();
+        }}
+      >
+        <Group
+          modifiers={[
+            presentationDetents([{ fraction: 0.9 }]),
+            presentationDragIndicator('visible'),
+            presentationBackground(palette.base),
+          ]}
+        >
+          <RNHostView>
+            <View style={[styles.root, { backgroundColor: palette.base }]}>
+              <SafeAreaView edges={['left', 'right']} style={styles.flex}>
+                <SheetHeader title={t('report.globalFilter')} onClose={onClose} />
+                <ScrollView contentContainerStyle={styles.sheetContent}>
+                  <View style={[styles.filterSummaryCard, { backgroundColor: palette.card }]}>
+                    <View style={[styles.filterSummaryIcon, { backgroundColor: palette.cardPill }]}>
+                      <SymbolView name="line.3.horizontal.decrease" tintColor={palette.accent} size={18} />
+                    </View>
+                    <View style={styles.flex}>
+                      <Text style={[styles.filterSummaryTitle, { color: palette.textPrimary }]}>
+                        {t('report.filterUnify')}
+                      </Text>
+                      <Text style={[styles.filterSummaryText, { color: palette.textSecondary }]}>
+                        {t('report.filterUnifyHint')}
+                      </Text>
+                    </View>
+                  </View>
+                  <FilterSection title={t('report.filterMembers')} palette={palette}>
+                    {members.map((member) => (
+                      <FilterChip
+                        key={member.id}
+                        label={member.nickname}
+                        selected={filters.memberIds.includes(member.id)}
+                        palette={palette}
+                        onPress={() => setMember(member.id)}
+                      />
+                    ))}
+                  </FilterSection>
+                  <FilterSection title={t('report.filterExpenseCats')} palette={palette}>
+                    {expenseCategories.map(renderCategoryFilter)}
+                  </FilterSection>
+                  <FilterSection title={t('report.filterIncomeCats')} palette={palette}>
+                    {incomeCategories.map(renderCategoryFilter)}
+                  </FilterSection>
+                  <View style={[styles.pendingFilterCard, { backgroundColor: palette.card }]}>
+                    <SymbolView name="tray" tintColor={palette.textTertiary} size={20} />
+                    <View style={styles.flex}>
+                      <Text style={[styles.pendingFilterTitle, { color: palette.textPrimary }]}>
+                        {t('report.pendingAccount')}
+                      </Text>
+                      <Text style={[styles.pendingFilterText, { color: palette.textSecondary }]}>
+                        {t('report.pendingAccountHint')}
+                      </Text>
+                    </View>
+                  </View>
+                </ScrollView>
+                <View
+                  style={[styles.filterFooter, { backgroundColor: palette.base, borderTopColor: palette.separator }]}
+                >
+                  <Text style={[styles.filterFooterMeta, { color: palette.textSecondary }]}>
+                    {t('report.matchedCount', { count: matchedCount })}
+                  </Text>
+                  <Pressable style={[styles.filterReset, { borderColor: palette.separator }]} onPress={reset}>
+                    <Text style={[styles.filterResetText, { color: palette.textPrimary }]}>{t('common.reset')}</Text>
+                  </Pressable>
+                </View>
+              </SafeAreaView>
             </View>
-            <FilterSection title={t('report.filterMembers')} palette={palette}>
-              {members.map((member) => (
-                <FilterChip
-                  key={member.id}
-                  label={member.nickname}
-                  selected={filters.memberIds.includes(member.id)}
-                  palette={palette}
-                  onPress={() => setMember(member.id)}
-                />
-              ))}
-            </FilterSection>
-            <FilterSection title={t('report.filterExpenseCats')} palette={palette}>
-              {expenseCategories.map(renderCategoryFilter)}
-            </FilterSection>
-            <FilterSection title={t('report.filterIncomeCats')} palette={palette}>
-              {incomeCategories.map(renderCategoryFilter)}
-            </FilterSection>
-            <View style={[styles.pendingFilterCard, { backgroundColor: palette.card }]}>
-              <SymbolView name="tray" tintColor={palette.textTertiary} size={20} />
-              <View style={styles.flex}>
-                <Text style={[styles.pendingFilterTitle, { color: palette.textPrimary }]}>
-                  {t('report.pendingAccount')}
-                </Text>
-                <Text style={[styles.pendingFilterText, { color: palette.textSecondary }]}>
-                  {t('report.pendingAccountHint')}
-                </Text>
-              </View>
-            </View>
-          </ScrollView>
-          <View style={[styles.filterFooter, { backgroundColor: palette.base, borderTopColor: palette.separator }]}>
-            <Text style={[styles.filterFooterMeta, { color: palette.textSecondary }]}>
-              {t('report.matchedCount', { count: matchedCount })}
-            </Text>
-            <Pressable style={[styles.filterReset, { borderColor: palette.separator }]} onPress={reset}>
-              <Text style={[styles.filterResetText, { color: palette.textPrimary }]}>{t('common.reset')}</Text>
-            </Pressable>
-          </View>
-        </SafeAreaView>
-      </View>
-    </PageSheet>
+          </RNHostView>
+        </Group>
+      </BottomSheet>
+    </Host>
   );
 }
 
@@ -3564,6 +3536,17 @@ const styles = StyleSheet.create({
     paddingBottom: Space[3],
   },
   title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
+  filterButton: { width: 44, height: 44, marginRight: -11, alignItems: 'center', justifyContent: 'center' },
+  filterButtonDot: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 9,
+    height: 9,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+  },
+  filterSheetAnchor: { width: 1, height: 1 },
   segmentHost: { height: 44, justifyContent: 'center' },
   dimensionSegmentFrame: { flex: 1, height: 44, justifyContent: 'center', minWidth: 0 },
   dimensionSegmentHost: { height: 34, justifyContent: 'center', minWidth: 0 },
@@ -3618,37 +3601,6 @@ const styles = StyleSheet.create({
   noMargin: { marginBottom: 0 },
   cardHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space[3] },
   cardHeaderAction: { flexDirection: 'row', alignItems: 'center', gap: Space[1] },
-  filterBar: {
-    minHeight: 46,
-    borderRadius: Radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: Space[4],
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Space[3],
-  },
-  filterBarLeft: { flexDirection: 'row', alignItems: 'center', gap: Space[2], flex: 1, minWidth: 0 },
-  filterBarRight: { flexDirection: 'row', alignItems: 'center', gap: Space[1] },
-  filterBarText: { fontSize: 15, fontWeight: '600' },
-  filterBarMeta: { fontSize: 13, fontVariant: ['tabular-nums'] },
-  filterIconBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  periodStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderRadius: Radius.full,
-    paddingHorizontal: Space[2],
-    paddingVertical: 4,
-  },
-  periodStatusDot: { width: 5, height: 5, borderRadius: Radius.full },
-  periodStatusText: { fontSize: 11, lineHeight: 14, fontWeight: '700' },
   dataReadinessCard: {
     minHeight: 68,
     borderRadius: Radius.lg,

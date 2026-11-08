@@ -450,6 +450,8 @@ const zhHans = {
     filterAll: '筛选全部数据',
     filterCount: '筛选 {{count}} 项',
     filterA11y: '报表筛选，{{period}}，已启用 {{active}} 个条件，当前周期命中 {{matched}} 笔流水',
+    filterActiveA11y: '报表筛选，已启用筛选条件',
+    filterInactiveA11y: '报表筛选，未启用筛选条件',
     filterHint: '点按可按家庭成员或分类筛选全部报表数据',
     currentInProgress: '{{period}}进行中',
     readinessA11y: '数据仍在积累中，当前周期已记录 {{count}} 笔；继续记账后将显示更可靠的趋势与环比。',

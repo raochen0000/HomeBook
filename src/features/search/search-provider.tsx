@@ -1,5 +1,5 @@
 /**
- * 搜索入口（流程 14）：各 Tab 顶栏 🔍 跳转到独立搜索路由。
+ * 搜索入口（流程 14）：顶栏 🔍 跳转到独立搜索路由。
  */
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
@@ -22,7 +22,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   return <SearchCtx.Provider value={value}>{children}</SearchCtx.Provider>;
 }
 
-/** 各 Tab 顶栏右上角 🔍（流程 14 入口；「我的」页除外）。 */
+/** 顶栏右上角 🔍（流程 14 入口）。 */
 export function HeaderSearchButton({ style }: { style?: StyleProp<ViewStyle> }) {
   const palette = usePalette();
   const { openSearch } = useSearch();
