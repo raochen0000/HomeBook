@@ -560,12 +560,9 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
             </>
           )
         ) : (
-          <>
-            <Pressable hitSlop={10} onPress={() => onArchive(c)} style={styles.archiveBtn}>
-              <SymbolView name="minus.circle" tintColor={palette.danger} size={20} />
-            </Pressable>
-            <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
-          </>
+          <Pressable hitSlop={10} onPress={() => onArchive(c)} style={styles.archiveBtn}>
+            <SymbolView name="minus.circle" tintColor={palette.danger} size={20} />
+          </Pressable>
         )}
       </View>
     );
