@@ -167,7 +167,7 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
     title: 'category.gPersonal',
     icons: [
       'person.fill',
-      'heart.fill',
+      'crown.fill',
       'star.fill',
       'tshirt.fill',
       'comb.fill',
@@ -759,6 +759,9 @@ function Editor({ view, onBack }: { view: Extract<ViewState, { mode: 'new' | 'ed
   const [name, setName] = useState(isEdit ? view.category.name : '');
   const defaultIcon = type === 'expense' ? DEFAULT_EXPENSE_ICON : DEFAULT_INCOME_ICON;
   const [icon, setIcon] = useState(isEdit ? (view.category.icon ?? defaultIcon) : defaultIcon);
+  const [iconGroup, setIconGroup] = useState(
+    () => CATEGORY_ICON_GROUPS.find((group) => group.icons.some((item) => item === icon))?.title,
+  );
   const colorKey = isEdit ? customCategoryColorKey(view.category.color_key) : automaticCategoryColorKey(name);
 
   const saving = createM.isPending || updateM.isPending;
@@ -828,12 +831,15 @@ function Editor({ view, onBack }: { view: Extract<ViewState, { mode: 'new' | 'ed
     } else await persist();
   };
 
-  const renderIconChoice = (ic: SymbolName) => {
-    const active = ic === icon;
+  const renderIconChoice = (ic: SymbolName, groupTitle: string) => {
+    const active = ic === icon && groupTitle === iconGroup;
     return (
       <Pressable
         key={ic}
-        onPress={() => setIcon(ic)}
+        onPress={() => {
+          setIcon(ic);
+          setIconGroup(groupTitle);
+        }}
         style={[
           styles.iconCell,
           { backgroundColor: active ? color : palette.base },
@@ -851,7 +857,7 @@ function Editor({ view, onBack }: { view: Extract<ViewState, { mode: 'new' | 'ed
     );
   };
 
-  const renderIconGrid = (icons: readonly SymbolName[]) => {
+  const renderIconGrid = (icons: readonly SymbolName[], groupTitle: string) => {
     const rows: SymbolName[][] = [];
     for (let i = 0; i < icons.length; i += 6) {
       rows.push(icons.slice(i, i + 6));
@@ -865,7 +871,7 @@ function Editor({ view, onBack }: { view: Extract<ViewState, { mode: 'new' | 'ed
               const ic = row[slotIndex];
               return (
                 <View key={ic ?? `empty-${index}-${slotIndex}`} style={styles.iconSlot}>
-                  {ic ? renderIconChoice(ic) : null}
+                  {ic ? renderIconChoice(ic, groupTitle) : null}
                 </View>
               );
             })}
@@ -932,7 +938,7 @@ function Editor({ view, onBack }: { view: Extract<ViewState, { mode: 'new' | 'ed
               {CATEGORY_ICON_GROUPS.map((group) => (
                 <View key={group.title} style={styles.iconPickerGroup}>
                   <Text style={[styles.iconGroupTitle, { color: palette.textSecondary }]}>{t(group.title)}</Text>
-                  {renderIconGrid(group.icons)}
+                  {renderIconGrid(group.icons, group.title)}
                 </View>
               ))}
             </View>
