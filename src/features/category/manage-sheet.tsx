@@ -830,19 +830,21 @@ function Editor({ view, onBack }: { view: Extract<ViewState, { mode: 'new' | 'ed
     return (
       <Pressable
         key={ic}
+        accessibilityRole="radio"
+        accessibilityState={{ selected: active }}
         onPress={() => {
           setIcon(ic);
           setIconGroup(groupTitle);
         }}
         style={[
           styles.iconCell,
-          { backgroundColor: active ? color : palette.base },
-          active && { borderColor: palette.textPrimary, borderWidth: 2 },
+          { backgroundColor: palette.base },
+          active && { borderColor: palette.accent, borderWidth: 2 },
         ]}
       >
         <SymbolView
           name={ic}
-          tintColor={active ? '#FFFFFF' : palette.textSecondary}
+          tintColor={active ? palette.accent : palette.textSecondary}
           size={28}
           resizeMode="scaleAspectFit"
           style={styles.iconSymbol}
