@@ -75,14 +75,31 @@ describe('category hierarchy', () => {
     expect(selectableCategories(empty, 'expense', new Set())).toEqual([]);
   });
 
-  it('never offers a legacy parent in the manual entry picker, even when editing it', () => {
-    expect(selectableRecordCategories(tree, 'expense', new Set()).map((item) => item.id)).toEqual(['breakfast']);
+  it('offers roots without children and excludes parents with children', () => {
+    expect(selectableRecordCategories(tree, 'expense', new Set()).map((item) => item.id)).toEqual([
+      'breakfast',
+      'travel',
+    ]);
     expect(selectableRecordCategories(tree, 'expense', new Set(), 'food').map((item) => item.id)).toEqual([
       'breakfast',
+      'travel',
     ]);
     expect(selectableRecordCategories(tree, 'expense', new Set(['food']), 'old').map((item) => item.id)).toEqual([
       'old',
+      'travel',
     ]);
+  });
+
+  it('switches from a root to its children without changing historical IDs', () => {
+    const root = category('root', '工资');
+    const child = category('child', '奖金');
+    const before = buildCategoryHierarchy([root], [layout('root', null)]);
+    const after = buildCategoryHierarchy([root, child], [layout('root', null), layout('child', 'root')]);
+    expect(selectableRecordCategories(before, 'expense', new Set()).map((item) => item.id)).toEqual(['root']);
+    expect(categoryPath('root', before, name, '未细分')).toBe('工资');
+    expect(selectableRecordCategories(after, 'expense', new Set()).map((item) => item.id)).toEqual(['child']);
+    expect(categoryPath('root', after, name, '未细分')).toBe('工资 / 未细分');
+    expect(selectableRecordCategories(after, 'expense', new Set(['child']))).toEqual([]);
   });
 
   it('matches parent names to descendants while keeping unspecified searches specific', () => {

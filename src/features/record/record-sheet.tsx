@@ -218,7 +218,7 @@ function RecordForm({
 
   // 可手动选择的分类：当前类型 + 排除储蓄类系统分类（储蓄走专门入口，PRD 口径）+ 排除本家庭隐藏的系统分类。
   // 仅显示当前 Tab 类型——支出 Tab 不混入收入分类，反之亦然。
-  // 编辑时保留已隐藏的原分类，但一级分类不作为可选项。
+  // 编辑时保留原分类；已有二级分类的一级不作为可选项。
   const hierarchy = useMemo(
     () => buildCategoryHierarchy(categoriesQ.data ?? [], layoutQ.data ?? []),
     [categoriesQ.data, layoutQ.data],
@@ -269,7 +269,7 @@ function RecordForm({
     !!editing &&
     categoryId === editing.category_id &&
     type === editing.type &&
-    !hierarchy.layoutById.get(editing.category_id)?.parent_category_id;
+    !categories.some((category) => category.id === editing.category_id);
 
   // 用户选择优先；否则使用本人最近分类，首次或失效时回退到对应的「其他」。
   const effectiveCategoryId = useMemo(() => {

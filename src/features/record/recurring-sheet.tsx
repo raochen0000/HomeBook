@@ -163,7 +163,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
     !!editing &&
     categoryId === editing.category_id &&
     type === editing.type &&
-    !hierarchy.layoutById.get(editing.category_id)?.parent_category_id;
+    !categories.some((category) => category.id === editing.category_id);
 
   const effectiveCategoryId = useMemo(() => {
     if (keepingOriginalGroup) return categoryId;

@@ -997,7 +997,8 @@ function ReportFilterSheet({
     onChange({ ...filters, categoryIds: [...selected] });
   };
   const renderCategoryFilter = (category: Category) => {
-    const group = hierarchy.layoutById.get(category.id)?.is_group;
+    const group =
+      hierarchy.layoutById.get(category.id)?.is_group && (hierarchy.childrenByParent.get(category.id)?.length ?? 0) > 0;
     const ids = group ? categoryDescendantIds(category.id, hierarchy) : [category.id];
     const selectedCount = ids.filter((id) => filters.categoryIds.includes(id)).length;
     return (
@@ -2929,7 +2930,10 @@ function CategoryDetailSheet({
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const isOther = detail?.id === EXPENSE_CATEGORY_OTHER_ID && !selectedGroup;
   const groupId = selectedGroup ?? detail?.id;
-  const isGroup = !!groupId && !!hierarchy.layoutById.get(groupId)?.is_group;
+  const isGroup =
+    !!groupId &&
+    !!hierarchy.layoutById.get(groupId)?.is_group &&
+    (hierarchy.childrenByParent.get(groupId)?.length ?? 0) > 0;
   const type = detail?.type ?? 'expense';
   const groupIds = detail
     ? (selectedGroup ? [selectedGroup] : detail.categoryIds?.length ? detail.categoryIds : [detail.id]).flatMap((id) =>

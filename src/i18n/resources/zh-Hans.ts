@@ -290,7 +290,7 @@ const zhHans = {
     recurringYearlyOn: '每年 {{month}} 月 {{day}} 日',
     category: '分类',
     legacyCategoryKept: '当前流水保留原分类，选择下方分类可更改。',
-    noSubcategories: '暂无可用的二级分类，请先在分类管理中添加。',
+    noSubcategories: '暂无可用的分类，请先在分类管理中添加或启用。',
     note: '备注',
     editRecurring: '编辑定时收支',
     addRecurring: '新增定时收支',

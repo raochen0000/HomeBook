@@ -304,9 +304,11 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     for (const txn of rows) {
       const cat = catById.get(txn.categoryId);
       const layout = hierarchy.layoutById.get(txn.categoryId);
+      const isGroupWithChildren =
+        !!layout?.is_group && (hierarchy.childrenByParent.get(txn.categoryId)?.length ?? 0) > 0;
       const parent = layout?.parent_category_id
         ? catById.get(layout.parent_category_id)
-        : layout?.is_group
+        : isGroupWithChildren
           ? cat
           : null;
       const ttype = txn.type;
@@ -330,7 +332,9 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       group.totalCents += ttype === 'income' ? txn.amount : -txn.amount;
       group.rows.push({
         id: txn.id,
-        title: layout?.is_group ? t('category.unspecified') : (categoryNameById.get(txn.categoryId) ?? uncategorized),
+        title: isGroupWithChildren
+          ? t('category.unspecified')
+          : (categoryNameById.get(txn.categoryId) ?? uncategorized),
         categoryParent: parent ? displayCategoryName(parent.name, parent.is_system) : undefined,
         note,
         symbol: categorySymbol(cat?.icon ?? null, ttype),
@@ -1194,7 +1198,8 @@ function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
         {categories
           .filter((category) => !hierarchy.layoutById.get(category.id)?.parent_category_id)
           .map((c) => {
-            const isGroup = !!hierarchy.layoutById.get(c.id)?.is_group;
+            const isGroup =
+              !!hierarchy.layoutById.get(c.id)?.is_group && (hierarchy.childrenByParent.get(c.id)?.length ?? 0) > 0;
             const ids = isGroup ? categoryDescendantIds(c.id, hierarchy) : [c.id];
             const selected = ids.filter((id) => categoryIds.has(id)).length;
             const expanded = expandedGroups.has(c.id);

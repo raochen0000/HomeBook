@@ -48,7 +48,12 @@ export function matchingCategoryIds(
     if (names(category).some((name) => name.toLocaleLowerCase().includes(normalized))) {
       for (const id of categoryDescendantIds(category.id, hierarchy)) matched.add(id);
     }
-    if (item?.is_group && unspecified.toLocaleLowerCase().includes(normalized)) matched.add(category.id);
+    if (
+      item?.is_group &&
+      (hierarchy.childrenByParent.get(category.id)?.length ?? 0) > 0 &&
+      unspecified.toLocaleLowerCase().includes(normalized)
+    )
+      matched.add(category.id);
   }
   return [...matched];
 }
@@ -62,7 +67,8 @@ export function categoryPath(
   const category = hierarchy.byId.get(id);
   if (!category) return null;
   const item = hierarchy.layoutById.get(id);
-  if (item?.is_group) return `${displayName(category)} / ${unspecified}`;
+  if (item?.is_group && (hierarchy.childrenByParent.get(id)?.length ?? 0) > 0)
+    return `${displayName(category)} / ${unspecified}`;
   const parent = item?.parent_category_id ? hierarchy.byId.get(item.parent_category_id) : undefined;
   return parent ? `${displayName(parent)} / ${displayName(category)}` : displayName(category);
 }
@@ -97,14 +103,28 @@ export function selectableCategories(
     });
 }
 
-/** New entries can only use second-level categories. */
+/** A root is selectable only while it has no children. */
 export function selectableRecordCategories(
   hierarchy: CategoryHierarchy,
   type: 'expense' | 'income',
   hidden: Set<string>,
   editingId?: string | null,
 ): Category[] {
-  return selectableCategories(hierarchy, type, hidden, editingId).filter(
-    (category) => !!hierarchy.layoutById.get(category.id)?.parent_category_id,
-  );
+  const selectable = selectableCategories(hierarchy, type, hidden, editingId);
+  const eligibleIds = new Set(selectable.map((category) => category.id));
+  const positions = new Map(hierarchy.categories.map((category, index) => [category.id, index]));
+  return hierarchy.categories
+    .filter((category) => {
+      const item = hierarchy.layoutById.get(category.id);
+      if (item?.parent_category_id) return eligibleIds.has(category.id);
+      if ((hierarchy.childrenByParent.get(category.id)?.length ?? 0) > 0) return false;
+      if (category.type !== type || category.name.startsWith('储蓄·')) return false;
+      return category.id === editingId || (category.status === 'active' && !hidden.has(category.id));
+    })
+    .sort((a, b) => {
+      return (
+        (positions.get(categoryRootId(a.id, hierarchy)) ?? 0) - (positions.get(categoryRootId(b.id, hierarchy)) ?? 0) ||
+        (positions.get(a.id) ?? 0) - (positions.get(b.id) ?? 0)
+      );
+    });
 }

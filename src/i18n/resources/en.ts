@@ -290,7 +290,7 @@ const en = {
     recurringYearlyOn: 'Yearly on {{month}}/{{day}}',
     category: 'Category',
     legacyCategoryKept: 'This entry keeps its original category. Choose a category below to change it.',
-    noSubcategories: 'No subcategories available. Add one in category settings first.',
+    noSubcategories: 'No categories available. Add or enable one in category settings.',
     note: 'Note',
     editRecurring: 'Edit recurring',
     addRecurring: 'New recurring',
