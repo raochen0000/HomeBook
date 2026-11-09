@@ -286,7 +286,6 @@ const CATEGORY_ICON_GROUPS: readonly IconGroup[] = [
 
 const DEFAULT_EXPENSE_ICON = 'gamecontroller.fill';
 const DEFAULT_INCOME_ICON = 'dollarsign.circle.fill';
-const CATEGORY_NAME_MAX_LENGTH = 6;
 
 type ViewState =
   | { mode: 'list' }
@@ -766,15 +765,10 @@ function Editor({ view, onBack }: { view: Extract<ViewState, { mode: 'new' | 'ed
 
   const saving = createM.isPending || updateM.isPending;
   const trimmed = name.trim();
-  const nameTooLong = trimmed.length > CATEGORY_NAME_MAX_LENGTH;
   const color = catColors[colorKey];
 
   const handleSave = async () => {
     if (!trimmed) return;
-    if (nameTooLong) {
-      Alert.alert(t('category.tooLongTitle'), t('category.nameTooLong', { max: CATEGORY_NAME_MAX_LENGTH }), alertOk());
-      return;
-    }
     const parentId = isEdit
       ? ((layoutQ.data ?? []).find((item) => item.category_id === view.category.id)?.parent_category_id ?? null)
       : (view.parentId ?? null);
@@ -897,7 +891,7 @@ function Editor({ view, onBack }: { view: Extract<ViewState, { mode: 'new' | 'ed
           }
           onBack={onBack}
           onConfirm={handleSave}
-          confirmDisabled={!trimmed || nameTooLong || saving || !layoutQ.isSuccess}
+          confirmDisabled={!trimmed || saving || !layoutQ.isSuccess}
         />
 
         <View style={styles.editorContent}>
@@ -919,11 +913,10 @@ function Editor({ view, onBack }: { view: Extract<ViewState, { mode: 'new' | 'ed
 
           <TextInput
             style={[styles.nameInput, { backgroundColor: palette.card, color: palette.textPrimary }]}
-            placeholder={t('category.namePlaceholder', { max: CATEGORY_NAME_MAX_LENGTH })}
+            placeholder={t('category.namePlaceholder')}
             placeholderTextColor={palette.textTertiary}
             value={name}
             onChangeText={setName}
-            maxLength={CATEGORY_NAME_MAX_LENGTH}
             autoFocus={!isEdit}
             returnKeyType="done"
           />
