@@ -931,6 +931,8 @@ const en = {
     expenseType: 'Expense category',
     incomeType: 'Income category',
     namePlaceholder: 'Category name',
+    saveNetworkError: 'Check your connection and try again.',
+    saveError: 'Please try again later.',
     exists: '“{{name}}” already exists. Try another name.',
     existsTitle: 'Name already used',
     ownerOnlyDisable: 'Only the owner can disable',

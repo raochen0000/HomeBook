@@ -35,6 +35,7 @@ import {
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
+import { isLikelyNetworkError } from '@/features/record/save-attempt';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { automaticCategoryColorKey, categoryColorKey, customCategoryColorKey } from '@/lib/category-style';
 import { currentPeriodInTimeZone, formatAmount } from '@/lib/format';
@@ -809,7 +810,16 @@ function Editor({ view, onBack }: { view: Extract<ViewState, { mode: 'new' | 'ed
         }
         onBack();
       } catch (e) {
-        Alert.alert(t('account.saveFailed'), (e as Error).message ?? String(e), alertOk());
+        const code = typeof e === 'object' && e !== null && 'code' in e ? e.code : undefined;
+        if (code === '23505') {
+          Alert.alert(t('category.existsTitle'), t('category.exists', { name: trimmed }), alertOk());
+        } else {
+          Alert.alert(
+            t('account.saveFailed'),
+            isLikelyNetworkError(e) ? t('category.saveNetworkError') : t('category.saveError'),
+            alertOk(),
+          );
+        }
       }
     };
     const sameNameElsewhere =

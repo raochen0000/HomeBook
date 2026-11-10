@@ -925,6 +925,8 @@ const zhHans = {
     expenseType: '支出分类',
     incomeType: '收入分类',
     namePlaceholder: '分类名称',
+    saveNetworkError: '网络异常，请检查网络后重试。',
+    saveError: '暂时无法保存，请稍后重试。',
     exists: '已有同名「{{name}}」分类，换个名字吧。',
     existsTitle: '分类已存在',
     ownerOnlyDisable: '仅户主可停用',
