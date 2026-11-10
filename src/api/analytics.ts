@@ -187,8 +187,8 @@ export async function fetchBudgetProgress(period: string): Promise<BudgetProgres
   return { usedAmount: data?.used_amount ?? 0, byCategory: parseCategoryUsage(data?.category_usage ?? {}) };
 }
 
-export function useBudgetProgress(period: string) {
-  return useQuery({ queryKey: queryKeys.budgetProgress(period), queryFn: () => fetchBudgetProgress(period) });
+export function useBudgetProgress(period: string, enabled = true) {
+  return useQuery({ queryKey: queryKeys.budgetProgress(period), queryFn: () => fetchBudgetProgress(period), enabled });
 }
 
 export async function fetchFamilyActivity(): Promise<FamilyActivityAnalytics | null> {
@@ -214,8 +214,8 @@ export async function fetchReportAnalytics(input: ReportAnalyticsInput): Promise
   return parseReportAnalytics(data);
 }
 
-export function useReportAnalytics(input: ReportAnalyticsInput) {
-  return useQuery({ queryKey: queryKeys.reportAnalytics(input), queryFn: () => fetchReportAnalytics(input) });
+export function useReportAnalytics(input: ReportAnalyticsInput, enabled = true) {
+  return useQuery({ queryKey: queryKeys.reportAnalytics(input), queryFn: () => fetchReportAnalytics(input), enabled });
 }
 
 export type CategoryDetailInput = {

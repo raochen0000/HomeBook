@@ -21,17 +21,28 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter, type Href } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Fragment, useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import {
+  ActivityIndicator,
+  AppState,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import Animated from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Line, Polyline, Rect, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, Defs, Line, Pattern, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 
 import {
   DEFAULT_ACCOUNTING_PREFS,
   EMPTY_REPORT_ANALYTICS,
   useAccountingPrefs,
   useBudget,
+  useBudgetProgress,
   useAllCategories,
   useCategoryLayout,
   useCategoryDetail,
@@ -57,29 +68,40 @@ import {
   TopExpensesCard,
   type TopItem,
 } from '@/features/report/advanced';
+import {
+  ReportCardHeader,
+  ReportDetailText,
+  ReportDisclosure,
+  ReportEmptyGroup,
+  ReportFilterButton,
+} from '@/features/report/presentation';
+import { compactReportCards, reportComparisonChange, reportComparisonRangeLabel } from '@/lib/report-presentation';
 import { Donut } from '@/features/report/donut';
 import { MoreStatsEntryCard, MoreStatsSheet } from '@/features/report/more-stats-ui';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
 import { displayCategoryName, i18n, INTL_LOCALE, t, useLocalePreference } from '@/i18n';
 import { fromI18nLanguage } from '@/i18n/locale';
-import { daysToMonthEnd } from '@/lib/budget';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { buildCategoryHierarchy, categoryDescendantIds, type CategoryHierarchy } from '@/lib/category-hierarchy';
-import {
-  calendarDateInTimeZone,
-  currentPeriod,
-  formatAmount,
-  formatMonthDay,
-  maskAmount,
-  signForNet,
-} from '@/lib/format';
+import { calendarDateInTimeZone, currentPeriod, formatAmount, maskAmount, signForNet } from '@/lib/format';
 import { memberDisplayName } from '@/lib/member-name';
 import {
   balanceRate,
+  calendarDayDifference,
+  categoryChanges,
+  categoryIdsForReportType,
+  comparablePeriods,
   equalPeriodIncomeExpenseSeries,
   incomeExpenseSeries,
   periodRange,
+  reportAccountingTotals,
+  reportBudgetForecast,
+  reportCalendarDayTimestamp,
+  reportDayFlows,
+  reportPeriodCashFlow,
+  reportTopicData,
+  reportTrendAverage,
   shiftAnchor,
   type Dimension,
 } from '@/lib/report';
@@ -95,6 +117,13 @@ const EXPENSE_CATEGORY_OTHER_ID = '__other__';
 type ReportFilters = { memberIds: string[]; categoryIds: string[] };
 type IncomeTargets = { annual: number; custom: number; activeRatio: number };
 type FinancialInsight = { title: string; body: string; action: string; tone: 'ok' | 'warn' | 'danger' };
+type FamilyComparison = {
+  label: string;
+  shortLabel: string;
+  inProgress: boolean;
+  currentValues: ReturnType<typeof reportPeriodCashFlow>;
+  previousValues: ReturnType<typeof reportPeriodCashFlow>;
+};
 
 const REPORT_SCOPES: { key: ReportScope; labelKey: string }[] = [
   { key: 'expense', labelKey: 'record.expense' },
@@ -143,16 +172,16 @@ function targetForDimension(targets: IncomeTargets, dimension: Dimension): numbe
   return dimension === 'year' ? targets.annual : targets.custom;
 }
 
-function projectionForRange(amount: number, range: { start: Date; end: Date }, isCurrent: boolean): number | null {
+function projectionForRange(
+  amount: number,
+  range: { start: Date; end: Date },
+  isCurrent: boolean,
+  today: Date,
+): number | null {
   if (!isCurrent) return null;
-  const today = startOfLocalDay(new Date());
-  const elapsed = Math.max(1, Math.floor((today.getTime() - range.start.getTime()) / 86400000) + 1);
-  const total = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
+  const elapsed = Math.max(1, calendarDayDifference(range.start, today) + 1);
+  const total = Math.max(1, calendarDayDifference(range.start, range.end));
   return Math.round((amount / elapsed) * total);
-}
-
-function renderOrderedCards(nodes: Partial<Record<ReportCardId, ReactNode>>, order: ReportCardId[]): ReactNode[] {
-  return order.map((id) => (nodes[id] ? <View key={id}>{nodes[id]}</View> : null)).filter(Boolean);
 }
 
 function startOfLocalDay(date: Date): Date {
@@ -198,7 +227,7 @@ function customRange(startInput: Date, endInput: Date): { start: Date; end: Date
 }
 
 function previousEqualRange(start: Date, end: Date): { start: Date; end: Date; label: string } {
-  const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000));
+  const days = Math.max(1, calendarDayDifference(start, end));
   const prevEnd = new Date(start);
   const prevStart = addDays(prevEnd, -days);
   return { start: prevStart, end: prevEnd, label: rangeLabel(prevStart, addDays(prevEnd, -1)) };
@@ -225,6 +254,7 @@ export default function ReportScreen() {
     return (membersQ.data ?? []).map((member) => ({
       id: member.id,
       nickname: memberDisplayName(member.nickname, member.departed),
+      avatarUrl: member.avatar_url,
     }));
   }, [membersQ.data, locale]);
   const familyQ = useMyFamily();
@@ -238,19 +268,34 @@ export default function ReportScreen() {
 
   const [dimension, setDimension] = useState<Dimension>('month');
   const [scope, setScope] = useState<ReportScope>('expense');
-  const todayInFamilyTimeZone = useMemo(() => calendarDateInTimeZone(familyQ.data?.timezone), [familyQ.data?.timezone]);
+  const [clockMs, setClockMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setClockMs(Date.now()), 60_000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setClockMs(Date.now());
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, []);
+  const todayKey = localDateKey(calendarDateInTimeZone(familyQ.data?.timezone, new Date(clockMs)));
+  const todayInFamilyTimeZone = useMemo(() => {
+    const [year, month, day] = todayKey.split('-').map(Number);
+    return new Date(year, month - 1, day, 12);
+  }, [todayKey]);
   const [anchorOverride, setAnchor] = useState<Date | null>(null);
   const anchor = anchorOverride ?? todayInFamilyTimeZone;
   const [filters, setFilters] = useState<ReportFilters>(EMPTY_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
   const [incomeTargets, setIncomeTargets] = useState<IncomeTargets>(DEFAULT_INCOME_TARGETS);
   const [incomeTargetOpen, setIncomeTargetOpen] = useState(false);
-  const [customStart, setCustomStart] = useState(() => {
-    const d = startOfLocalDay(todayInFamilyTimeZone);
-    d.setDate(d.getDate() - 29);
-    return d;
-  });
-  const [customEnd, setCustomEnd] = useState(() => startOfLocalDay(todayInFamilyTimeZone));
+  const [customStartOverride, setCustomStart] = useState<Date | null>(null);
+  const [customEndOverride, setCustomEnd] = useState<Date | null>(null);
+  const defaultCustomEnd = useMemo(() => startOfLocalDay(todayInFamilyTimeZone), [todayInFamilyTimeZone]);
+  const defaultCustomStart = useMemo(() => addDays(defaultCustomEnd, -29), [defaultCustomEnd]);
+  const customEnd = customEndOverride ?? defaultCustomEnd;
+  const customStart = customStartOverride ?? defaultCustomStart;
   const [customOpen, setCustomOpen] = useState(false);
   const [detail, setDetail] = useState<CategoryDetail | null>(null);
   const [memberAnalysisOpen, setMemberAnalysisOpen] = useState(false);
@@ -276,35 +321,154 @@ export default function ReportScreen() {
     const today = startOfLocalDay(todayInFamilyTimeZone);
     return range.start.getTime() <= today.getTime() && range.end.getTime() > today.getTime();
   }, [dimension, anchor, range, todayInFamilyTimeZone]);
+  const todayStart = defaultCustomEnd;
+  const futurePeriod = range.start.getTime() > todayStart.getTime();
+  const availableEnd = useMemo(() => {
+    const tomorrow = addDays(todayStart, 1);
+    return isCurrent && range.end.getTime() > tomorrow.getTime() ? tomorrow : range.end;
+  }, [isCurrent, range.end, todayStart]);
   const budgetPeriod = useMemo(() => currentPeriod(range.start), [range.start]);
+  const isMonthlyView = dimension === 'month';
   const budgetQ = useBudget(budgetPeriod);
+  const budgetProgressQ = useBudgetProgress(budgetPeriod, isMonthlyView && !futurePeriod);
 
-  // 服务端聚合窗：覆盖「锚点期往前 6 期」及本年统计；只返回有限分组与按日分桶。
-  const analyticsInput = useMemo(() => {
+  // 全家基准和专题分析分别查询；没有适用筛选时复用同一份全家数据。
+  const familyInput = useMemo<ReportAnalyticsInput>(() => {
     const HISTORY_PERIODS = 6;
     let from: Date;
     if (dimension === 'custom') {
-      const length = Math.max(86400000, range.end.getTime() - range.start.getTime());
-      from = new Date(range.start.getTime() - (HISTORY_PERIODS - 1) * length);
+      const days = Math.max(1, calendarDayDifference(range.start, range.end));
+      from = addDays(range.start, -(HISTORY_PERIODS - 1) * days);
     } else {
       from = periodRange(dimension, shiftAnchor(dimension, anchor, -(HISTORY_PERIODS - 1))).start;
     }
-    const historyStart = from;
     return {
       start: localDateKey(range.start),
-      end: localDateKey(range.end),
+      end: localDateKey(availableEnd),
       previousStart: localDateKey(prevRange.start),
-      historyStart: localDateKey(historyStart),
-      memberIds: filters.memberIds,
-      categoryIds: filters.categoryIds,
+      historyStart: localDateKey(from),
+      memberIds: [],
+      categoryIds: [],
     };
-  }, [dimension, anchor, range, prevRange, filters]);
-  const reportQ = useReportAnalytics(analyticsInput);
-  const reportData = reportQ.data;
-  const filteredCount = reportData?.summary.transactionCount ?? 0;
+  }, [dimension, anchor, range, prevRange, availableEnd]);
+  const expenseCategoryIds = useMemo(
+    () => categoryIdsForReportType(filters.categoryIds, catsQ.data ?? [], 'expense'),
+    [filters.categoryIds, catsQ.data],
+  );
+  const incomeCategoryIds = useMemo(
+    () => categoryIdsForReportType(filters.categoryIds, catsQ.data ?? [], 'income'),
+    [filters.categoryIds, catsQ.data],
+  );
+  const expenseInput = useMemo(
+    () => ({ ...familyInput, memberIds: filters.memberIds, categoryIds: expenseCategoryIds }),
+    [familyInput, filters.memberIds, expenseCategoryIds],
+  );
+  const incomeInput = useMemo(
+    () => ({ ...familyInput, memberIds: filters.memberIds, categoryIds: incomeCategoryIds }),
+    [familyInput, filters.memberIds, incomeCategoryIds],
+  );
+  const hasExpenseFilters = filters.memberIds.length > 0 || expenseCategoryIds.length > 0;
+  const hasIncomeFilters = filters.memberIds.length > 0 || incomeCategoryIds.length > 0;
+  const prerequisitesReady = !familyQ.isLoading && !familyQ.isError && !catsQ.isLoading && !catsQ.isError;
+  const reportQ = useReportAnalytics(familyInput, prerequisitesReady && !futurePeriod);
+  const expenseQ = useReportAnalytics(
+    expenseInput,
+    prerequisitesReady && !futurePeriod && hasExpenseFilters && (scope === 'expense' || memberAnalysisOpen),
+  );
+  const incomeQ = useReportAnalytics(
+    incomeInput,
+    prerequisitesReady && !futurePeriod && hasIncomeFilters && (scope === 'income' || memberAnalysisOpen),
+  );
+  const familyData = futurePeriod ? EMPTY_REPORT_ANALYTICS : reportQ.data;
+  const expenseData = reportTopicData(familyData, expenseQ.data, !futurePeriod && hasExpenseFilters);
+  const incomeData = reportTopicData(familyData, incomeQ.data, !futurePeriod && hasIncomeFilters);
+  const reportData = scope === 'income' ? incomeData : expenseData;
+  const analyticsInput = scope === 'income' ? incomeInput : expenseInput;
+  const topicSelectionKey = JSON.stringify([
+    analyticsInput.start,
+    analyticsInput.end,
+    analyticsInput.memberIds,
+    analyticsInput.categoryIds,
+  ]);
+  const familySelectionKey = `${familyInput.start}:${familyInput.end}`;
+  const topicQ = scope === 'income' ? incomeQ : expenseQ;
+  const topicFiltersApplied = scope === 'income' ? hasIncomeFilters : hasExpenseFilters;
+  const topicUnavailable = scope !== 'balance' && topicFiltersApplied && !reportData;
+  const filteredCount = scope === 'balance' ? null : (reportData?.summary.transactionCount ?? null);
   const activeFilters = activeFilterCount(filters);
-  const reportLoadFailed = (reportQ.isError && !reportData) || catsQ.isError || layoutQ.isError;
+  const reportLoadFailed =
+    (!familyData && (reportQ.isError || reportQ.fetchStatus === 'paused')) ||
+    familyQ.isError ||
+    catsQ.isError ||
+    layoutQ.isError;
   const filterUnavailable = catsQ.isLoading || layoutQ.isLoading || catsQ.isError || layoutQ.isError;
+  const hasRefreshError =
+    (!futurePeriod && reportQ.isError && !!familyData) ||
+    (scope === 'expense' && hasExpenseFilters && expenseQ.isError && !!expenseData) ||
+    (scope === 'income' && hasIncomeFilters && incomeQ.isError && !!incomeData) ||
+    (dimension === 'month' && budgetQ.isError && !!budgetQ.data) ||
+    (dimension === 'month' && budgetProgressQ.isError && !!budgetProgressQ.data) ||
+    (savingsQ.isError && !!savingsQ.data);
+
+  const comparison = useMemo(
+    () => comparablePeriods(range, prevRange, todayInFamilyTimeZone),
+    [range, prevRange, todayInFamilyTimeZone],
+  );
+  const comparisonLabel = comparison
+    ? t('report.comparisonRanges', {
+        current: rangeLabel(comparison.current.start, addDays(comparison.current.end, -1)),
+        previous: rangeLabel(comparison.previous.start, addDays(comparison.previous.end, -1)),
+        currentDays: calendarDayDifference(comparison.current.start, comparison.current.end),
+        previousDays: calendarDayDifference(comparison.previous.start, comparison.previous.end),
+      })
+    : null;
+  const familyComparison: FamilyComparison | null =
+    comparison && comparisonLabel && familyData
+      ? {
+          label: comparisonLabel,
+          shortLabel: reportComparisonRangeLabel(
+            comparison.current.start,
+            addDays(comparison.current.end, -1),
+            todayInFamilyTimeZone,
+            intlLocale(),
+          ),
+          inProgress: comparison.inProgress,
+          currentValues: reportPeriodCashFlow(
+            familyData.days,
+            localDateKey(comparison.current.start),
+            localDateKey(comparison.current.end),
+          ),
+          previousValues: reportPeriodCashFlow(
+            familyData.days,
+            localDateKey(comparison.previous.start),
+            localDateKey(comparison.previous.end),
+          ),
+        }
+      : null;
+  const comparisonVisible =
+    scope === 'expense' &&
+    resolveScopeCardLayout(scope, prefs.report_card_order, prefs.report_card_hidden).visible.includes('category_mom');
+  const currentComparisonInput: ReportAnalyticsInput = comparison
+    ? {
+        ...expenseInput,
+        start: localDateKey(comparison.current.start),
+        end: localDateKey(comparison.current.end),
+        historyStart: localDateKey(comparison.current.start),
+      }
+    : expenseInput;
+  const previousComparisonInput: ReportAnalyticsInput = comparison
+    ? {
+        ...expenseInput,
+        start: localDateKey(comparison.previous.start),
+        end: localDateKey(comparison.previous.end),
+        previousStart: localDateKey(addDays(comparison.previous.start, -1)),
+        historyStart: localDateKey(comparison.previous.start),
+      }
+    : expenseInput;
+  const fetchPartialComparison =
+    prerequisitesReady && !futurePeriod && !filterOpen && comparisonVisible && !!comparison?.inProgress;
+  const currentComparisonQ = useReportAnalytics(currentComparisonInput, fetchPartialComparison);
+  const previousComparisonQ = useReportAnalytics(previousComparisonInput, fetchPartialComparison);
 
   useEffect(() => {
     let alive = true;
@@ -330,9 +494,17 @@ export default function ReportScreen() {
     balance,
     byCat,
     expenseTotal,
+    familyByCat,
+    familyExpenseTotal,
+    familyTopItems,
+    budgetTopCategory,
+    normalIncome,
+    goalWithdrawals,
+    goalDeposits,
     members,
     balRate,
     incomeExpense,
+    topicIncomeExpense,
     momItems,
     topItems,
     incomeSlices,
@@ -340,6 +512,7 @@ export default function ReportScreen() {
   } = useMemo(() => {
     void locale;
     const analytics = reportData;
+    const family = familyData ?? EMPTY_REPORT_ANALYTICS;
     const cats = catsQ.data ?? [];
     const mem = membersQ.data ?? [];
     const catById = new Map(cats.map((c) => [c.id, c]));
@@ -376,46 +549,66 @@ export default function ReportScreen() {
       );
     };
 
-    const list = (analytics?.expenseCategories ?? []).map(({ categoryId, currentAmount }) => ({
-      id: categoryId,
-      ...catDisplay(categoryId, 'expense'),
-      amount: currentAmount,
-    }));
-    const mom = (analytics?.expenseCategories ?? [])
-      .map(({ categoryId, currentAmount, previousAmount }) => ({
+    const categorySlices = (items: ReportAnalytics['expenseCategories']) =>
+      items
+        .filter(({ currentAmount }) => currentAmount > 0)
+        .map(({ categoryId, currentAmount }) => ({
+          id: categoryId,
+          ...catDisplay(categoryId, 'expense'),
+          amount: currentAmount,
+        }));
+    const list = categorySlices(analytics?.expenseCategories ?? []);
+    const wholeFamilyCategories = categorySlices(family.expenseCategories);
+    const budgetCategories = [...(budgetProgressQ.data?.byCategory ?? new Map<string, number>())]
+      .map(([categoryId, amount]) => ({ id: categoryId, ...catDisplay(categoryId, 'expense'), amount }))
+      .sort((a, b) => b.amount - a.amount);
+    const comparisonCurrent = comparison?.inProgress
+      ? (currentComparisonQ.data?.expenseCategories ?? [])
+      : (expenseData?.expenseCategories ?? []);
+    const comparisonPrevious = comparison?.inProgress
+      ? (previousComparisonQ.data?.expenseCategories ?? [])
+      : (expenseData?.expenseCategories ?? []).map((item) => ({
+          categoryId: item.categoryId,
+          currentAmount: item.previousAmount,
+        }));
+    const mom = categoryChanges(comparisonCurrent, comparisonPrevious).map(
+      ({ categoryId, currentAmount, previousAmount }) => ({
         id: categoryId,
         ...catDisplay(categoryId, 'expense'),
         cur: currentAmount,
         prev: previousAmount,
-      }))
-      .sort((a, b) => b.cur - a.cur || b.prev - a.prev);
-    const dailyFlows = (analytics?.days ?? []).flatMap((day) => [
-      { occurred_at: `${day.date}T12:00:00.000Z`, type: 'income' as const, amount: day.incomeAmount },
-      { occurred_at: `${day.date}T12:00:00.000Z`, type: 'expense' as const, amount: day.expenseAmount },
-    ]);
+      }),
+    );
+    const dailyFlows = reportDayFlows(family.days, false);
+    const topicFlows = reportDayFlows(analytics?.days ?? [], true);
     const incomeSlices = (analytics?.incomeCategories ?? []).map(({ categoryId, amount }) => ({
       id: categoryId,
       ...catDisplay(categoryId, 'income'),
       amount,
     }));
-    const topItems = (analytics?.topExpenses ?? []).map((item) => ({
-      id: item.id,
-      note: item.note ?? '',
-      category: catDisplay(item.categoryId, 'expense').name,
-      color: catDisplay(item.categoryId, 'expense').color,
-      symbol: catDisplay(item.categoryId, 'expense').symbol,
-      amount: item.amount,
-      date: formatMonthDay(item.occurredAt),
-    }));
+    const expenseItems = (items: ReportAnalytics['topExpenses']) =>
+      items.map((item) => ({
+        id: item.id,
+        note: item.note ?? '',
+        category: catDisplay(item.categoryId, 'expense').name,
+        color: catDisplay(item.categoryId, 'expense').color,
+        symbol: catDisplay(item.categoryId, 'expense').symbol,
+        amount: item.amount,
+        date: new Intl.DateTimeFormat(intlLocale(), {
+          month: 'numeric',
+          day: 'numeric',
+          timeZone: familyQ.data?.timezone ?? undefined,
+        }).format(new Date(item.occurredAt)),
+      }));
+    const topItems = expenseItems(analytics?.topExpenses ?? []);
     const memberRows = (analytics?.members ?? []).map((item) => ({
       id: item.userId,
       name: memberNameById.get(item.userId) ?? memberFallback,
       amount: item.expenseNormalAmount,
       count: item.count,
     }));
-    const inc = analytics?.summary.incomeAmount ?? 0;
-    const exp = analytics?.summary.expenseAmount ?? 0;
-    const passiveInc = (analytics?.incomeCategoryChildren ?? []).reduce(
+    const totals = reportAccountingTotals(family.summary, family.days, familyInput.start, familyInput.end);
+    const passiveInc = family.incomeCategoryChildren.reduce(
       (total, item) =>
         total +
         (isPassiveIncomeName(catById.get(item.categoryId)?.name ?? '') ||
@@ -426,41 +619,75 @@ export default function ReportScreen() {
     );
 
     return {
-      income: inc,
-      expense: exp,
-      balance: inc - exp,
+      income: totals.income,
+      expense: totals.expense,
+      balance: totals.balance,
       byCat: list,
       expenseTotal: analytics?.summary.expenseNormalAmount ?? 0,
+      familyByCat: wholeFamilyCategories,
+      familyExpenseTotal: totals.normalExpense,
+      familyTopItems: expenseItems(family.topExpenses),
+      budgetTopCategory: budgetCategories[0] ?? null,
+      normalIncome: totals.normalIncome,
+      goalWithdrawals: totals.goalWithdrawals,
+      goalDeposits: totals.goalDeposits,
       members: memberRows,
-      balRate: balanceRate(inc, inc - exp),
+      balRate: balanceRate(totals.income, totals.balance),
       // 近 6 期收支（对账口径，含储蓄类）：区间跨度超出本期/上期，传全量流水单独分桶。
       incomeExpense:
         dimension === 'custom'
           ? equalPeriodIncomeExpenseSeries(range, dailyFlows)
           : incomeExpenseSeries(dimension, range.start, dailyFlows),
+      topicIncomeExpense:
+        dimension === 'custom'
+          ? equalPeriodIncomeExpenseSeries(range, topicFlows)
+          : incomeExpenseSeries(dimension, range.start, topicFlows),
       momItems: mom,
       topItems,
       incomeSlices,
       passiveIncome: passiveInc,
     };
-  }, [reportData, catsQ.data, membersQ.data, profileQ.data, range, dimension, catColors, locale]);
+  }, [
+    reportData,
+    familyData,
+    familyQ.data?.timezone,
+    familyInput.start,
+    familyInput.end,
+    budgetProgressQ.data,
+    expenseData,
+    comparison,
+    currentComparisonQ.data,
+    previousComparisonQ.data,
+    catsQ.data,
+    membersQ.data,
+    profileQ.data,
+    range,
+    dimension,
+    catColors,
+    locale,
+  ]);
 
-  const loading = reportQ.isLoading || catsQ.isLoading || layoutQ.isLoading;
+  const loading = reportQ.isLoading || familyQ.isLoading || catsQ.isLoading || layoutQ.isLoading;
   const memberCountMax = Math.max(1, ...members.map((m) => m.count));
-  const isMonthlyView = dimension === 'month';
   const currentMonthRange = useMemo(() => periodRange('month', todayInFamilyTimeZone), [todayInFamilyTimeZone]);
   const selectedMonthIsCurrent = dimension === 'month' && range.start.getTime() === currentMonthRange.start.getTime();
   const monthElapsedDays = selectedMonthIsCurrent
-    ? Math.max(1, Math.floor((startOfLocalDay(todayInFamilyTimeZone).getTime() - range.start.getTime()) / 86400000) + 1)
+    ? Math.max(1, calendarDayDifference(range.start, todayInFamilyTimeZone) + 1)
     : null;
-  const monthTotalDays =
-    dimension === 'month' ? Math.max(1, Math.round((range.end.getTime() - range.start.getTime()) / 86400000)) : 0;
-  const projectedExpense =
-    selectedMonthIsCurrent && monthElapsedDays ? Math.round((expenseTotal / monthElapsedDays) * monthTotalDays) : null;
-  const projectedIncome = projectionForRange(income, range, isCurrent);
+  const monthTotalDays = dimension === 'month' ? Math.max(1, calendarDayDifference(range.start, range.end)) : 0;
+  const familyBudgetUsed = budgetProgressQ.data?.usedAmount ?? 0;
+  const { scopeDiffers: budgetScopeDiffers, projected: projectedExpense } = reportBudgetForecast({
+    budgetUsed: budgetProgressQ.data?.usedAmount ?? null,
+    budgetTotal: budgetQ.data?.budget?.total_amount ?? null,
+    observedExpense: familyExpenseTotal,
+    elapsedDays: monthElapsedDays,
+    totalDays: monthTotalDays,
+    isCurrent: selectedMonthIsCurrent,
+  });
+  const projectedIncome = projectionForRange(income, range, isCurrent, todayInFamilyTimeZone);
   const incomeTarget = targetForDimension(incomeTargets, dimension);
-  const activeIncome = Math.max(0, income - passiveIncome);
-  const periodText = periodName(dimension);
+  const activeIncome = Math.max(0, normalIncome - passiveIncome);
+  const periodText = isCurrent ? periodName(dimension) : range.label;
   const customToolbarEnd = dimension === 'custom' ? addDays(range.end, -1) : range.start;
   const scopeLayout = resolveScopeCardLayout(scope, prefs.report_card_order, prefs.report_card_hidden);
   const cardOrder = scopeLayout.visible;
@@ -471,29 +698,100 @@ export default function ReportScreen() {
       setAnchor((a) => shiftAnchor(dimension, a ?? todayInFamilyTimeZone, delta));
       return;
     }
-    const days = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
+    const days = Math.max(1, calendarDayDifference(range.start, range.end));
     setCustomStart((d) => {
-      const next = new Date(d);
-      next.setDate(d.getDate() + delta * days);
+      const base = d ?? customStart;
+      const next = new Date(base);
+      next.setDate(base.getDate() + delta * days);
       return next;
     });
     setCustomEnd((d) => {
-      const next = new Date(d);
-      next.setDate(d.getDate() + delta * days);
+      const base = d ?? customEnd;
+      const next = new Date(base);
+      next.setDate(base.getDate() + delta * days);
       return next;
     });
   };
 
-  const commonInsightCard = (
+  const insightPending = (isMonthlyView && (!budgetQ.data || !budgetProgressQ.data)) || !savingsQ.data;
+  const insightFailed =
+    (isMonthlyView && !budgetQ.data && (budgetQ.isError || budgetQ.fetchStatus === 'paused')) ||
+    (isMonthlyView && !budgetProgressQ.data && (budgetProgressQ.isError || budgetProgressQ.fetchStatus === 'paused')) ||
+    (!savingsQ.data && (savingsQ.isError || savingsQ.fetchStatus === 'paused'));
+  const selectedCategoryIds = scope === 'income' ? incomeCategoryIds : expenseCategoryIds;
+  const scopeParts: string[] = [];
+  if (filters.memberIds.length > 0) {
+    const names = filters.memberIds.map(
+      (id) => ledgerMembers.find((member) => member.id === id)?.nickname ?? t('common.member'),
+    );
+    scopeParts.push(`${t('report.filterMembers')}：${names.join('、')}`);
+  }
+  if (selectedCategoryIds.length > 0) {
+    const names = selectedCategoryIds.map((id) => {
+      const category = hierarchy.byId.get(id);
+      return category ? displayCategoryName(category.name, category.is_system) : t('common.uncategorized');
+    });
+    scopeParts.push(
+      `${t(scope === 'income' ? 'report.filterIncomeCats' : 'report.filterExpenseCats')}：${names.join('、')}`,
+    );
+  }
+  const topicScopeText =
+    scopeParts.length > 0
+      ? t('report.filteredScope', { filters: scopeParts.join(' · ') })
+      : t('report.unfilteredScope');
+  const selectedFilterMembers = filters.memberIds.map(
+    (id) => ledgerMembers.find((member) => member.id === id) ?? { id, nickname: t('common.member'), avatarUrl: null },
+  );
+  const filterDescriptionParts: string[] = [];
+  if (selectedFilterMembers.length > 0)
+    filterDescriptionParts.push(
+      `${t('report.filterMembers')}：${selectedFilterMembers.map((member) => member.nickname).join('、')}`,
+    );
+  if (filters.categoryIds.length > 0)
+    filterDescriptionParts.push(
+      `${t('report.filterCategories')}：${filters.categoryIds
+        .map((id) => {
+          const category = hierarchy.byId.get(id);
+          return category ? displayCategoryName(category.name, category.is_system) : t('common.uncategorized');
+        })
+        .join('、')}`,
+    );
+  const filterDescription =
+    activeFilters > 0
+      ? t('report.filterSelectionA11y', { count: activeFilters, filters: filterDescriptionParts.join('；') })
+      : t('report.filterInactiveA11y');
+  const topicHeader = (title: string, details?: ReactNode) => <ReportCardHeader title={title} details={details} />;
+  const comparisonPending = fetchPartialComparison && (!currentComparisonQ.data || !previousComparisonQ.data);
+  const comparisonFailed =
+    fetchPartialComparison &&
+    (currentComparisonQ.isError ||
+      previousComparisonQ.isError ||
+      currentComparisonQ.fetchStatus === 'paused' ||
+      previousComparisonQ.fetchStatus === 'paused');
+  const commonInsightCard = insightPending ? (
+    <ReportInlineStatus
+      palette={palette}
+      onRetry={
+        insightFailed
+          ? () => {
+              if (isMonthlyView && !budgetQ.data) void budgetQ.refetch();
+              if (isMonthlyView && !budgetProgressQ.data) void budgetProgressQ.refetch();
+              if (!savingsQ.data) void savingsQ.refetch();
+            }
+          : undefined
+      }
+    />
+  ) : (
     <FinancialInsightsCard
       income={income}
       expense={expense}
-      expenseTotal={expenseTotal}
+      expenseTotal={familyExpenseTotal}
       projectedExpense={projectedExpense}
       projectedIncome={projectedIncome}
+      budgetScopeDiffers={budgetScopeDiffers}
       budgetTotal={budgetQ.data?.budget?.total_amount ?? null}
-      topCategory={byCat[0] ?? null}
-      topExpense={topItems[0] ?? null}
+      topCategory={familyByCat[0] ?? null}
+      topExpense={familyTopItems[0] ?? null}
       goals={savingsQ.data ?? []}
       incomeTarget={incomeTarget}
       palette={palette}
@@ -523,32 +821,55 @@ export default function ReportScreen() {
         expense={expense}
         balance={balance}
         periodText={periodText}
+        todayLabel={new Intl.DateTimeFormat(intlLocale(), { month: 'numeric', day: 'numeric' }).format(
+          todayInFamilyTimeZone,
+        )}
         currentPeriod={isCurrent}
+        futurePeriod={futurePeriod}
+        comparison={familyComparison}
         palette={palette}
         hidden={privacy}
       />
     ),
     ...(isMonthlyView
       ? {
-          budget: (
-            <MonthlyBudgetCard
-              total={budgetQ.data?.budget?.total_amount ?? null}
-              used={expenseTotal}
-              topCategory={byCat[0] ?? null}
-              daysLeft={selectedMonthIsCurrent ? daysToMonthEnd() : null}
-              projected={projectedExpense}
-              palette={palette}
-              hidden={privacy}
-              onOpen={() => setBudgetOpen(true)}
-            />
-          ),
+          budget:
+            !budgetQ.data || !budgetProgressQ.data ? (
+              <ReportInlineStatus
+                palette={palette}
+                onRetry={
+                  budgetQ.isError ||
+                  budgetQ.fetchStatus === 'paused' ||
+                  budgetProgressQ.isError ||
+                  budgetProgressQ.fetchStatus === 'paused'
+                    ? () => {
+                        if (!budgetQ.data) void budgetQ.refetch();
+                        if (!budgetProgressQ.data) void budgetProgressQ.refetch();
+                      }
+                    : undefined
+                }
+              />
+            ) : (
+              <MonthlyBudgetCard
+                title={t('report.familyBudget')}
+                total={budgetQ.data?.budget?.total_amount ?? null}
+                used={familyBudgetUsed}
+                topCategory={budgetTopCategory}
+                scopeDiffers={budgetScopeDiffers}
+                projected={projectedExpense}
+                palette={palette}
+                hidden={privacy}
+                onOpen={selectedMonthIsCurrent ? () => setBudgetOpen(true) : undefined}
+              />
+            ),
         }
       : {}),
     insights: commonInsightCard,
     expense_trend: (
       <MonthlyExpenseTrendCard
-        series={incomeExpense}
-        budgetTotal={isMonthlyView ? (budgetQ.data?.budget?.total_amount ?? null) : null}
+        scopeDescription={topicScopeText}
+        key={topicSelectionKey}
+        series={topicIncomeExpense}
         palette={palette}
         hidden={privacy}
         currentPeriod={isCurrent}
@@ -556,18 +877,62 @@ export default function ReportScreen() {
     ),
     expense_category: (
       <MonthlyExpenseCategoryCard
+        header={topicHeader(t('report.expenseMix'))}
+        key={topicSelectionKey}
         categories={byCat}
         total={expenseTotal}
         palette={palette}
         hidden={privacy}
         onOpenDetail={setDetail}
-        emptyText={isMonthlyView ? t('report.emptyMonthExpense') : t('report.emptyPeriodExpense')}
+        emptyText={
+          topicFiltersApplied
+            ? t('report.emptyTopicExpense')
+            : isMonthlyView
+              ? t('report.emptyMonthExpense')
+              : t('report.emptyPeriodExpense')
+        }
       />
     ),
-    category_mom: <CategoryMomCard items={momItems.slice(0, 5)} palette={palette} hidden={privacy} />,
-    top_expenses: <TopExpensesCard items={topItems} palette={palette} hidden={privacy} />,
+    category_mom: (
+      <CategoryMomCard
+        header={topicHeader(
+          t('report.categoryMom'),
+          <>
+            <ReportDetailText>{comparisonLabel ?? t('report.noComparableData')}</ReportDetailText>
+            {comparison?.inProgress ? <ReportDetailText>{t('report.comparisonPartialHint')}</ReportDetailText> : null}
+            <ReportDetailText>{topicScopeText}</ReportDetailText>
+          </>,
+        )}
+        items={momItems.slice(0, 5)}
+        palette={palette}
+        hidden={privacy}
+        comparisonLabel={comparisonLabel}
+        inProgress={comparison?.inProgress ?? isCurrent}
+        loading={fetchPartialComparison && (!currentComparisonQ.data || !previousComparisonQ.data)}
+        failed={
+          fetchPartialComparison &&
+          (currentComparisonQ.isError ||
+            previousComparisonQ.isError ||
+            currentComparisonQ.fetchStatus === 'paused' ||
+            previousComparisonQ.fetchStatus === 'paused')
+        }
+        onRetry={() => {
+          void currentComparisonQ.refetch();
+          void previousComparisonQ.refetch();
+        }}
+      />
+    ),
+    top_expenses: (
+      <TopExpensesCard
+        header={topicHeader(t('report.topExpenses'))}
+        items={topItems}
+        palette={palette}
+        hidden={privacy}
+      />
+    ),
     member: (
       <MonthlyMemberCard
+        header={topicHeader(t('report.memberAnalysis'))}
         members={members}
         maxCount={memberCountMax}
         periodText={periodText}
@@ -587,7 +952,12 @@ export default function ReportScreen() {
         balance={balance}
         rate={balRate}
         periodText={periodText}
+        todayLabel={new Intl.DateTimeFormat(intlLocale(), { month: 'numeric', day: 'numeric' }).format(
+          todayInFamilyTimeZone,
+        )}
         currentPeriod={isCurrent}
+        futurePeriod={futurePeriod}
+        comparison={familyComparison}
         palette={palette}
         hidden={privacy}
       />
@@ -607,9 +977,20 @@ export default function ReportScreen() {
       />
     ),
     insights: commonInsightCard,
-    income_trend: <MonthlyIncomeTrendCard series={incomeExpense} palette={palette} hidden={privacy} />,
+    income_trend: (
+      <MonthlyIncomeTrendCard
+        scopeDescription={topicScopeText}
+        key={topicSelectionKey}
+        series={topicIncomeExpense}
+        palette={palette}
+        hidden={privacy}
+        currentPeriod={isCurrent}
+      />
+    ),
     income_structure: (
       <IncomeStructureCard
+        header={topicHeader(t('report.incomeStructure'))}
+        key={topicSelectionKey}
         slices={incomeSlices}
         palette={palette}
         hidden={privacy}
@@ -627,30 +1008,52 @@ export default function ReportScreen() {
         balance={balance}
         rate={balRate}
         periodText={periodText}
+        todayLabel={new Intl.DateTimeFormat(intlLocale(), { month: 'numeric', day: 'numeric' }).format(
+          todayInFamilyTimeZone,
+        )}
         currentPeriod={isCurrent}
+        futurePeriod={futurePeriod}
+        comparison={familyComparison}
         palette={palette}
         hidden={privacy}
       />
     ),
     insights: commonInsightCard,
     income_expense: (
-      <IncomeExpenseCard series={incomeExpense} palette={palette} hidden={privacy} currentPeriod={isCurrent} />
+      <IncomeExpenseCard
+        key={familySelectionKey}
+        series={incomeExpense}
+        palette={palette}
+        hidden={privacy}
+        currentPeriod={isCurrent}
+      />
     ),
     balance_waterfall: (
       <BalanceWaterfallCard
-        income={income}
-        expense={expense}
+        normalIncome={normalIncome}
+        normalExpense={familyExpenseTotal}
+        goalWithdrawals={goalWithdrawals}
+        goalDeposits={goalDeposits}
         balance={balance}
-        categories={byCat}
+        categories={familyByCat}
         palette={palette}
         hidden={privacy}
       />
     ),
-    savings_rate: <SavingsRateTrendCard series={incomeExpense} palette={palette} />,
+    savings_rate: (
+      <SavingsRateTrendCard
+        key={familySelectionKey}
+        series={incomeExpense}
+        palette={palette}
+        currentPeriod={isCurrent}
+      />
+    ),
     savings_goals: (
       <SavingsGoalsCard
         goals={savingsQ.data ?? []}
         loading={savingsQ.isLoading}
+        failed={!savingsQ.data && (savingsQ.isError || savingsQ.fetchStatus === 'paused')}
+        onRetry={() => void savingsQ.refetch()}
         palette={palette}
         hidden={privacy}
         onOpen={() => setSavingsOpen(true)}
@@ -659,6 +1062,88 @@ export default function ReportScreen() {
     more_stats: null,
   };
   const scopeCards = scope === 'expense' ? expenseCards : scope === 'income' ? incomeCards : balanceCards;
+  const topicCardIds: ReportCardId[] =
+    scope === 'expense'
+      ? ['expense_trend', 'expense_category', 'category_mom', 'top_expenses', 'member', 'more_stats']
+      : scope === 'income'
+        ? ['income_trend', 'income_structure']
+        : [];
+  const firstTopicCard = cardOrder.find((id) => topicCardIds.includes(id));
+  const compactIds = new Set<ReportCardId>();
+  if (!topicUnavailable && reportData && !futurePeriod) {
+    if (scope === 'expense') {
+      if (byCat.length === 0) compactIds.add('expense_category');
+      if (topItems.length === 0) compactIds.add('top_expenses');
+      if (members.length === 0) compactIds.add('member');
+      if (byCat.length === 0) compactIds.add('more_stats');
+      if (comparison && !comparisonPending && !comparisonFailed && momItems.every((item) => item.cur === 0))
+        compactIds.add('category_mom');
+    } else if (scope === 'income' && incomeSlices.length === 0) compactIds.add('income_structure');
+  }
+  const renderedCards = compactReportCards(cardOrder, compactIds).map((block) => {
+    if (block.kind === 'empty') {
+      const showPrevious = block.ids.includes('category_mom') && momItems.some((item) => item.prev > 0);
+      return (
+        <ReportEmptyGroup
+          key={block.ids[0]}
+          title={
+            scope === 'income'
+              ? t('report.emptyTopicIncome')
+              : byCat.length === 0
+                ? t('report.emptyTopicExpense')
+                : block.ids.includes('category_mom')
+                  ? t('report.emptyComparisonExpense')
+                  : t('report.noMemberRecords', { period: periodText })
+          }
+          onAdjust={topicFiltersApplied ? () => setFilterOpen(true) : undefined}
+        >
+          {showPrevious ? (
+            <ReportDisclosure
+              label={t('report.previousCategories')}
+              value={t('report.categoryCount', { count: momItems.filter((item) => item.prev > 0).length })}
+              title={t('report.previousCategories')}
+            >
+              <ReportDetailText>{comparisonLabel}</ReportDetailText>
+              {comparison?.inProgress ? <ReportDetailText>{t('report.comparisonPartialHint')}</ReportDetailText> : null}
+              <ReportDetailText>{topicScopeText}</ReportDetailText>
+              {momItems
+                .filter((item) => item.prev > 0)
+                .map((item) => (
+                  <ReportDetailText key={item.id}>
+                    {item.name} · {maskAmount(formatAmount(item.prev, '-'), privacy)}
+                  </ReportDetailText>
+                ))}
+            </ReportDisclosure>
+          ) : null}
+          {block.ids.includes('more_stats') ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setMoreStatsOpen(true)}
+              style={({ pressed }) => [styles.compactStats, { opacity: pressed ? 0.65 : 1 }]}
+            >
+              <Text style={{ color: palette.textPrimary }}>{t('report.moreStats')}</Text>
+              <SymbolView name="chevron.right" size={13} tintColor={palette.textSecondary} />
+            </Pressable>
+          ) : null}
+        </ReportEmptyGroup>
+      );
+    }
+    const id = block.id;
+    if (futurePeriod && id !== 'overview' && id !== 'savings_goals') return null;
+    const isTopic = topicCardIds.includes(id);
+    if (isTopic && topicUnavailable) {
+      if (id !== firstTopicCard) return null;
+      return (
+        <ReportInlineStatus
+          key="topic-status"
+          palette={palette}
+          onRetry={topicQ.isError || topicQ.fetchStatus === 'paused' ? () => void topicQ.refetch() : undefined}
+        />
+      );
+    }
+    const card = scopeCards[id];
+    return card ? <View key={id}>{card}</View> : null;
+  });
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
@@ -672,6 +1157,7 @@ export default function ReportScreen() {
             palette={palette}
             onRetry={() => {
               void reportQ.refetch();
+              void familyQ.refetch();
               void catsQ.refetch();
               void layoutQ.refetch();
             }}
@@ -757,7 +1243,7 @@ export default function ReportScreen() {
                       const next = value as Dimension;
                       setDimension(next);
                       if (next === 'custom') setCustomOpen(true);
-                      else setAnchor(new Date());
+                      else setAnchor(todayInFamilyTimeZone);
                     }}
                   >
                     {DIMENSIONS.map((d) => (
@@ -770,10 +1256,28 @@ export default function ReportScreen() {
               </View>
             </View>
 
-            {filteredCount > 0 && filteredCount < 3 ? (
-              <ReportDataReadinessCard count={filteredCount} palette={palette} />
+            {hasRefreshError ? (
+              <Pressable
+                style={[styles.card, styles.inlineStatus, { backgroundColor: palette.card }]}
+                accessibilityRole="button"
+                onPress={() => {
+                  if (reportQ.isError && !futurePeriod) void reportQ.refetch();
+                  if (scope === 'expense' && expenseQ.isError && hasExpenseFilters) void expenseQ.refetch();
+                  if (scope === 'income' && incomeQ.isError && hasIncomeFilters) void incomeQ.refetch();
+                  if (dimension === 'month' && budgetQ.isError) void budgetQ.refetch();
+                  if (dimension === 'month' && budgetProgressQ.isError) void budgetProgressQ.refetch();
+                  if (savingsQ.isError) void savingsQ.refetch();
+                }}
+              >
+                <ThemedText style={{ color: palette.textSecondary }}>{t('report.refreshFailedCached')}</ThemedText>
+                <ThemedText style={{ color: palette.accent }}>{t('common.retry')}</ThemedText>
+              </Pressable>
             ) : null}
-            {renderOrderedCards(scopeCards, cardOrder)}
+
+            {familyData && familyData.summary.transactionCount > 0 && familyData.summary.transactionCount < 3 ? (
+              <ReportDataReadinessCard count={familyData.summary.transactionCount} palette={palette} />
+            ) : null}
+            {renderedCards}
             {addCardEntry}
           </Animated.ScrollView>
         )}
@@ -785,27 +1289,13 @@ export default function ReportScreen() {
             onLayout={onHeaderLayout}
           >
             <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('tabs.report')}</ThemedText>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t(activeFilters > 0 ? 'report.filterActiveA11y' : 'report.filterInactiveA11y')}
-              accessibilityHint={t('report.filterHint')}
-              accessibilityState={{ disabled: filterUnavailable }}
+            <ReportFilterButton
+              members={selectedFilterMembers}
+              filterCount={activeFilters}
+              description={filterDescription}
               disabled={filterUnavailable}
               onPress={() => setFilterOpen(true)}
-              style={styles.filterButton}
-            >
-              <SymbolView
-                name="line.3.horizontal.decrease"
-                tintColor={activeFilters > 0 ? palette.accent : palette.textPrimary}
-                size={22}
-              />
-              {activeFilters > 0 ? (
-                <View
-                  pointerEvents="none"
-                  style={[styles.filterButtonDot, { backgroundColor: palette.accent, borderColor: palette.base }]}
-                />
-              ) : null}
-            </Pressable>
+            />
           </Animated.View>
         </View>
       </View>
@@ -817,6 +1307,8 @@ export default function ReportScreen() {
         hierarchy={hierarchy}
         analytics={reportData ?? EMPTY_REPORT_ANALYTICS}
         range={range}
+        today={todayInFamilyTimeZone}
+        familyTimeZone={familyQ.data?.timezone ?? undefined}
         dimension={dimension}
         analyticsInput={analyticsInput}
         totalExpense={expenseTotal}
@@ -826,9 +1318,22 @@ export default function ReportScreen() {
       />
       <MemberAnalysisSheet
         visible={memberAnalysisOpen}
-        dimension={dimension}
-        analytics={reportData ?? EMPTY_REPORT_ANALYTICS}
-        members={ledgerMembers}
+        periodText={periodText}
+        analytics={expenseData ?? null}
+        incomeAnalytics={incomeData ?? null}
+        failed={
+          (!expenseData && (expenseQ.isError || expenseQ.fetchStatus === 'paused')) ||
+          (!incomeData && (incomeQ.isError || incomeQ.fetchStatus === 'paused'))
+        }
+        onRetry={() => {
+          if (!expenseData) void expenseQ.refetch();
+          if (!incomeData) void incomeQ.refetch();
+        }}
+        members={
+          filters.memberIds.length > 0
+            ? ledgerMembers.filter((member) => filters.memberIds.includes(member.id))
+            : ledgerMembers
+        }
         categories={catsQ.data ?? []}
         hidden={privacy}
         onClose={() => setMemberAnalysisOpen(false)}
@@ -837,18 +1342,20 @@ export default function ReportScreen() {
         visible={insightsOpen}
         income={income}
         expense={expense}
-        expenseTotal={expenseTotal}
+        expenseTotal={familyExpenseTotal}
         projectedExpense={projectedExpense}
         projectedIncome={projectedIncome}
+        budgetScopeDiffers={budgetScopeDiffers}
         budgetTotal={budgetQ.data?.budget?.total_amount ?? null}
-        topCategory={byCat[0] ?? null}
-        topExpense={topItems[0] ?? null}
+        topCategory={familyByCat[0] ?? null}
+        topExpense={familyTopItems[0] ?? null}
         goals={savingsQ.data ?? []}
         incomeTarget={incomeTarget}
         hidden={privacy}
         onClose={() => setInsightsOpen(false)}
       />
       <MoreStatsSheet
+        key={topicSelectionKey}
         visible={moreStatsOpen}
         range={range}
         days={reportData?.days ?? []}
@@ -861,6 +1368,7 @@ export default function ReportScreen() {
         visible={customOpen}
         start={customStart}
         end={customEnd}
+        today={todayInFamilyTimeZone}
         onChangeStart={setCustomStart}
         onChangeEnd={setCustomEnd}
         onClose={() => setCustomOpen(false)}
@@ -872,6 +1380,9 @@ export default function ReportScreen() {
         categories={catsQ.data ?? []}
         hierarchy={hierarchy}
         matchedCount={filteredCount}
+        scope={scope}
+        futurePeriod={futurePeriod}
+        matchedFailed={topicUnavailable && (topicQ.isError || topicQ.fetchStatus === 'paused')}
         onChange={setFilters}
         onClose={() => setFilterOpen(false)}
       />
@@ -935,6 +1446,23 @@ function ReportLoadErrorState({ palette, onRetry }: { palette: ReturnType<typeof
   );
 }
 
+function ReportInlineStatus({ palette, onRetry }: { palette: ReturnType<typeof usePalette>; onRetry?: () => void }) {
+  return (
+    <View style={[styles.card, styles.inlineStatus, { backgroundColor: palette.card }]}>
+      {onRetry ? (
+        <>
+          <ThemedText style={{ color: palette.textSecondary }}>{t('common.loadFailed')}</ThemedText>
+          <Pressable accessibilityRole="button" onPress={onRetry} hitSlop={8}>
+            <ThemedText style={{ color: palette.accent }}>{t('common.retry')}</ThemedText>
+          </Pressable>
+        </>
+      ) : (
+        <ActivityIndicator color={palette.accent} />
+      )}
+    </View>
+  );
+}
+
 function AddReportCardButton({
   hiddenCount,
   palette,
@@ -965,6 +1493,9 @@ function ReportFilterSheet({
   categories,
   hierarchy,
   matchedCount,
+  scope,
+  futurePeriod,
+  matchedFailed,
   onChange,
   onClose,
 }: {
@@ -973,7 +1504,10 @@ function ReportFilterSheet({
   members: { id: string; nickname: string }[];
   categories: Category[];
   hierarchy: CategoryHierarchy;
-  matchedCount: number;
+  matchedCount: number | null;
+  scope: ReportScope;
+  futurePeriod: boolean;
+  matchedFailed: boolean;
   onChange: (filters: ReportFilters) => void;
   onClose: () => void;
 }) {
@@ -1097,7 +1631,16 @@ function ReportFilterSheet({
                   style={[styles.filterFooter, { backgroundColor: palette.base, borderTopColor: palette.separator }]}
                 >
                   <Text style={[styles.filterFooterMeta, { color: palette.textSecondary }]}>
-                    {t('report.matchedCount', { count: matchedCount })}
+                    {futurePeriod
+                      ? t('report.futureReportHint')
+                      : scope === 'balance'
+                        ? t('report.filterBalanceHint')
+                        : matchedCount == null
+                          ? t(matchedFailed ? 'common.loadFailed' : 'report.filterCountLoading')
+                          : t('report.matchedTopicCount', {
+                              scope: t(scope === 'expense' ? 'record.expense' : 'record.income'),
+                              count: matchedCount,
+                            })}
                   </Text>
                   <Pressable style={[styles.filterReset, { borderColor: palette.separator }]} onPress={reset}>
                     <Text style={[styles.filterResetText, { color: palette.textPrimary }]}>{t('common.reset')}</Text>
@@ -1202,18 +1745,25 @@ function IncomeTargetCard({
   const targetText = maskAmount(formatAmount(target, ''), hidden);
 
   return (
-    <Pressable
+    <View
       style={[styles.card, styles.incomeTargetCard, { backgroundColor: palette.card }]}
-      onPress={onOpen}
-      accessibilityRole="button"
-      accessibilityLabel={t('report.incomeTargetA11y', { label: targetLabel, amount: formatAmount(income, '') })}
+      accessibilityLabel={t('report.incomeTargetA11y', {
+        label: targetLabel,
+        amount: maskAmount(formatAmount(income, ''), hidden),
+      })}
     >
-      <View style={styles.cardHeaderRow}>
-        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-          {targetLabel}
-        </ThemedText>
-        <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={14} />
-      </View>
+      <ReportCardHeader
+        title={t('report.familyIncomeTarget')}
+        details={<ReportDetailText>{t('report.incomeGoalScopeHint')}</ReportDetailText>}
+      />
+      <Pressable
+        accessibilityRole="button"
+        onPress={onOpen}
+        style={({ pressed }) => [styles.compactStats, { opacity: pressed ? 0.65 : 1 }]}
+      >
+        <Text style={{ color: palette.accent }}>{targetLabel}</Text>
+        <SymbolView name="chevron.right" size={13} tintColor={palette.textSecondary} />
+      </Pressable>
       {target <= 0 ? (
         <View style={[styles.incomeTargetEmpty, { backgroundColor: palette.base }]}>
           <View style={[styles.targetEmptyIcon, { backgroundColor: palette.card }]}>
@@ -1279,7 +1829,7 @@ function IncomeTargetCard({
           </View>
         </>
       )}
-    </Pressable>
+    </View>
   );
 }
 
@@ -1396,6 +1946,7 @@ function buildFinancialInsights({
   expenseTotal,
   projectedExpense,
   projectedIncome,
+  budgetScopeDiffers,
   budgetTotal,
   topCategory,
   topExpense,
@@ -1409,6 +1960,7 @@ function buildFinancialInsights({
   expenseTotal: number;
   projectedExpense: number | null;
   projectedIncome: number | null;
+  budgetScopeDiffers: boolean;
   budgetTotal: number | null;
   topCategory: CatSlice | null;
   topExpense: TopItem | null;
@@ -1418,6 +1970,14 @@ function buildFinancialInsights({
   nowMs: number;
 }): FinancialInsight[] {
   const insights: FinancialInsight[] = [];
+  if (budgetScopeDiffers) {
+    insights.push({
+      title: t('report.insightBudgetScope'),
+      body: t('report.budgetPeriodScopeHint'),
+      action: t('report.insightBudgetScopeAction'),
+      tone: 'warn',
+    });
+  }
   if (budgetTotal && budgetTotal > 0 && projectedExpense != null && projectedExpense > budgetTotal) {
     insights.push({
       title: t('report.insightRisk'),
@@ -1492,6 +2052,7 @@ function FinancialInsightsCard({
   expenseTotal,
   projectedExpense,
   projectedIncome,
+  budgetScopeDiffers,
   budgetTotal,
   topCategory,
   topExpense,
@@ -1506,6 +2067,7 @@ function FinancialInsightsCard({
   expenseTotal: number;
   projectedExpense: number | null;
   projectedIncome: number | null;
+  budgetScopeDiffers: boolean;
   budgetTotal: number | null;
   topCategory: CatSlice | null;
   topExpense: TopItem | null;
@@ -1522,6 +2084,7 @@ function FinancialInsightsCard({
     expenseTotal,
     projectedExpense,
     projectedIncome,
+    budgetScopeDiffers,
     budgetTotal,
     topCategory,
     topExpense,
@@ -1531,7 +2094,6 @@ function FinancialInsightsCard({
     nowMs,
   });
   const lead = insights[0];
-  const rest = insights.slice(1, 3);
   const leadColor = insightToneColor(lead.tone, palette);
 
   return (
@@ -1543,7 +2105,7 @@ function FinancialInsightsCard({
     >
       <View style={styles.cardHeaderRow}>
         <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-          {t('report.insights')}
+          {t('report.familyInsights')}
         </ThemedText>
         <View style={styles.cardHeaderAction}>
           <ThemedText style={[styles.chartMeta, { color: palette.textSecondary }]}>
@@ -1559,29 +2121,8 @@ function FinancialInsightsCard({
         <View style={styles.flex}>
           <ThemedText style={[styles.insightLeadTitle, { color: palette.textPrimary }]}>{lead.title}</ThemedText>
           <ThemedText style={[styles.insightLeadBody, { color: palette.textSecondary }]}>{lead.body}</ThemedText>
-          <View style={[styles.insightActionPill, { borderColor: leadColor }]}>
-            <ThemedText style={[styles.insightActionText, { color: leadColor }]}>{lead.action}</ThemedText>
-          </View>
         </View>
       </View>
-      {rest.length > 0 ? (
-        <View style={styles.insightMinorList}>
-          {rest.map((item) => {
-            const color = insightToneColor(item.tone, palette);
-            return (
-              <View key={item.title} style={styles.insightMinorRow}>
-                <View style={[styles.insightDot, { backgroundColor: color }]} />
-                <ThemedText style={[styles.insightMinorTitle, { color: palette.textPrimary }]} numberOfLines={1}>
-                  {item.title}
-                </ThemedText>
-                <ThemedText style={[styles.insightMinorBody, { color: palette.textSecondary }]} numberOfLines={1}>
-                  {item.body}
-                </ThemedText>
-              </View>
-            );
-          })}
-        </View>
-      ) : null}
     </Pressable>
   );
 }
@@ -1604,6 +2145,7 @@ function FinancialInsightsDetailSheet({
   expenseTotal,
   projectedExpense,
   projectedIncome,
+  budgetScopeDiffers,
   budgetTotal,
   topCategory,
   topExpense,
@@ -1618,6 +2160,7 @@ function FinancialInsightsDetailSheet({
   expenseTotal: number;
   projectedExpense: number | null;
   projectedIncome: number | null;
+  budgetScopeDiffers: boolean;
   budgetTotal: number | null;
   topCategory: CatSlice | null;
   topExpense: TopItem | null;
@@ -1634,6 +2177,7 @@ function FinancialInsightsDetailSheet({
     expenseTotal,
     projectedExpense,
     projectedIncome,
+    budgetScopeDiffers,
     budgetTotal,
     topCategory,
     topExpense,
@@ -1701,7 +2245,10 @@ function MonthlyOverviewCard({
   expense,
   balance,
   periodText,
+  todayLabel,
   currentPeriod,
+  futurePeriod,
+  comparison,
   palette,
   hidden,
 }: {
@@ -1709,7 +2256,10 @@ function MonthlyOverviewCard({
   expense: number;
   balance: number;
   periodText: string;
+  todayLabel: string;
   currentPeriod: boolean;
+  futurePeriod: boolean;
+  comparison: FamilyComparison | null;
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
 }) {
@@ -1721,7 +2271,10 @@ function MonthlyOverviewCard({
       balance={balance}
       rate={balanceRate(income, balance)}
       periodText={periodText}
+      todayLabel={todayLabel}
       currentPeriod={currentPeriod}
+      futurePeriod={futurePeriod}
+      comparison={comparison}
       palette={palette}
       hidden={hidden}
     />
@@ -1733,8 +2286,11 @@ function MonthlyIncomeOverviewCard({
   expense,
   balance,
   rate,
+  todayLabel,
   periodText = t('dates.thisMonth'),
   currentPeriod,
+  futurePeriod,
+  comparison,
   palette,
   hidden,
 }: {
@@ -1743,7 +2299,10 @@ function MonthlyIncomeOverviewCard({
   balance: number;
   rate: number | null;
   periodText?: string;
+  todayLabel: string;
   currentPeriod: boolean;
+  futurePeriod: boolean;
+  comparison: FamilyComparison | null;
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
 }) {
@@ -1755,7 +2314,10 @@ function MonthlyIncomeOverviewCard({
       balance={balance}
       rate={rate}
       periodText={periodText}
+      todayLabel={todayLabel}
       currentPeriod={currentPeriod}
+      futurePeriod={futurePeriod}
+      comparison={comparison}
       palette={palette}
       hidden={hidden}
     />
@@ -1767,8 +2329,11 @@ function MonthlyBalanceOverviewCard({
   expense,
   balance,
   rate,
+  todayLabel,
   periodText = t('dates.thisMonth'),
   currentPeriod,
+  futurePeriod,
+  comparison,
   palette,
   hidden,
 }: {
@@ -1777,7 +2342,10 @@ function MonthlyBalanceOverviewCard({
   balance: number;
   rate: number | null;
   periodText?: string;
+  todayLabel: string;
   currentPeriod: boolean;
+  futurePeriod: boolean;
+  comparison: FamilyComparison | null;
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
 }) {
@@ -1789,7 +2357,10 @@ function MonthlyBalanceOverviewCard({
       balance={balance}
       rate={rate}
       periodText={periodText}
+      todayLabel={todayLabel}
       currentPeriod={currentPeriod}
+      futurePeriod={futurePeriod}
+      comparison={comparison}
       palette={palette}
       hidden={hidden}
     />
@@ -1803,7 +2374,10 @@ function ScopeOverviewCard({
   balance,
   rate,
   periodText,
+  todayLabel,
   currentPeriod,
+  futurePeriod,
+  comparison,
   palette,
   hidden,
 }: {
@@ -1813,35 +2387,64 @@ function ScopeOverviewCard({
   balance: number;
   rate: number | null;
   periodText: string;
+  todayLabel: string;
   currentPeriod: boolean;
+  futurePeriod: boolean;
+  comparison: FamilyComparison | null;
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
 }) {
+  const { width, fontScale } = useWindowDimensions();
   const rateText = rate == null ? '—' : `${Math.round(rate * 100)}%`;
+  const comparisonLines = comparison
+    ? (['income', 'expense', 'balance'] as const).map((key) => {
+        const formatValue = (value: FamilyComparison['currentValues']) =>
+          value.hasRecords
+            ? maskAmount(formatAmount(value[key], key === 'balance' ? signForNet(value[key]) : ''), hidden)
+            : t('report.comparisonNoRecords');
+        return t('report.summaryComparisonMetric', {
+          metric: t(key === 'income' ? 'record.income' : key === 'expense' ? 'record.expense' : 'report.balance'),
+          current: formatValue(comparison.currentValues),
+          previous: formatValue(comparison.previousValues),
+        });
+      })
+    : [];
+  if (futurePeriod) {
+    return (
+      <View style={[styles.monthlyOverview, { backgroundColor: palette.card }]} accessible>
+        <ThemedText style={[styles.overviewTitle, { color: palette.textPrimary }]}>
+          {t('report.familySummary')} · {t('report.futurePeriod')}
+        </ThemedText>
+        <ThemedText style={[styles.chartSelection, { color: palette.textSecondary }]}>
+          {t('report.futureReportHint')}
+        </ThemedText>
+      </View>
+    );
+  }
   const metrics =
     scope === 'income'
       ? [
           {
             label: t('report.thisIncome'),
-            value: maskAmount(formatAmount(income, '+'), hidden),
+            value: maskAmount(formatAmount(income), hidden),
             color: palette.income,
           },
           {
-            label: t('report.thisBalance'),
-            value: maskAmount(formatAmount(balance, signForNet(balance)), hidden),
+            label: t(balance < 0 ? 'report.deficit' : 'report.thisBalance'),
+            value: maskAmount(formatAmount(balance), hidden),
             color: balance < 0 ? palette.danger : palette.info,
           },
           {
             label: t('report.thisExpense'),
-            value: maskAmount(formatAmount(expense, '-'), hidden),
+            value: maskAmount(formatAmount(expense), hidden),
             color: palette.expense,
           },
         ]
       : scope === 'balance'
         ? [
             {
-              label: t('report.thisBalance'),
-              value: maskAmount(formatAmount(balance, signForNet(balance)), hidden),
+              label: t(balance < 0 ? 'report.deficit' : 'report.thisBalance'),
+              value: maskAmount(formatAmount(balance), hidden),
               color: balance < 0 ? palette.danger : palette.info,
             },
             {
@@ -1851,86 +2454,114 @@ function ScopeOverviewCard({
             },
             {
               label: t('report.thisExpense'),
-              value: maskAmount(formatAmount(expense, '-'), hidden),
+              value: maskAmount(formatAmount(expense), hidden),
               color: palette.expense,
             },
           ]
         : [
             {
               label: t('report.thisExpense'),
-              value: maskAmount(formatAmount(expense, '-'), hidden),
+              value: maskAmount(formatAmount(expense), hidden),
               color: palette.expense,
             },
             {
-              label: t('report.thisBalance'),
-              value: maskAmount(formatAmount(balance, signForNet(balance)), hidden),
+              label: t(balance < 0 ? 'report.deficit' : 'report.thisBalance'),
+              value: maskAmount(formatAmount(balance), hidden),
               color: balance < 0 ? palette.danger : palette.info,
             },
             {
               label: t('report.thisIncome'),
-              value: maskAmount(formatAmount(income, '+'), hidden),
+              value: maskAmount(formatAmount(income), hidden),
               color: palette.income,
             },
           ];
 
+  const stacked = width < 375 || fontScale > 1.15 || metrics.some((metric) => metric.value.length > 11);
+
   return (
-    <View
-      style={[styles.monthlyOverview, { backgroundColor: palette.card }]}
-      accessible
-      accessibilityRole="summary"
-      accessibilityLabel={t('report.overviewA11y', {
-        period: periodText,
-        income: formatAmount(income, '+'),
-        expense: formatAmount(expense, '-'),
-        balance: formatAmount(balance, signForNet(balance)),
-        suffix: currentPeriod ? t('report.overviewInProgress') : '',
-      })}
-    >
+    <View style={[styles.monthlyOverview, styles.cardWithFooter, { backgroundColor: palette.card }]}>
       <View style={styles.overviewHeader}>
-        <ThemedText style={[styles.overviewTitle, { color: palette.textPrimary }]}>
-          {t('report.periodSummary')}
-        </ThemedText>
-        <View
-          style={[styles.overviewStatus, { backgroundColor: currentPeriod ? palette.bannerTint : palette.cardPill }]}
-        >
-          <View
-            style={[styles.overviewStatusDot, { backgroundColor: currentPeriod ? palette.info : palette.textTertiary }]}
-          />
-          <ThemedText
-            style={[styles.overviewStatusText, { color: currentPeriod ? palette.info : palette.textSecondary }]}
-          >
-            {currentPeriod ? t('dates.inProgress') : t('dates.settled')}
-          </ThemedText>
+        <Text accessibilityRole="header" style={[styles.overviewTitle, { color: palette.textPrimary }]}>
+          {t('report.familySummary')}
+        </Text>
+        <Text style={[styles.overviewStatusText, { color: palette.info }]}>
+          {currentPeriod ? t('report.asOf', { date: todayLabel }) : t('dates.settled')}
+        </Text>
+      </View>
+      <View
+        accessible
+        accessibilityRole="summary"
+        accessibilityLabel={t('report.overviewA11y', {
+          period: periodText,
+          income: maskAmount(formatAmount(income, '+'), hidden),
+          expense: maskAmount(formatAmount(expense, '-'), hidden),
+          balance: maskAmount(formatAmount(balance, signForNet(balance)), hidden),
+          suffix: currentPeriod ? t('report.overviewInProgress') : futurePeriod ? t('report.overviewFuture') : '',
+        })}
+      >
+        <View style={[styles.overviewMetrics, stacked && { flexDirection: 'column', gap: Space[3] }]}>
+          {metrics.map((metric, index) => (
+            <View
+              key={metric.label}
+              style={[
+                styles.monthlyOverviewCell,
+                stacked && { flex: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+                !stacked &&
+                  index > 0 && { borderLeftColor: palette.separator, borderLeftWidth: StyleSheet.hairlineWidth },
+              ]}
+            >
+              <ThemedText style={[styles.monthlyOverviewLabel, { color: palette.textSecondary }]}>
+                {metric.label}
+              </ThemedText>
+              <ThemedText
+                style={[styles.monthlyOverviewAmount, { color: metric.color }]}
+                selectable
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.75}
+              >
+                {metric.value}
+              </ThemedText>
+            </View>
+          ))}
         </View>
       </View>
-      <View style={styles.overviewMetrics}>
-        {metrics.map((metric, index) => (
-          <View
-            key={metric.label}
-            style={[
-              styles.monthlyOverviewCell,
-              index > 0 && { borderLeftColor: palette.separator, borderLeftWidth: StyleSheet.hairlineWidth },
-            ]}
-          >
-            <ThemedText style={[styles.monthlyOverviewLabel, { color: palette.textSecondary }]}>
-              {metric.label}
-            </ThemedText>
-            <ThemedText
-              style={[
-                styles.monthlyOverviewAmount,
-                index === 0 && styles.monthlyOverviewAmountPrimary,
-                { color: metric.color },
-              ]}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-            >
-              {metric.value}
-            </ThemedText>
-          </View>
+      <ReportDisclosure
+        label={
+          comparison
+            ? `${t('report.samePeriodMetric', { metric: t(scope === 'balance' ? 'report.balance' : `record.${scope}`) })} · ${comparison.shortLabel}`
+            : t('report.noComparableData')
+        }
+        value={comparison ? comparisonChangeText(scope, comparison, hidden) : undefined}
+        title={t('report.comparisonDetails')}
+      >
+        <ReportDetailText>{comparison?.label ?? t('report.noComparableData')}</ReportDetailText>
+        {comparison?.inProgress ? <ReportDetailText>{t('report.comparisonPartialHint')}</ReportDetailText> : null}
+        {comparisonLines.map((line) => (
+          <ReportDetailText key={line}>{line}</ReportDetailText>
         ))}
-      </View>
+        <ReportDetailText>{t('report.familyBaseline')}</ReportDetailText>
+        {scope === 'balance' ? <ReportDetailText>{t('report.balanceRateScopeHint')}</ReportDetailText> : null}
+      </ReportDisclosure>
     </View>
   );
+}
+
+function comparisonChangeText(scope: ReportScope, comparison: FamilyComparison, hidden: boolean): string {
+  const change = reportComparisonChange(
+    scope,
+    comparison.currentValues[scope],
+    comparison.previousValues[scope],
+    comparison.currentValues.hasRecords,
+    comparison.previousValues.hasRecords,
+  );
+  if (change.kind === 'no-current') return t('report.noCurrentMatches');
+  if (change.kind === 'no-previous') return t('report.noPreviousMatches');
+  if (change.kind === 'no-records') return t('report.comparisonNoRecords');
+  if (change.value === 0) return t('report.flat');
+  if (change.kind === 'amount') return maskAmount(formatAmount(change.value, signForNet(change.value)), hidden);
+  const pct = Math.abs(change.value);
+  return `${change.value > 0 ? '↑' : '↓'} ${pct < 0.1 ? '<0.1' : pct.toFixed(1)}%`;
 }
 
 function chartTicks(max: number, count = 3): number[] {
@@ -1955,6 +2586,7 @@ function SvgYAxis({
   chartRight,
   color,
   gridColor,
+  hidden = false,
   suffix = '',
   formatter = axisAmountLabel,
 }: {
@@ -1965,6 +2597,7 @@ function SvgYAxis({
   chartRight: number;
   color: string;
   gridColor: string;
+  hidden?: boolean;
   suffix?: string;
   formatter?: (value: number) => string;
 }) {
@@ -1976,8 +2609,7 @@ function SvgYAxis({
           <Fragment key={`${tick}-${suffix}`}>
             <Line x1={x + width + 6} y1={y} x2={chartRight} y2={y} stroke={gridColor} strokeWidth="1" opacity={0.42} />
             <SvgText x={x + width} y={y + 3} fontSize="9" fill={color} textAnchor="end">
-              {formatter(tick)}
-              {suffix}
+              {hidden ? '****' : `${formatter(tick)}${suffix}`}
             </SvgText>
           </Fragment>
         );
@@ -1986,131 +2618,170 @@ function SvgYAxis({
   );
 }
 
-function MonthlyExpenseTrendCard({
-  series,
-  budgetTotal,
-  palette,
-  hidden,
-  currentPeriod,
-}: {
+function MonthlyExpenseTrendCard(props: AmountTrendProps) {
+  return <AmountTrendCard {...props} metric="expense" />;
+}
+function MonthlyIncomeTrendCard(props: AmountTrendProps) {
+  return <AmountTrendCard {...props} metric="income" />;
+}
+type AmountTrendProps = {
   series: { label: string; income: number; expense: number }[];
-  budgetTotal: number | null;
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
   currentPeriod: boolean;
-}) {
-  const [selected, setSelected] = useState<{ label: string; expense: number; budget: number | null } | null>(null);
-  const W = 320;
-  const H = 146;
-  const axisW = 34;
-  const chartRight = W - 2;
-  const chartBottom = H - 18;
-  const padY = 14;
-  const max = Math.max(1, budgetTotal ?? 0, ...series.map((s) => s.expense));
-  const nonZeroCount = series.filter((s) => s.expense > 0).length;
-  const avg = series.length > 0 ? Math.round(series.reduce((sum, item) => sum + item.expense, 0) / series.length) : 0;
-  const groupW = (chartRight - axisW) / Math.max(1, series.length);
-  const barW = Math.min(22, groupW * 0.42);
-  const hasTrend = nonZeroCount >= 2;
-  const yOf = (value: number) => chartBottom - ((chartBottom - padY) * value) / max;
-  const ticks = chartTicks(max);
-
+  scopeDescription?: string;
+};
+function AmountTrendCard({
+  series,
+  palette,
+  hidden,
+  currentPeriod,
+  scopeDescription,
+  metric,
+}: AmountTrendProps & { metric: 'income' | 'expense' }) {
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const patternId = `trend-${useId().replace(/:/g, '')}`;
+  const selected = selectedIndex == null ? null : series[selectedIndex];
+  const { width, fontScale } = useWindowDimensions();
+  const [contentWidth, setContentWidth] = useState(Math.max(1, width - 64));
+  const axisW = 36 * Math.min(fontScale, 1.5);
+  const W = Math.max(contentWidth, axisW + series.length * 44 + 2),
+    H = 172,
+    bottom = H - 12,
+    right = W - 2;
+  const max = Math.max(1, ...series.map((item) => item[metric]));
+  const { average, count } = reportTrendAverage(
+    series.map((item) => item[metric]),
+    currentPeriod,
+  );
+  const groupW = (right - axisW) / Math.max(1, series.length);
+  const barW = Math.min(24, groupW * 0.5);
+  const yOf = (value: number) => bottom - ((bottom - 16) * value) / max;
+  const color = palette[metric];
+  const title = t(metric === 'income' ? 'report.incomeTrend' : 'report.expenseTrend');
+  const valueText = (item: AmountTrendProps['series'][number]) =>
+    t(metric === 'income' ? 'report.selectedIncome' : 'report.selectedExpense', {
+      label: item.label,
+      amount: maskAmount(formatAmount(item[metric], metric === 'income' ? '+' : '-'), hidden),
+    });
+  const hasData = series.some((item) => item[metric] > 0);
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
-      <View style={styles.cardHeaderRow}>
-        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-          {t('report.expenseTrend')}
-        </ThemedText>
-        <ThemedText style={[styles.chartMeta, { color: palette.textSecondary }]}>
-          {t('report.chartMean', { amount: maskAmount(formatAmount(avg, ''), hidden) })}
-        </ThemedText>
-      </View>
-      {!hasTrend ? (
-        <TrendFallback
-          count={nonZeroCount}
-          label={t('record.expense')}
-          icon="chart.line.uptrend.xyaxis"
-          palette={palette}
-        />
-      ) : (
-        <>
-          <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
-            <SvgYAxis
-              ticks={ticks}
-              x={0}
-              width={axisW - 8}
-              yOf={yOf}
-              chartRight={chartRight}
-              color={palette.textTertiary}
-              gridColor={palette.separator}
-            />
-            {budgetTotal != null && budgetTotal > 0 ? (
-              <Line
-                x1={axisW}
-                y1={yOf(budgetTotal)}
-                x2={chartRight}
-                y2={yOf(budgetTotal)}
-                stroke={palette.warning}
-                strokeWidth="1.5"
-                strokeDasharray="5 5"
-              />
-            ) : null}
-            <Line
-              x1={axisW}
-              y1={chartBottom}
-              x2={chartRight}
-              y2={chartBottom}
-              stroke={palette.separator}
-              strokeWidth="1"
-            />
-            {series.map((item, index) => {
-              const h = item.expense > 0 ? Math.max(3, chartBottom - yOf(item.expense)) : 0;
-              const x = axisW + groupW * index + (groupW - barW) / 2;
-              const isCurrent = currentPeriod && index === series.length - 1;
-              return (
-                <Rect
-                  key={item.label}
-                  x={x}
-                  y={chartBottom - h}
-                  width={barW}
-                  height={h}
-                  rx={4}
-                  fill={selected?.label === item.label ? palette.accent : palette.expense}
-                  opacity={isCurrent ? 0.82 : 1}
-                  onPress={() => setSelected({ label: item.label, expense: item.expense, budget: budgetTotal })}
-                  accessibilityLabel={t('report.selectedExpense', {
-                    label: item.label,
-                    amount: formatAmount(item.expense, '-'),
-                  })}
-                />
-              );
-            })}
-          </Svg>
-          <View style={[styles.trendLabels, { paddingLeft: axisW }]}>
-            {series.map((item, index) => (
-              <Text
-                key={item.label}
-                style={[
-                  styles.trendLabel,
-                  { color: currentPeriod && index === series.length - 1 ? palette.info : palette.textTertiary },
-                ]}
-              >
-                {item.label}
-              </Text>
+      <ReportCardHeader
+        title={title}
+        details={
+          <>
+            {scopeDescription ? <ReportDetailText>{scopeDescription}</ReportDetailText> : null}
+            <ReportDetailText>{t('report.ordinaryFlowScope')}</ReportDetailText>
+            <ReportDetailText>
+              {t(metric === 'income' ? 'report.chartAvgIncome' : 'report.chartAvgExpense', {
+                count,
+                amount: maskAmount(formatAmount(average, ''), hidden),
+              })}
+            </ReportDetailText>
+            {currentPeriod ? <ReportDetailText>{t('report.inProgressTrendHint')}</ReportDetailText> : null}
+            {series.map((item) => (
+              <ReportDetailText key={item.label}>{valueText(item)}</ReportDetailText>
             ))}
-          </View>
-          <ThemedText style={[styles.chartSelection, { color: palette.textSecondary }]}>
-            {selected
-              ? t('report.selectedExpense', {
-                  label: selected.label,
-                  amount: maskAmount(formatAmount(selected.expense, '-'), hidden),
-                })
-              : t('report.chartAvgExpense', {
-                  count: series.length,
-                  amount: maskAmount(formatAmount(avg, ''), hidden),
+          </>
+        }
+      />
+      {hasData ? (
+        <View onLayout={(event) => setContentWidth(event.nativeEvent.layout.width)}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={{ width: W }}>
+              <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} accessible={false}>
+                <Defs>
+                  <Pattern id={patternId} width={7} height={7} patternUnits="userSpaceOnUse">
+                    <Line x1={-2} y1={7} x2={7} y2={-2} stroke={palette.card} strokeWidth={2} />
+                  </Pattern>
+                </Defs>
+                <SvgYAxis
+                  ticks={chartTicks(max)}
+                  x={0}
+                  width={axisW - 8}
+                  yOf={yOf}
+                  chartRight={right}
+                  color={palette.textSecondary}
+                  gridColor={palette.separator}
+                  hidden={hidden}
+                />
+                {series.map((item, index) => {
+                  const x = axisW + groupW * index + (groupW - barW) / 2;
+                  const h = item[metric] > 0 ? Math.max(2, bottom - yOf(item[metric])) : 0;
+                  const ongoing = currentPeriod && index === series.length - 1;
+                  return (
+                    <Fragment key={item.label}>
+                      {h > 0 ? (
+                        <>
+                          <Rect
+                            x={x}
+                            y={bottom - h}
+                            width={barW}
+                            height={h}
+                            rx={4}
+                            fill={selectedIndex === index ? palette.accent : color}
+                          />
+                          {ongoing ? (
+                            <Rect x={x} y={bottom - h} width={barW} height={h} rx={4} fill={`url(#${patternId})`} />
+                          ) : null}
+                        </>
+                      ) : (
+                        <Circle
+                          cx={x + barW / 2}
+                          cy={bottom}
+                          r={3}
+                          fill={palette.card}
+                          stroke={ongoing ? palette.info : palette.textSecondary}
+                          strokeWidth={1.5}
+                        />
+                      )}
+                      <Rect
+                        x={axisW + groupW * index}
+                        y={0}
+                        width={groupW}
+                        height={H}
+                        fill="transparent"
+                        onPress={() => setSelectedIndex(index)}
+                      />
+                    </Fragment>
+                  );
                 })}
-          </ThemedText>
-        </>
+              </Svg>
+              <View style={{ flexDirection: 'row', paddingLeft: axisW, paddingRight: 2 }}>
+                {series.map((item, index) => (
+                  <Pressable
+                    key={item.label}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: selectedIndex === index }}
+                    accessibilityLabel={`${valueText(item)}${currentPeriod && index === series.length - 1 ? ` · ${t('dates.inProgress')}` : ''}`}
+                    onPress={() => setSelectedIndex(index)}
+                    style={{ flex: 1, minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' }}
+                  >
+                    <Text
+                      style={{
+                        color: currentPeriod && index === series.length - 1 ? palette.info : palette.textSecondary,
+                        fontSize: 12,
+                      }}
+                    >
+                      {item.label}
+                    </Text>
+                    {currentPeriod && index === series.length - 1 ? (
+                      <Text style={{ color: palette.info, fontSize: 11 }}>{t('dates.inProgress')}</Text>
+                    ) : null}
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </ScrollView>
+          {selected ? (
+            <Text accessibilityLiveRegion="polite" style={[styles.chartSelection, { color: palette.textPrimary }]}>
+              {valueText(selected)}
+            </Text>
+          ) : null}
+        </View>
+      ) : (
+        <Text style={[styles.chartSelection, { color: palette.textSecondary }]}>{t('report.noTrendRecords')}</Text>
       )}
     </View>
   );
@@ -2129,136 +2800,26 @@ function TrendFallback({
 }) {
   return (
     <View style={styles.emptyBox}>
-      <SymbolView name={icon} tintColor={palette.textTertiary} size={36} />
-      <ThemedText style={{ color: palette.textPrimary, fontWeight: '700' }}>{t('report.trendNotEnough')}</ThemedText>
-      <ThemedText style={{ color: palette.textSecondary, textAlign: 'center' }}>
-        {t('report.trendNeedMore', { count, label })}
-      </ThemedText>
-    </View>
-  );
-}
-
-function MonthlyIncomeTrendCard({
-  series,
-  palette,
-  hidden,
-}: {
-  series: { label: string; income: number; expense: number }[];
-  palette: ReturnType<typeof usePalette>;
-  hidden: boolean;
-}) {
-  const [selected, setSelected] = useState<{ label: string; income: number } | null>(null);
-  const W = 320;
-  const H = 142;
-  const axisW = 34;
-  const chartRight = W - 2;
-  const chartBottom = H - 18;
-  const padY = 14;
-  const max = Math.max(1, ...series.map((s) => s.income));
-  const avg = series.length > 0 ? Math.round(series.reduce((sum, item) => sum + item.income, 0) / series.length) : 0;
-  const groupW = (chartRight - axisW) / Math.max(1, series.length);
-  const barW = Math.min(22, groupW * 0.42);
-  const nonZeroCount = series.filter((s) => s.income > 0).length;
-  const hasTrend = nonZeroCount >= 2;
-  const yOf = (value: number) => chartBottom - ((chartBottom - padY) * value) / max;
-  const ticks = chartTicks(max);
-
-  return (
-    <View style={[styles.card, { backgroundColor: palette.card }]}>
-      <View style={styles.cardHeaderRow}>
-        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-          {t('report.incomeTrend')}
-        </ThemedText>
-        <ThemedText style={[styles.chartMeta, { color: palette.textSecondary }]}>
-          {t('report.chartAvgLine', { amount: maskAmount(formatAmount(avg, ''), hidden) })}
-        </ThemedText>
-      </View>
-      {!hasTrend ? (
-        <TrendFallback count={nonZeroCount} label={t('record.income')} icon="chart.bar.xaxis" palette={palette} />
-      ) : (
-        <>
-          <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
-            <SvgYAxis
-              ticks={ticks}
-              x={0}
-              width={axisW - 8}
-              yOf={yOf}
-              chartRight={chartRight}
-              color={palette.textTertiary}
-              gridColor={palette.separator}
-            />
-            <Line
-              x1={axisW}
-              y1={yOf(avg)}
-              x2={chartRight}
-              y2={yOf(avg)}
-              stroke={palette.warning}
-              strokeWidth="1.5"
-              strokeDasharray="5 5"
-            />
-            <Line
-              x1={axisW}
-              y1={chartBottom}
-              x2={chartRight}
-              y2={chartBottom}
-              stroke={palette.separator}
-              strokeWidth="1"
-            />
-            {series.map((item, index) => {
-              const h = item.income > 0 ? Math.max(3, chartBottom - yOf(item.income)) : 0;
-              const x = axisW + groupW * index + (groupW - barW) / 2;
-              return h > 0 ? (
-                <Rect
-                  key={item.label}
-                  x={x}
-                  y={chartBottom - h}
-                  width={barW}
-                  height={h}
-                  rx={4}
-                  fill={selected?.label === item.label ? palette.accent : palette.income}
-                  onPress={() => setSelected({ label: item.label, income: item.income })}
-                  accessibilityLabel={t('report.selectedIncome', {
-                    label: item.label,
-                    amount: formatAmount(item.income, ''),
-                  })}
-                />
-              ) : null;
-            })}
-          </Svg>
-          <View style={[styles.trendLabels, { paddingLeft: axisW }]}>
-            {series.map((item) => (
-              <Text key={item.label} style={[styles.trendLabel, { color: palette.textTertiary }]}>
-                {item.label}
-              </Text>
-            ))}
-          </View>
-          <ThemedText style={[styles.chartSelection, { color: palette.textSecondary }]}>
-            {selected
-              ? t('report.selectedIncome', {
-                  label: selected.label,
-                  amount: maskAmount(formatAmount(selected.income, '+'), hidden),
-                })
-              : t('report.chartAvgIncome', {
-                  count: series.length,
-                  amount: maskAmount(formatAmount(avg, ''), hidden),
-                })}
-          </ThemedText>
-        </>
-      )}
+      <SymbolView name={icon} tintColor={palette.textSecondary} size={32} />
+      <Text style={{ color: palette.textSecondary }}>{t('report.trendNeedMore', { count, label })}</Text>
     </View>
   );
 }
 
 function BalanceWaterfallCard({
-  income,
-  expense,
+  normalIncome,
+  normalExpense,
+  goalWithdrawals,
+  goalDeposits,
   balance,
   categories,
   palette,
   hidden,
 }: {
-  income: number;
-  expense: number;
+  normalIncome: number;
+  normalExpense: number;
+  goalWithdrawals: number;
+  goalDeposits: number;
   balance: number;
   categories: CatSlice[];
   palette: ReturnType<typeof usePalette>;
@@ -2267,9 +2828,12 @@ function BalanceWaterfallCard({
   const { locale } = useLocalePreference();
   const topCategories = categories.slice(0, 4);
   const topTotal = topCategories.reduce((sum, item) => sum + item.amount, 0);
-  const otherExpense = Math.max(0, expense - topTotal);
+  const otherExpense = Math.max(0, normalExpense - topTotal);
   const rows: { label: string; amount: number; color: string; sign: '+' | '-' | '' }[] = [
-    { label: t('record.income'), amount: income, color: palette.income, sign: '+' },
+    { label: t('report.normalIncome'), amount: normalIncome, color: palette.income, sign: '+' },
+    ...(goalWithdrawals > 0
+      ? [{ label: t('report.goalWithdrawals'), amount: goalWithdrawals, color: palette.income, sign: '+' as const }]
+      : []),
     ...topCategories.map((category) => ({
       label: category.name,
       amount: category.amount,
@@ -2277,7 +2841,10 @@ function BalanceWaterfallCard({
       sign: '-' as const,
     })),
     ...(otherExpense > 0
-      ? [{ label: t('common.other'), amount: otherExpense, color: palette.textTertiary, sign: '-' as const }]
+      ? [{ label: t('report.otherConsumption'), amount: otherExpense, color: palette.textTertiary, sign: '-' as const }]
+      : []),
+    ...(goalDeposits > 0
+      ? [{ label: t('report.goalDeposits'), amount: goalDeposits, color: palette.expense, sign: '-' as const }]
       : []),
     {
       label: t('report.balance'),
@@ -2291,13 +2858,13 @@ function BalanceWaterfallCard({
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
       <ThemedText style={[styles.sectionTitle, { color: palette.textPrimary }]}>
-        {t('report.balanceWaterfall')}
+        {t('report.familyBreakdown')}
       </ThemedText>
       <View style={styles.waterfallList}>
         {rows.map((row) => (
           <View key={row.label} style={styles.waterfallRow}>
             <ThemedText
-              style={[styles.waterfallLabel, { color: palette.textSecondary, width: locale === 'en' ? 72 : 38 }]}
+              style={[styles.waterfallLabel, { color: palette.textSecondary, width: locale === 'en' ? 100 : 64 }]}
               numberOfLines={1}
               adjustsFontSizeToFit
               minimumFontScale={0.72}
@@ -2330,15 +2897,18 @@ function BalanceWaterfallCard({
 function SavingsRateTrendCard({
   series,
   palette,
+  currentPeriod,
 }: {
   series: { label: string; income: number; expense: number }[];
   palette: ReturnType<typeof usePalette>;
+  currentPeriod: boolean;
 }) {
-  const [selected, setSelected] = useState<{ label: string; rate: number } | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const rates = series.map((item) => ({
     label: item.label,
     rate: item.income > 0 ? (item.income - item.expense) / item.income : null,
   }));
+  const selected = selectedIndex == null ? null : (rates[selectedIndex] ?? null);
   const values = rates.map((item) => item.rate).filter((value): value is number => value != null);
   const hasData = values.length > 0;
   const W = 320;
@@ -2360,12 +2930,24 @@ function SavingsRateTrendCard({
 
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
+      <ReportCardHeader
+        title={t('report.familyRate')}
+        details={
+          <>
+            <ReportDetailText>{t('report.balanceRateScopeHint')}</ReportDetailText>
+            {currentPeriod ? <ReportDetailText>{t('report.inProgressTrendHint')}</ReportDetailText> : null}
+            {rates.map((item) => (
+              <ReportDetailText key={item.label}>
+                {item.label} · {item.rate == null ? t('report.noIncome') : `${Math.round(item.rate * 100)}%`}
+              </ReportDetailText>
+            ))}
+          </>
+        }
+      />
       <View style={styles.cardHeaderRow}>
-        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-          {t('report.savingsRate')}
-        </ThemedText>
         <ThemedText style={[styles.chartMeta, { color: palette.textSecondary }]}>
           {latest == null ? t('report.noIncome') : t('report.periodRate', { pct: Math.round(latest * 100) })}
+          {currentPeriod ? ` · ${t('dates.inProgress')}` : ''}
         </ThemedText>
       </View>
       {!hasData ? (
@@ -2401,9 +2983,9 @@ function SavingsRateTrendCard({
                   key={item.label}
                   cx={xOf(index)}
                   cy={yOf(item.rate)}
-                  r={selected?.label === item.label ? 5 : 3}
-                  fill={selected?.label === item.label ? palette.accent : palette.info}
-                  onPress={() => setSelected({ label: item.label, rate: item.rate ?? 0 })}
+                  r={selectedIndex === index ? 5 : 3}
+                  fill={selectedIndex === index ? palette.accent : palette.info}
+                  onPress={() => setSelectedIndex(index)}
                   accessibilityLabel={t('report.selectedRate', {
                     label: item.label,
                     pct: Math.round((item.rate ?? 0) * 100),
@@ -2413,14 +2995,20 @@ function SavingsRateTrendCard({
             )}
           </Svg>
           <View style={[styles.trendLabels, { paddingLeft: axisW }]}>
-            {rates.map((item) => (
-              <Text key={item.label} style={[styles.trendLabel, { color: palette.textTertiary }]}>
+            {rates.map((item, index) => (
+              <Text
+                key={item.label}
+                style={[
+                  styles.trendLabel,
+                  { color: currentPeriod && index === rates.length - 1 ? palette.info : palette.textTertiary },
+                ]}
+              >
                 {item.label}
               </Text>
             ))}
           </View>
           <ThemedText style={[styles.chartSelection, { color: palette.textSecondary }]}>
-            {selected
+            {selected?.rate != null
               ? t('report.selectedRate', { label: selected.label, pct: Math.round(selected.rate * 100) })
               : t('report.chartLatestRate', {
                   value: latest == null ? t('report.noValue') : `${Math.round(latest * 100)}%`,
@@ -2433,23 +3021,25 @@ function SavingsRateTrendCard({
 }
 
 function MonthlyBudgetCard({
+  title,
   total,
   used,
   topCategory,
-  daysLeft,
+  scopeDiffers,
   projected,
   palette,
   hidden,
   onOpen,
 }: {
+  title: string;
   total: number | null;
   used: number;
   topCategory: CatSlice | null;
-  daysLeft: number | null;
+  scopeDiffers: boolean;
   projected: number | null;
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
-  onOpen: () => void;
+  onOpen?: () => void;
 }) {
   if (!total || total <= 0) {
     return (
@@ -2458,16 +3048,22 @@ function MonthlyBudgetCard({
           <View style={styles.budgetTitleRow}>
             <SymbolView name="target" tintColor={palette.textSecondary} size={18} />
             <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-              {t('report.monthBudget')}
+              {title}
             </ThemedText>
           </View>
           <ThemedText style={{ color: palette.textSecondary }}>{t('settings.notSet')}</ThemedText>
         </View>
-        <ThemedText style={{ color: palette.textSecondary }}>{t('report.setBudgetHint')}</ThemedText>
-        <Pressable style={[styles.budgetAction, { borderColor: palette.separator }]} onPress={onOpen}>
-          <SymbolView name="plus.circle" tintColor={palette.accent} size={17} />
-          <ThemedText style={[styles.budgetActionText, { color: palette.accent }]}>{t('report.setBudget')}</ThemedText>
-        </Pressable>
+        <ThemedText style={{ color: palette.textSecondary }}>
+          {t(onOpen ? 'report.setBudgetHint' : 'report.historicalBudgetEmpty')}
+        </ThemedText>
+        {onOpen ? (
+          <Pressable style={[styles.budgetAction, { borderColor: palette.separator }]} onPress={onOpen}>
+            <SymbolView name="plus.circle" tintColor={palette.accent} size={17} />
+            <ThemedText style={[styles.budgetActionText, { color: palette.accent }]}>
+              {t('report.setBudget')}
+            </ThemedText>
+          </Pressable>
+        ) : null}
       </View>
     );
   }
@@ -2483,12 +3079,17 @@ function MonthlyBudgetCard({
   const forecastOver = projected != null && projected > total;
 
   return (
-    <Pressable style={[styles.card, styles.budgetCard, { backgroundColor: palette.card }]} onPress={onOpen}>
+    <Pressable
+      style={[styles.card, styles.budgetCard, { backgroundColor: palette.card }]}
+      onPress={onOpen}
+      disabled={!onOpen}
+      accessibilityRole={onOpen ? 'button' : undefined}
+    >
       <View style={styles.budgetHeading}>
         <View style={styles.budgetTitleRow}>
           <SymbolView name="target" tintColor={palette.textSecondary} size={18} />
           <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-            {t('report.monthBudget')}
+            {title}
           </ThemedText>
         </View>
         <ThemedText style={{ color: over ? palette.danger : palette.textPrimary, fontWeight: '600' }}>
@@ -2505,25 +3106,19 @@ function MonthlyBudgetCard({
           pct: percent,
         })}
       </ThemedText>
-      <View style={[styles.budgetInsight, { backgroundColor: palette.base }]}>
-        <View style={styles.budgetInsightIcon}>
-          <SymbolView
-            name={over || forecastOver ? 'exclamationmark.triangle.fill' : 'checkmark.circle.fill'}
-            tintColor={over || forecastOver ? palette.warning : palette.success}
-            size={17}
-          />
+      {scopeDiffers || over || forecastOver ? (
+        <View style={[styles.budgetInsight, { backgroundColor: palette.base }]}>
+          <SymbolView name="exclamationmark.triangle" tintColor={palette.textPrimary} size={17} />
+          <Text style={[styles.budgetInsightText, { color: palette.textPrimary }]}>
+            {scopeDiffers
+              ? t('report.budgetForecastUnavailable')
+              : over
+                ? t('report.pressureItem', { name: topCategory?.name ?? t('report.thisExpensePressure') })
+                : t('report.projectedMonthEnd', { amount: maskAmount(formatAmount(projected ?? 0, ''), hidden) })}
+          </Text>
+          {onOpen ? <SymbolView name="chevron.right" tintColor={palette.textSecondary} size={13} /> : null}
         </View>
-        <ThemedText style={[styles.budgetInsightText, { color: palette.textSecondary }]}>
-          {over
-            ? t('report.pressureItem', { name: topCategory?.name ?? t('report.thisExpensePressure') })
-            : forecastOver
-              ? t('report.projectedMonthEnd', { amount: maskAmount(formatAmount(projected ?? 0, ''), hidden) })
-              : daysLeft != null
-                ? t('report.budgetOkDays', { days: daysLeft })
-                : t('report.budgetOk')}
-        </ThemedText>
-        <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
-      </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -2548,6 +3143,7 @@ function buildExpenseCategoryRows(categories: CatSlice[], otherColor: string): D
 }
 
 function MonthlyExpenseCategoryCard({
+  header,
   categories,
   total,
   palette,
@@ -2555,6 +3151,7 @@ function MonthlyExpenseCategoryCard({
   onOpenDetail,
   emptyText = t('report.emptyMonthExpense'),
 }: {
+  header?: ReactNode;
   categories: CatSlice[];
   total: number;
   palette: ReturnType<typeof usePalette>;
@@ -2562,29 +3159,23 @@ function MonthlyExpenseCategoryCard({
   onOpenDetail: (detail: CategoryDetail) => void;
   emptyText?: string;
 }) {
-  const [selected, setSelected] = useState<DisplayCatSlice | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const { locale } = useLocalePreference();
   const rows = useMemo(() => {
     void locale;
     return buildExpenseCategoryRows(categories, palette.textTertiary);
   }, [categories, palette.textTertiary, locale]);
+  const selected = rows.find((row) => row.id === selectedId) ?? null;
   const selectedPercent = selected && total > 0 ? Math.round((selected.amount / total) * 100) : 0;
   return (
     <View
       style={[styles.card, { backgroundColor: palette.card }]}
-      accessible
-      accessibilityLabel={t('report.mixA11y', { total: formatAmount(total, ''), count: categories.length })}
+      accessibilityLabel={t('report.mixA11y', {
+        total: maskAmount(formatAmount(total, ''), hidden),
+        count: categories.length,
+      })}
     >
-      <View style={styles.cardHeaderRow}>
-        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-          {t('report.expenseMix')}
-        </ThemedText>
-        {categories.length > 0 ? (
-          <ThemedText style={[styles.categoryCaption, { color: palette.textSecondary }]}>
-            {t('report.topSixOnly')}
-          </ThemedText>
-        ) : null}
-      </View>
+      {header ?? <ReportCardHeader title={t('report.expenseMix')} />}
       {categories.length === 0 ? (
         <View style={styles.emptyBox}>
           <SymbolView name="chart.pie" tintColor={palette.textTertiary} size={40} />
@@ -2598,7 +3189,7 @@ function MonthlyExpenseCategoryCard({
             strokeWidth={22}
             trackColor={palette.base}
             accessibilityLabel={t('report.mixChartA11y', { name: rows[0]?.name ?? t('report.noneYet') })}
-            onSlicePress={(index) => setSelected(rows[index] ?? null)}
+            onSlicePress={(index) => setSelectedId(rows[index]?.id ?? null)}
           >
             <ThemedText style={[styles.donutCaption, { color: palette.textSecondary }]}>
               {t('report.totalExpense')}
@@ -2626,7 +3217,7 @@ function MonthlyExpenseCategoryCard({
                   accessibilityLabel={t('report.catShareA11y', {
                     name: category.name,
                     pct: percent,
-                    amount: formatAmount(category.amount, '-'),
+                    amount: maskAmount(formatAmount(category.amount, '-'), hidden),
                   })}
                   accessibilityHint={t('report.catShareHint')}
                 >
@@ -2662,6 +3253,7 @@ function MonthlyExpenseCategoryCard({
 }
 
 function MonthlyMemberCard({
+  header,
   members,
   maxCount,
   periodText = t('dates.thisMonth'),
@@ -2669,6 +3261,7 @@ function MonthlyMemberCard({
   hidden,
   onOpen,
 }: {
+  header?: ReactNode;
   members: Member[];
   maxCount: number;
   periodText?: string;
@@ -2677,18 +3270,8 @@ function MonthlyMemberCard({
   onOpen: () => void;
 }) {
   return (
-    <Pressable
-      style={[styles.card, { backgroundColor: palette.card }]}
-      onPress={onOpen}
-      accessibilityRole="button"
-      accessibilityHint={t('report.memberAnalysisHint')}
-    >
-      <View style={styles.memberTitleRow}>
-        <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-          {t('report.memberAnalysis')}
-        </ThemedText>
-        <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={15} />
-      </View>
+    <View style={[styles.card, styles.cardWithFooter, { backgroundColor: palette.card }]}>
+      {header ?? <ReportCardHeader title={t('report.memberAnalysis')} />}
       {members.length === 0 ? (
         <View style={styles.emptyBox}>
           <SymbolView name="person.2" tintColor={palette.textTertiary} size={34} />
@@ -2720,19 +3303,31 @@ function MonthlyMemberCard({
           ))}
         </View>
       )}
-    </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onOpen}
+        style={({ pressed }) => [styles.compactStats, styles.memberFooter, { opacity: pressed ? 0.65 : 1 }]}
+      >
+        <Text style={{ color: palette.accent }}>{t('report.memberAnalysis')}</Text>
+        <SymbolView name="chevron.right" size={13} tintColor={palette.textSecondary} />
+      </Pressable>
+    </View>
   );
 }
 
 function SavingsGoalsCard({
   goals,
   loading,
+  failed,
+  onRetry,
   palette,
   hidden,
   onOpen,
 }: {
   goals: SavingsGoal[];
   loading: boolean;
+  failed: boolean;
+  onRetry: () => void;
   palette: ReturnType<typeof usePalette>;
   hidden: boolean;
   onOpen: () => void;
@@ -2744,6 +3339,8 @@ function SavingsGoalsCard({
       </View>
     );
   }
+
+  if (failed) return <ReportInlineStatus palette={palette} onRetry={onRetry} />;
 
   if (goals.length === 0) {
     return (
@@ -2769,7 +3366,7 @@ function SavingsGoalsCard({
     <View style={[styles.card, styles.goalsCard, { backgroundColor: palette.card }]}>
       <View style={styles.cardHeaderRow}>
         <ThemedText style={[styles.sectionTitle, styles.noMargin, { color: palette.textPrimary }]}>
-          {t('report.savingsGoals')}
+          {t('report.currentSavingsGoals')}
         </ThemedText>
         <ThemedText style={{ color: palette.textSecondary }}>
           {t('report.goalsInProgress', { count: goals.length })}
@@ -2825,6 +3422,7 @@ function CustomRangeSheet({
   visible,
   start,
   end,
+  today,
   onChangeStart,
   onChangeEnd,
   onClose,
@@ -2832,16 +3430,17 @@ function CustomRangeSheet({
   visible: boolean;
   start: Date;
   end: Date;
+  today: Date;
   onChangeStart: (date: Date) => void;
   onChangeEnd: (date: Date) => void;
   onClose: () => void;
 }) {
   const palette = useSheetPalette();
-  const selectedDays = Math.max(1, Math.abs(Math.round((start.getTime() - end.getTime()) / 86400000)) + 1);
+  const selectedDays = Math.max(1, Math.abs(calendarDayDifference(start, end)) + 1);
   const resetLast30Days = () => {
-    const today = startOfLocalDay(new Date());
-    onChangeEnd(today);
-    onChangeStart(addDays(today, -29));
+    const todayStart = startOfLocalDay(today);
+    onChangeEnd(todayStart);
+    onChangeStart(addDays(todayStart, -29));
   };
 
   return (
@@ -2905,6 +3504,8 @@ function CategoryDetailSheet({
   hierarchy,
   analytics,
   range,
+  today,
+  familyTimeZone,
   dimension,
   analyticsInput,
   totalExpense,
@@ -2916,6 +3517,8 @@ function CategoryDetailSheet({
   hierarchy: CategoryHierarchy;
   analytics: ReportAnalytics;
   range: { start: Date; end: Date };
+  today: Date;
+  familyTimeZone?: string;
   dimension: Dimension;
   analyticsInput: ReportAnalyticsInput;
   totalExpense: number;
@@ -2988,11 +3591,10 @@ function CategoryDetailSheet({
   const trend = useMemo(() => {
     void locale;
     const days = firstPage?.days ?? [];
-    const flowRows = days.map((item) => ({
-      occurred_at: `${item.date}T12:00:00.000Z`,
-      type: 'expense' as const,
-      amount: item.amount,
-    }));
+    const flowRows = days.flatMap((item) => {
+      const occurred_at = reportCalendarDayTimestamp(item.date);
+      return occurred_at ? [{ occurred_at, type: 'expense' as const, amount: item.amount }] : [];
+    });
     const series =
       dimension === 'custom'
         ? equalPeriodIncomeExpenseSeries(range, flowRows)
@@ -3002,7 +3604,8 @@ function CategoryDetailSheet({
 
   const denominator = selectedChild ? parentAmount : type === 'income' ? totalIncome : totalExpense;
   const share = denominator > 0 ? Math.round((periodExpense / denominator) * 100) : 0;
-  const days = Math.max(1, Math.ceil((range.end.getTime() - range.start.getTime()) / 86400000));
+  const observedEnd = new Date(Math.min(range.end.getTime(), addDays(startOfLocalDay(today), 1).getTime()));
+  const days = Math.max(1, calendarDayDifference(range.start, observedEnd));
   const dailyAvg = Math.round(periodExpense / days);
   const maxGroupAmount = Math.max(1, ...noteGroups.map((item) => item.amount));
 
@@ -3033,6 +3636,7 @@ function CategoryDetailSheet({
                 </Text>
                 <Text style={[styles.detailSummaryMeta, { color: palette.textSecondary }]}>
                   {t('report.shareCountAvg', {
+                    scope: t(type === 'income' ? 'record.income' : 'record.expense'),
                     pct: share,
                     count: firstPage?.count ?? 0,
                     amount: maskAmount(formatAmount(dailyAvg, ''), hidden),
@@ -3152,7 +3756,7 @@ function CategoryDetailSheet({
                       {t('report.last6Periods')}
                     </Text>
                   </View>
-                  <CategoryDetailTrendChart series={trend} palette={palette} />
+                  <CategoryDetailTrendChart series={trend} palette={palette} hidden={hidden} />
                 </View>
               ) : null}
 
@@ -3169,7 +3773,9 @@ function CategoryDetailSheet({
                   {rows.length === 0 ? (
                     <View style={styles.emptyBox}>
                       <SymbolView name="list.bullet.rectangle" tintColor={palette.textTertiary} size={34} />
-                      <Text style={{ color: palette.textSecondary }}>{t('report.emptyCatExpense')}</Text>
+                      <Text style={{ color: palette.textSecondary }}>
+                        {t(type === 'income' ? 'report.emptyCatIncome' : 'report.emptyCatExpense')}
+                      </Text>
                     </View>
                   ) : (
                     rows.map((txn) => (
@@ -3179,7 +3785,7 @@ function CategoryDetailSheet({
                             {txn.note || t('report.noNote')}
                           </Text>
                           <Text style={[styles.detailDate, { color: palette.textSecondary }]}>
-                            {new Date(txn.occurredAt).toLocaleDateString(intlLocale())}
+                            {new Date(txn.occurredAt).toLocaleDateString(intlLocale(), { timeZone: familyTimeZone })}
                           </Text>
                         </View>
                         <Text
@@ -3209,11 +3815,14 @@ function CategoryDetailSheet({
 function CategoryDetailTrendChart({
   series,
   palette,
+  hidden,
 }: {
   series: { label: string; expense: number }[];
   palette: ReturnType<typeof usePalette>;
+  hidden: boolean;
 }) {
-  const [selected, setSelected] = useState<{ label: string; expense: number } | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const selected = selectedIndex == null ? null : (series[selectedIndex] ?? null);
   const W = 320;
   const H = 126;
   const axisW = 34;
@@ -3241,6 +3850,7 @@ function CategoryDetailTrendChart({
           chartRight={chartRight}
           color={palette.textTertiary}
           gridColor={palette.separator}
+          hidden={hidden}
         />
         <Line x1={axisW} y1={chartBottom} x2={chartRight} y2={chartBottom} stroke={palette.separator} strokeWidth="1" />
         {series.map((item, index) => {
@@ -3254,11 +3864,11 @@ function CategoryDetailTrendChart({
               width={barW}
               height={height}
               rx={5}
-              fill={selected?.label === item.label ? palette.accent : palette.expense}
-              onPress={() => setSelected({ label: item.label, expense: item.expense })}
+              fill={selectedIndex === index ? palette.accent : palette.expense}
+              onPress={() => setSelectedIndex(index)}
               accessibilityLabel={t('report.selectedExpense', {
                 label: item.label,
-                amount: formatAmount(item.expense, ''),
+                amount: maskAmount(formatAmount(item.expense, ''), hidden),
               })}
             />
           ) : null;
@@ -3273,7 +3883,10 @@ function CategoryDetailTrendChart({
       </View>
       <Text style={[styles.chartSelection, { color: palette.textSecondary }]}>
         {selected
-          ? t('report.selectedExpense', { label: selected.label, amount: formatAmount(selected.expense, '-') })
+          ? t('report.selectedExpense', {
+              label: selected.label,
+              amount: maskAmount(formatAmount(selected.expense, '-'), hidden),
+            })
           : t('report.tapBarExact')}
       </Text>
     </>
@@ -3283,16 +3896,22 @@ function CategoryDetailTrendChart({
 // ── 家庭成员分析：参与度 + 收支贡献 + 支出偏好 ────────────────────────────────
 function MemberAnalysisSheet({
   visible,
-  dimension,
+  periodText,
   analytics,
+  incomeAnalytics,
+  failed,
+  onRetry,
   members,
   categories,
   hidden,
   onClose,
 }: {
   visible: boolean;
-  dimension: Dimension;
-  analytics: ReportAnalytics;
+  periodText: string;
+  analytics: ReportAnalytics | null;
+  incomeAnalytics: ReportAnalytics | null;
+  failed: boolean;
+  onRetry: () => void;
   members: { id: string; nickname: string }[];
   categories: Category[];
   hidden: boolean;
@@ -3320,7 +3939,7 @@ function MemberAnalysisSheet({
         { id: member.id, name: member.nickname, count: 0, income: 0, expense: 0, categoryMap: new Map() },
       ]),
     );
-    for (const item of analytics.members) {
+    for (const item of analytics?.members ?? []) {
       const row = memberMap.get(item.userId) ?? {
         id: item.userId,
         name: t('common.member'),
@@ -3330,11 +3949,22 @@ function MemberAnalysisSheet({
         categoryMap: new Map(),
       };
       row.count = item.count;
-      row.income = item.incomeAmount;
       row.expense = item.expenseAmount;
       memberMap.set(item.userId, row);
     }
-    for (const item of analytics.memberCategories) {
+    for (const item of incomeAnalytics?.members ?? []) {
+      const row = memberMap.get(item.userId) ?? {
+        id: item.userId,
+        name: t('common.member'),
+        count: 0,
+        income: 0,
+        expense: 0,
+        categoryMap: new Map(),
+      };
+      row.income = item.incomeAmount;
+      memberMap.set(item.userId, row);
+    }
+    for (const item of analytics?.memberCategories ?? []) {
       const row = memberMap.get(item.userId);
       if (!row) continue;
       const cat = catById.get(item.categoryId);
@@ -3352,15 +3982,28 @@ function MemberAnalysisSheet({
           return { ...row, topCategory };
         })
         .sort((a, b) => b.count - a.count || b.expense - a.expense),
-      totalCount: analytics.summary.transactionCount,
-      totalIncome: analytics.summary.incomeAmount,
-      totalExpense: analytics.summary.expenseAmount,
+      totalCount: analytics?.summary.transactionCount ?? 0,
+      totalIncome: incomeAnalytics?.summary.incomeAmount ?? 0,
+      totalExpense: analytics?.summary.expenseAmount ?? 0,
     };
-  }, [members, analytics, categories, catColors, locale]);
+  }, [members, analytics, incomeAnalytics, categories, catColors, locale]);
 
   const maxCount = Math.max(1, ...rows.map((row) => row.count));
   const maxMoney = Math.max(1, ...rows.flatMap((row) => [row.income, row.expense]));
-  const periodLabel = periodName(dimension);
+  const periodLabel = periodText;
+
+  if (!analytics || !incomeAnalytics) {
+    return (
+      <PageSheet visible={visible} onClose={onClose}>
+        <View style={[styles.root, { backgroundColor: palette.base }]}>
+          <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
+            <SheetHeader title={t('report.memberAnalysis')} />
+            <ReportInlineStatus palette={palette} onRetry={failed ? onRetry : undefined} />
+          </SafeAreaView>
+        </View>
+      </PageSheet>
+    );
+  }
 
   return (
     <PageSheet visible={visible} onClose={onClose}>
@@ -3369,6 +4012,7 @@ function MemberAnalysisSheet({
           <SheetHeader title={t('report.memberAnalysis')} />
 
           <ScrollView contentContainerStyle={styles.sheetContent}>
+            <Text style={[styles.scopeNote, { color: palette.textSecondary }]}>{t('report.memberScopeHint')}</Text>
             <View style={[styles.detailSummaryCard, { backgroundColor: palette.card }]}>
               <Text style={[styles.detailSummaryLabel, { color: palette.textSecondary }]}>
                 {t('report.periodParticipation', { period: periodLabel })}
@@ -3444,7 +4088,10 @@ function MemberAnalysisSheet({
                       <View
                         style={[
                           styles.memberContributionFill,
-                          { width: `${Math.max(4, (item.income / maxMoney) * 100)}%`, backgroundColor: palette.income },
+                          {
+                            width: `${Math.max(4, (item.income / maxMoney) * 100)}%`,
+                            backgroundColor: palette.income,
+                          },
                         ]}
                       />
                     </View>
@@ -3540,16 +4187,6 @@ const styles = StyleSheet.create({
     paddingBottom: Space[3],
   },
   title: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
-  filterButton: { width: 44, height: 44, marginRight: -11, alignItems: 'center', justifyContent: 'center' },
-  filterButtonDot: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 9,
-    height: 9,
-    borderRadius: Radius.full,
-    borderWidth: 1.5,
-  },
   filterSheetAnchor: { width: 1, height: 1 },
   segmentHost: { height: 44, justifyContent: 'center' },
   dimensionSegmentFrame: { flex: 1, height: 44, justifyContent: 'center', minWidth: 0 },
@@ -3602,6 +4239,19 @@ const styles = StyleSheet.create({
   reportRetryText: { fontSize: 15, fontWeight: '600' },
   content: { paddingHorizontal: Space[4], paddingBottom: TabBarInset, gap: Space[4] },
   card: { borderRadius: Radius.lg, padding: Space[4] },
+  // The footer's own touch area supplies the bottom breathing room; don't add card padding below it.
+  cardWithFooter: { paddingBottom: 0 },
+  memberFooter: { minHeight: 44 },
+  compactStats: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Space[2],
+  },
+  scopeNote: { fontSize: 12, lineHeight: 17, marginBottom: Space[1], marginHorizontal: Space[1] },
+  overviewComparison: { marginTop: Space[3], gap: Space[1] },
+  inlineStatus: { minHeight: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Space[3] },
   noMargin: { marginBottom: 0 },
   cardHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space[3] },
   cardHeaderAction: { flexDirection: 'row', alignItems: 'center', gap: Space[1] },
@@ -3668,7 +4318,7 @@ const styles = StyleSheet.create({
     paddingVertical: Space[2],
   },
   filterResetText: { fontSize: 15, fontWeight: '600' },
-  monthlyOverview: { borderRadius: Radius.lg, padding: Space[4], gap: Space[3] },
+  monthlyOverview: { borderRadius: Radius.lg, padding: Space[4], paddingBottom: Space[3], gap: Space[2] },
   overviewHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space[3] },
   overviewTitle: { fontSize: 16, lineHeight: 22, fontWeight: '700' },
   overviewStatus: {
@@ -3682,11 +4332,9 @@ const styles = StyleSheet.create({
   overviewStatusDot: { width: 5, height: 5, borderRadius: Radius.full },
   overviewStatusText: { fontSize: 11, lineHeight: 14, fontWeight: '700' },
   overviewMetrics: { flexDirection: 'row', alignItems: 'stretch' },
-  monthlyOverviewCell: { flex: 1, minWidth: 0, gap: Space[1], paddingHorizontal: Space[3] },
+  monthlyOverviewCell: { flex: 1, minWidth: 0, gap: Space[1], paddingHorizontal: Space[2] },
   monthlyOverviewLabel: { fontSize: 13 },
   monthlyOverviewAmount: { fontSize: 18, lineHeight: 24, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  // iOS 把超出字号的行高留在字形上方，上移行高差后主数字才和右侧数字共基线。
-  monthlyOverviewAmountPrimary: { fontSize: 24, lineHeight: 30, marginTop: 24 - 30 },
   budgetCard: { gap: Space[3] },
   budgetHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space[3] },
   budgetTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },

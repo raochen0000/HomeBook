@@ -6,12 +6,13 @@
  * 收入结构仅算 source=normal 收入（排除储蓄取出）。
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState, type ReactNode } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Defs, G, Line, Path, Pattern, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Space, usePalette } from '@/constants/design';
+import { ReportCardHeader, ReportDetailText } from '@/features/report/presentation';
 import { Donut } from '@/features/report/donut';
 import { i18n, t } from '@/i18n';
 import { fromI18nLanguage } from '@/i18n/locale';
@@ -67,6 +68,7 @@ function SvgYAxis({
   chartRight,
   color,
   gridColor,
+  hidden = false,
 }: {
   ticks: number[];
   width: number;
@@ -74,6 +76,7 @@ function SvgYAxis({
   chartRight: number;
   color: string;
   gridColor: string;
+  hidden?: boolean;
 }) {
   return (
     <>
@@ -83,7 +86,7 @@ function SvgYAxis({
           <G key={tick}>
             <Line x1={width + 6} y1={y} x2={chartRight} y2={y} stroke={gridColor} strokeWidth="1" opacity={0.42} />
             <SvgText x={width} y={y + 3} fontSize="9" fill={color} textAnchor="end">
-              {axisAmountLabel(tick)}
+              {hidden ? '****' : axisAmountLabel(tick)}
             </SvgText>
           </G>
         );
@@ -217,6 +220,7 @@ export function CumulativeCard({
               chartRight={chartRight}
               color={palette.textTertiary}
               gridColor={palette.separator}
+              hidden={hidden}
             />
             {prevPts ? (
               <Polyline
@@ -321,8 +325,16 @@ export function IncomeExpenseCard({
 
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
+      <ReportCardHeader
+        title={t('report.familyFlowTrend')}
+        details={
+          <>
+            <ReportDetailText>{t('report.familyBaseline')}</ReportDetailText>
+            <ReportDetailText>{t('report.chartHint')}</ReportDetailText>
+          </>
+        }
+      />
       <View style={styles.legendRow}>
-        <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('report.incomeExpenseTrend')}</ThemedText>
         <View style={styles.flex} />
         <LegendDot color={palette.income} label={t('record.income')} palette={palette} />
         <LegendDot color={palette.expense} label={t('record.expense')} palette={palette} />
@@ -351,6 +363,7 @@ export function IncomeExpenseCard({
               chartRight={chartRight}
               color={palette.textTertiary}
               gridColor={palette.separator}
+              hidden={hidden}
             />
             <Line
               x1={axisW}
@@ -432,9 +445,12 @@ export function IncomeExpenseCard({
                     onPress={() => setSelectedIndex(i)}
                     accessibilityLabel={t('report.flowA11y', {
                       label: s.label,
-                      income: formatAmount(s.income, '+'),
-                      expense: formatAmount(s.expense, '-'),
-                      balance: formatAmount(s.income - s.expense, signForNet(s.income - s.expense)),
+                      income: maskAmount(formatAmount(s.income, '+'), !!hidden),
+                      expense: maskAmount(formatAmount(s.expense, '-'), !!hidden),
+                      balance: maskAmount(
+                        formatAmount(s.income - s.expense, signForNet(s.income - s.expense)),
+                        !!hidden,
+                      ),
                     })}
                   />
                 </G>
@@ -467,7 +483,7 @@ export function IncomeExpenseCard({
           </View>
           <ThemedText style={[styles.cumCaption, { color: palette.textSecondary }]}>
             {selectedIndex == null && currentPeriod
-              ? t('report.chartHint')
+              ? t('dates.inProgress')
               : t('report.colonIncome', { label: focused.label })}
             {selectedIndex == null && currentPeriod ? null : (
               <Text style={{ color: palette.income, fontWeight: '600' }}>
@@ -500,58 +516,124 @@ export function IncomeExpenseCard({
 }
 
 // ── 分类环比 ──────────────────────────────────────────────────────────────────
-export function CategoryMomCard({ items, palette, hidden }: { items: MomItem[]; palette: Palette; hidden?: boolean }) {
-  if (items.length === 0) return null;
+export function CategoryMomCard({
+  header,
+  items,
+  palette,
+  hidden,
+  comparisonLabel,
+  loading,
+  failed,
+  onRetry,
+}: {
+  header?: ReactNode;
+  items: MomItem[];
+  palette: Palette;
+  hidden?: boolean;
+  comparisonLabel: string | null;
+  inProgress: boolean;
+  loading: boolean;
+  failed: boolean;
+  onRetry: () => void;
+}) {
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
-      <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('report.categoryMom')}</ThemedText>
-      <View style={styles.list}>
-        {items.map((it, i) => {
-          const isNew = it.prev === 0 && it.cur > 0;
-          const gone = it.cur === 0 && it.prev > 0;
-          const pct = it.prev > 0 ? Math.round(((it.cur - it.prev) / it.prev) * 100) : 0;
-          const up = it.cur >= it.prev;
-          const chipColor = isNew ? palette.danger : gone ? palette.success : up ? palette.danger : palette.success;
-          const chipText = isNew
-            ? t('report.newItem')
-            : gone
-              ? '↓ 100%'
-              : pct === 0
-                ? t('report.flat')
-                : `${up ? '↑' : '↓'} ${Math.abs(pct)}%`;
-          return (
-            <View key={it.id}>
-              {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
-              <View style={styles.momRow}>
-                <View style={[styles.dot, { backgroundColor: it.color }]}>
-                  <SymbolView name={it.symbol as Sym} tintColor="#FFFFFF" size={15} />
+      {header ?? <ReportCardHeader title={t('report.categoryMom')} />}
+      {failed ? (
+        <View style={styles.empty}>
+          <Text style={{ color: palette.textSecondary }}>{t('common.loadFailed')}</Text>
+          <Pressable accessibilityRole="button" onPress={onRetry} hitSlop={8}>
+            <Text style={{ color: palette.accent }}>{t('common.retry')}</Text>
+          </Pressable>
+        </View>
+      ) : loading ? (
+        <View style={styles.empty}>
+          <ActivityIndicator color={palette.accent} />
+        </View>
+      ) : !comparisonLabel || items.length === 0 ? (
+        <Text style={[styles.momCaption, { color: palette.textSecondary }]}>{t('report.noComparableData')}</Text>
+      ) : (
+        <View style={styles.list}>
+          {items.map((it, i) => {
+            const isNew = it.prev === 0 && it.cur > 0;
+            const gone = it.cur === 0 && it.prev > 0;
+            const pct = it.prev > 0 ? Math.round(((it.cur - it.prev) / it.prev) * 100) : 0;
+            const up = it.cur >= it.prev;
+            const chipColor = isNew
+              ? palette.danger
+              : gone
+                ? palette.textSecondary
+                : up
+                  ? palette.danger
+                  : palette.success;
+            const chipText = isNew
+              ? t('report.noPreviousMatches')
+              : gone
+                ? t('report.noCurrentMatches')
+                : it.cur === it.prev
+                  ? t('report.flat')
+                  : pct === 0
+                    ? `${up ? '↑' : '↓'} <1%`
+                    : `${up ? '↑' : '↓'} ${Math.abs(pct)}%`;
+            return (
+              <View key={it.id}>
+                {i > 0 ? <View style={[styles.divider, { backgroundColor: palette.separator }]} /> : null}
+                <View style={styles.momRow}>
+                  <View style={[styles.dot, { backgroundColor: it.color }]}>
+                    <SymbolView name={it.symbol as Sym} tintColor="#FFFFFF" size={15} />
+                  </View>
+                  <View style={styles.flex}>
+                    <ThemedText style={[styles.itemName, { color: palette.textPrimary }]} numberOfLines={1}>
+                      {it.name}
+                    </ThemedText>
+                    <Text style={[styles.momCaption, { color: palette.textSecondary }]}>
+                      {gone ? `${t('report.noCurrentMatches')} · ` : ''}
+                      {t('report.categoryChangeAmount', {
+                        amount: maskAmount(
+                          formatAmount(Math.abs(it.cur - it.prev), signForNet(it.cur - it.prev)),
+                          !!hidden,
+                        ),
+                      })}
+                    </Text>
+                  </View>
+                  <ThemedText style={[styles.itemAmount, { color: palette.textPrimary }]}>
+                    {maskAmount(formatAmount(it.cur, ''), !!hidden)}
+                  </ThemedText>
+                  <Text style={[styles.chip, { color: chipColor }]}>{chipText}</Text>
                 </View>
-                <ThemedText style={[styles.itemName, { color: palette.textPrimary }]} numberOfLines={1}>
-                  {it.name}
-                </ThemedText>
-                <View style={styles.flex} />
-                <ThemedText style={[styles.itemAmount, { color: palette.textPrimary }]}>
-                  {maskAmount(formatAmount(it.cur, ''), !!hidden)}
-                </ThemedText>
-                <Text style={[styles.chip, { color: chipColor }]}>{chipText}</Text>
               </View>
-            </View>
-          );
-        })}
-      </View>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 }
 
 // ── 大额支出 Top 5 ────────────────────────────────────────────────────────────
-export function TopExpensesCard({ items, palette, hidden }: { items: TopItem[]; palette: Palette; hidden?: boolean }) {
-  if (items.length === 0) return null;
+export function TopExpensesCard({
+  header,
+  items,
+  palette,
+  hidden,
+}: {
+  header?: ReactNode;
+  items: TopItem[];
+  palette: Palette;
+  hidden?: boolean;
+}) {
+  if (items.length === 0) {
+    return (
+      <View style={[styles.card, { backgroundColor: palette.card }]}>
+        {header ?? <ReportCardHeader title={t('report.topExpenses')} />}
+        <Text style={{ color: palette.textSecondary }}>{t('report.emptyTopicExpense')}</Text>
+      </View>
+    );
+  }
   const max = Math.max(1, ...items.map((i) => i.amount));
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
-      <ThemedText style={[styles.title, { color: palette.textPrimary }]}>
-        {t('report.topExpensesN', { count: items.length })}
-      </ThemedText>
+      {header ?? <ReportCardHeader title={t('report.topExpensesN', { count: items.length })} />}
       <View style={styles.list}>
         {items.map((it, i) => (
           <View key={it.id} style={styles.topItem}>
@@ -584,21 +666,30 @@ export function TopExpensesCard({ items, palette, hidden }: { items: TopItem[]; 
 
 // ── 收入结构 ──────────────────────────────────────────────────────────────────
 export function IncomeStructureCard({
+  header,
   slices,
   palette,
   hidden,
   onOpenCategory,
 }: {
+  header?: ReactNode;
   slices: IncomeSlice[];
   palette: Palette;
   hidden?: boolean;
   onOpenCategory?: (slice: IncomeSlice) => void;
 }) {
-  if (slices.length === 0) return null;
+  if (slices.length === 0) {
+    return (
+      <View style={[styles.card, { backgroundColor: palette.card }]}>
+        {header ?? <ReportCardHeader title={t('report.incomeStructure')} />}
+        <Text style={{ color: palette.textSecondary }}>{t('report.emptyTopicIncome')}</Text>
+      </View>
+    );
+  }
   const total = slices.reduce((s, x) => s + x.amount, 0);
   return (
     <View style={[styles.card, { backgroundColor: palette.card }]}>
-      <ThemedText style={[styles.title, { color: palette.textPrimary }]}>{t('report.incomeStructure')}</ThemedText>
+      {header ?? <ReportCardHeader title={t('report.incomeStructure')} />}
       <View style={styles.donutWrap}>
         <Donut slices={slices.map((s) => ({ value: s.amount, color: s.color }))} trackColor={palette.base}>
           <ThemedText style={[styles.donutCaption, { color: palette.textSecondary }]}>
@@ -670,6 +761,7 @@ const styles = StyleSheet.create({
   cumCaption: { fontSize: 13, marginTop: Space[3], textAlign: 'center' },
   // 分类环比
   momRow: { flexDirection: 'row', alignItems: 'center', gap: Space[3], paddingVertical: Space[3] },
+  momCaption: { fontSize: 12, lineHeight: 17 },
   chip: {
     fontSize: 13,
     fontWeight: '600',

@@ -9,6 +9,196 @@ import { i18n, t } from '@/i18n/instance';
 
 export type Dimension = 'week' | 'month' | 'year' | 'custom';
 
+export type ReportPeriod = { start: Date; end: Date };
+export type ComparablePeriods = { current: ReportPeriod; previous: ReportPeriod; inProgress: boolean };
+
+export function calendarDayDifference(start: Date, end: Date): number {
+  const startDay = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+  const endDay = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+  return Math.round((endDay - startDay) / 86400000);
+}
+
+function addCalendarDays(date: Date, days: number): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+}
+
+/** 当前周期只比较昨天以前的完整自然日；已结束周期分别比较各自完整区间。 */
+export function comparablePeriods(
+  current: ReportPeriod,
+  previous: ReportPeriod,
+  today: Date,
+): ComparablePeriods | null {
+  const currentDays = calendarDayDifference(current.start, current.end);
+  const previousDays = calendarDayDifference(previous.start, previous.end);
+  const elapsedDays = calendarDayDifference(current.start, today);
+  if (currentDays <= 0 || previousDays <= 0 || elapsedDays < 0) return null;
+  if (elapsedDays >= currentDays) return { current, previous, inProgress: false };
+  const days = Math.min(elapsedDays, currentDays, previousDays);
+  if (days <= 0) return null;
+  return {
+    current: { start: current.start, end: addCalendarDays(current.start, days) },
+    previous: { start: previous.start, end: addCalendarDays(previous.start, days) },
+    inProgress: true,
+  };
+}
+
+export type CategoryAmount = { categoryId: string; currentAmount: number };
+export type CategoryChange = { categoryId: string; currentAmount: number; previousAmount: number };
+
+/** 合并两段独立聚合，包含只在上期出现的分类，按金额变化大小排序。 */
+export function categoryChanges(current: CategoryAmount[], previous: CategoryAmount[]): CategoryChange[] {
+  const changes = new Map<string, CategoryChange>();
+  for (const item of current) {
+    if (item.currentAmount !== 0) {
+      changes.set(item.categoryId, {
+        categoryId: item.categoryId,
+        currentAmount: item.currentAmount,
+        previousAmount: 0,
+      });
+    }
+  }
+  for (const item of previous) {
+    if (item.currentAmount === 0) continue;
+    const change = changes.get(item.categoryId) ?? {
+      categoryId: item.categoryId,
+      currentAmount: 0,
+      previousAmount: 0,
+    };
+    change.previousAmount = item.currentAmount;
+    changes.set(item.categoryId, change);
+  }
+  return [...changes.values()].sort(
+    (a, b) =>
+      Math.abs(b.currentAmount - b.previousAmount) - Math.abs(a.currentAmount - a.previousAmount) ||
+      b.currentAmount - a.currentAmount ||
+      a.categoryId.localeCompare(b.categoryId),
+  );
+}
+
+/** 选中的支出和收入分类分别作用于对应专题。 */
+export function categoryIdsForReportType(
+  selectedIds: string[],
+  categories: { id: string; type: string }[],
+  type: 'income' | 'expense',
+): string[] {
+  const allowed = new Set(categories.filter((category) => category.type === type).map((category) => category.id));
+  return selectedIds.filter((id) => allowed.has(id));
+}
+
+/** 专题查询尚未完成时不回落到全家数据，避免旧范围冒充筛选结果。 */
+export function reportTopicData<T>(
+  family: T | undefined,
+  filtered: T | undefined,
+  filterActive: boolean,
+): T | undefined {
+  return filterActive ? filtered : family;
+}
+
+/** 预算沿用整月统计；当其与已到日期不一致时，不用两种范围混算预测。 */
+export function reportBudgetForecast({
+  budgetUsed,
+  budgetTotal,
+  observedExpense,
+  elapsedDays,
+  totalDays,
+  isCurrent,
+}: {
+  budgetUsed: number | null;
+  budgetTotal: number | null;
+  observedExpense: number;
+  elapsedDays: number | null;
+  totalDays: number;
+  isCurrent: boolean;
+}): { scopeDiffers: boolean; projected: number | null } {
+  const scopeDiffers = isCurrent && budgetUsed != null && (budgetTotal ?? 0) > 0 && budgetUsed !== observedExpense;
+  const projected =
+    isCurrent && budgetUsed != null && elapsedDays != null && elapsedDays > 0 && !scopeDiffers
+      ? Math.round((budgetUsed / elapsedDays) * totalDays)
+      : null;
+  return { scopeDiffers, projected };
+}
+
+/** 进行中的最后一期不计入完整周期均值。 */
+export function reportTrendAverage(values: number[], inProgress: boolean): { average: number; count: number } {
+  const completed = inProgress ? values.slice(0, -1) : values;
+  return {
+    average: completed.length > 0 ? Math.round(completed.reduce((sum, value) => sum + value, 0) / completed.length) : 0,
+    count: completed.length,
+  };
+}
+
+/** 服务端日期为家庭时区的日历日；本地正午仅用于图表日历分桶。 */
+export function reportCalendarDayTimestamp(dateKey: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return null;
+  const [year, month, date] = dateKey.split('-').map(Number);
+  const calendarDay = new Date(year, month - 1, date, 12);
+  if (calendarDay.getFullYear() !== year || calendarDay.getMonth() !== month - 1 || calendarDay.getDate() !== date)
+    return null;
+  return calendarDay.toISOString();
+}
+
+export function reportDayFlows(
+  days: {
+    date: string;
+    incomeAmount: number;
+    expenseAmount: number;
+    incomeNormalAmount: number;
+    expenseNormalAmount: number;
+  }[],
+  ordinary: boolean,
+): { occurred_at: string; type: 'income' | 'expense'; amount: number }[] {
+  return days.flatMap((day) => {
+    const occurred_at = reportCalendarDayTimestamp(day.date);
+    if (!occurred_at) return [];
+    return [
+      { occurred_at, type: 'income' as const, amount: ordinary ? day.incomeNormalAmount : day.incomeAmount },
+      { occurred_at, type: 'expense' as const, amount: ordinary ? day.expenseNormalAmount : day.expenseAmount },
+    ];
+  });
+}
+
+/** 全家对账总额与目标存取；普通收入由本期每日聚合得到。 */
+export function reportAccountingTotals(
+  summary: { incomeAmount: number; expenseAmount: number; expenseNormalAmount: number },
+  days: { date: string; incomeNormalAmount: number }[],
+  start: string,
+  end: string,
+) {
+  const normalIncome = days.reduce(
+    (sum, day) => sum + (day.date >= start && day.date < end ? day.incomeNormalAmount : 0),
+    0,
+  );
+  return {
+    income: summary.incomeAmount,
+    expense: summary.expenseAmount,
+    balance: summary.incomeAmount - summary.expenseAmount,
+    normalIncome,
+    normalExpense: summary.expenseNormalAmount,
+    goalWithdrawals: Math.max(0, summary.incomeAmount - normalIncome),
+    goalDeposits: Math.max(0, summary.expenseAmount - summary.expenseNormalAmount),
+  };
+}
+
+/** 用同一份家庭按日汇总计算比较区间，不把实时概览的今天混入环比。 */
+export function reportPeriodCashFlow(
+  days: { date: string; incomeAmount: number; expenseAmount: number }[],
+  start: string,
+  end: string,
+) {
+  const totals = days.reduce(
+    (result, day) => {
+      if (day.date >= start && day.date < end) {
+        result.income += day.incomeAmount;
+        result.expense += day.expenseAmount;
+        result.hasRecords = true;
+      }
+      return result;
+    },
+    { income: 0, expense: 0, hasRecords: false },
+  );
+  return { ...totals, balance: totals.income - totals.expense };
+}
+
 function startOfDay(d: Date): Date {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -253,11 +443,11 @@ export function equalPeriodIncomeExpenseSeries(
   txns: { occurred_at: string; type: string; amount: number }[],
   count = 6,
 ): PeriodFlow[] {
-  const lengthMs = Math.max(86400000, range.end.getTime() - range.start.getTime());
+  const lengthDays = Math.max(1, calendarDayDifference(range.start, range.end));
   const periods = Array.from({ length: count }, (_, i) => {
     const offset = count - 1 - i;
-    const start = new Date(range.start.getTime() - offset * lengthMs);
-    const end = new Date(start.getTime() + lengthMs);
+    const start = addCalendarDays(range.start, -offset * lengthDays);
+    const end = addCalendarDays(start, lengthDays);
     return { start: start.getTime(), end: end.getTime(), label: flowLabel('custom', start), income: 0, expense: 0 };
   });
   const first = periods[0].start;
