@@ -23,6 +23,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PageSheet } from '@/components/page-sheet';
+import { HeaderIconButton } from '@/components/sheet-header';
 import { toast } from '@/components/toast';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 import { singleLineTextInputStyle } from '@/constants/text-input';
@@ -149,13 +150,17 @@ export function ForgotPasswordSheet({
     >
       <View style={[styles.root, { backgroundColor: palette.base }]}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
-          {/* 头部：取消 + 标题 */}
+          {/* 关闭当前面板 */}
           <View style={styles.header}>
-            <Pressable hitSlop={8} onPress={onClose} disabled={busy} style={styles.headerBtn}>
-              <Text style={[styles.cancelText, { color: busy ? palette.textTertiary : palette.textSecondary }]}>
-                {t('common.cancel')}
-              </Text>
-            </Pressable>
+            <View style={styles.headerBtn}>
+              <HeaderIconButton
+                icon="xmark"
+                label={t('common.close')}
+                tintColor={busy ? palette.textTertiary : palette.textPrimary}
+                onPress={onClose}
+                disabled={busy}
+              />
+            </View>
             <Text style={[styles.headerTitle, { color: palette.textPrimary }]}>{t('auth.recoverTitle')}</Text>
             <View style={styles.headerBtn} />
           </View>
@@ -280,8 +285,7 @@ const styles = StyleSheet.create({
     height: 52,
     paddingHorizontal: Space[4],
   },
-  headerBtn: { minWidth: 44, justifyContent: 'center' },
-  cancelText: { fontSize: 16 },
+  headerBtn: { width: 44, justifyContent: 'center' },
   headerTitle: { fontSize: 17, fontWeight: '600' },
 
   content: { padding: Space[4], gap: Space[3] },

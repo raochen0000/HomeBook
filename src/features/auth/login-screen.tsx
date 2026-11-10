@@ -32,6 +32,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { toast } from '@/components/toast';
+import { HeaderIconButton } from '@/components/sheet-header';
 import { Radius, Space, usePalette } from '@/constants/design';
 import { singleLineTextInputStyle } from '@/constants/text-input';
 import { t, useLocalePreference } from '@/i18n';
@@ -792,9 +793,15 @@ function AppleLoginSheet({
           >
             <View style={[styles.sheetGrabber, { backgroundColor: palette.separator }]} />
           </View>
-          <Pressable style={styles.sheetCancel} hitSlop={8} onPress={onClose} disabled={busy}>
-            <Text style={[styles.sheetCancelText, { color: palette.textSecondary }]}>{t('common.cancel')}</Text>
-          </Pressable>
+          <View style={styles.sheetCancel}>
+            <HeaderIconButton
+              icon="xmark"
+              label={t('common.close')}
+              tintColor={busy ? palette.textTertiary : palette.textPrimary}
+              onPress={onClose}
+              disabled={busy}
+            />
+          </View>
 
           <SymbolView name="apple.logo" tintColor={palette.textPrimary} size={38} />
           <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>{t('auth.appleLogin')}</Text>
@@ -1050,7 +1057,6 @@ const styles = StyleSheet.create({
   },
   sheetGrabber: { width: 38, height: 5, borderRadius: Radius.full },
   sheetCancel: { position: 'absolute', top: Space[4], left: Space[5] },
-  sheetCancelText: { fontSize: 16 },
   sheetTitle: { fontSize: 22, lineHeight: 28, marginBottom: Space[1] },
   sheetBenefits: { width: '100%', gap: Space[6], marginVertical: Space[6] },
   benefitRow: { flexDirection: 'row', gap: Space[4], alignItems: 'flex-start' },

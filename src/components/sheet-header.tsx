@@ -69,7 +69,7 @@ function ProgressiveBlur() {
   );
 }
 
-function HeaderIconButton({
+export function HeaderIconButton({
   icon,
   label,
   tintColor,
