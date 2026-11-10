@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 /**
  * 报表（Tab 2，流程 9 完整版）：周/月/年维度切换 + 收支结余概览 + 结余率仪表 + 消费趋势折线
  * + 累计同期对比双线 + 收支对比双柱 + 支出分类占比环形图 + 分类环比 + 成员贡献条形图
@@ -21,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter, type Href } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { Fragment, useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -38,6 +39,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, { Circle, Defs, Line, Pattern, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 
 import {
+  fetchReportAnalytics,
   DEFAULT_ACCOUNTING_PREFS,
   EMPTY_REPORT_ANALYTICS,
   useAccountingPrefs,
@@ -56,6 +58,7 @@ import {
   type ReportAnalyticsInput,
   type SavingsGoal,
 } from '@/api';
+import { queryKeys } from '@/api/keys';
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { ThemedText } from '@/components/themed-text';
@@ -140,6 +143,18 @@ const DIMENSIONS: { key: Dimension; labelKey: string }[] = [
 
 function intlLocale(): string {
   return INTL_LOCALE[fromI18nLanguage(i18n.language)];
+}
+
+function reportPeriodName(dimension: Dimension): string {
+  return t(
+    dimension === 'week'
+      ? 'report.periodWeek'
+      : dimension === 'year'
+        ? 'report.periodYear'
+        : dimension === 'custom'
+          ? 'report.periodCustom'
+          : 'report.periodMonth',
+  );
 }
 
 function periodName(dimension: Dimension): string {
@@ -235,6 +250,26 @@ function previousEqualRange(start: Date, end: Date): { start: Date; end: Date; l
 
 export default function ReportScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const familyQ = useMyFamily();
+  const switchRequest = useRef(0);
+  const [switchingPending, setSwitching] = useState(false);
+  const [switchFamilyId, setSwitchFamilyId] = useState<string | undefined>();
+  const switching = switchingPending && switchFamilyId === familyQ.data?.id;
+  const [pendingDimension, setPendingDimension] = useState<Dimension | null>(null);
+  const [showSwitchMask, setShowSwitchMask] = useState(false);
+  useEffect(() => {
+    if (!switching) return;
+    const timer = setTimeout(() => setShowSwitchMask(true), 200);
+    return () => clearTimeout(timer);
+  }, [switching, pendingDimension]);
+  const [failedDimension, setFailedDimension] = useState<Dimension | null>(null);
+  useEffect(
+    () => () => {
+      switchRequest.current += 1;
+    },
+    [],
+  );
   const palette = usePalette();
   const { locale } = useLocalePreference();
   const catColors = useCategoryColors();
@@ -257,7 +292,12 @@ export default function ReportScreen() {
       avatarUrl: member.avatar_url,
     }));
   }, [membersQ.data, locale]);
-  const familyQ = useMyFamily();
+  useEffect(
+    () => () => {
+      switchRequest.current += 1;
+    },
+    [familyQ.data?.id],
+  );
   const profileQ = useMyProfile();
   const prefsQ = useAccountingPrefs();
   const savingsQ = useSavingsGoals();
@@ -379,6 +419,74 @@ export default function ReportScreen() {
     incomeInput,
     prerequisitesReady && !futurePeriod && hasIncomeFilters && (scope === 'income' || memberAnalysisOpen),
   );
+  const switchDimension = async (next: Dimension) => {
+    const request = ++switchRequest.current;
+    if (switching && next === dimension) {
+      setSwitching(false);
+      setShowSwitchMask(false);
+      setPendingDimension(null);
+      setFailedDimension(null);
+      return;
+    }
+    if (next === 'custom') {
+      setSwitching(false);
+      setShowSwitchMask(false);
+      setPendingDimension(null);
+      setFailedDimension(null);
+      setDimension(next);
+      setCustomOpen(true);
+      return;
+    }
+    setFailedDimension(null);
+    setPendingDimension(next);
+    setSwitchFamilyId(familyQ.data?.id);
+    setShowSwitchMask(false);
+    setSwitching(true);
+    const nextRange = periodRange(next, todayInFamilyTimeZone);
+    const previous = periodRange(next, shiftAnchor(next, todayInFamilyTimeZone, -1));
+    const history = periodRange(next, shiftAnchor(next, todayInFamilyTimeZone, -5));
+    const tomorrow = addDays(todayStart, 1);
+    const input: ReportAnalyticsInput = {
+      start: localDateKey(nextRange.start),
+      end: localDateKey(nextRange.end.getTime() > tomorrow.getTime() ? tomorrow : nextRange.end),
+      previousStart: localDateKey(previous.start),
+      historyStart: localDateKey(history.start),
+      memberIds: [],
+      categoryIds: [],
+    };
+    const topicInput =
+      scope === 'income'
+        ? { ...input, memberIds: filters.memberIds, categoryIds: incomeCategoryIds }
+        : { ...input, memberIds: filters.memberIds, categoryIds: expenseCategoryIds };
+    const needsTopic = scope === 'income' ? hasIncomeFilters : scope === 'expense' && hasExpenseFilters;
+    const load = (params: ReportAnalyticsInput) =>
+      queryClient.ensureQueryData({
+        queryKey: queryKeys.reportAnalytics(params),
+        queryFn: () => fetchReportAnalytics(params),
+        revalidateIfStale: true,
+      });
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.all([load(input), ...(needsTopic ? [load(topicInput)] : [])]),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('Report request timed out')), 15000);
+        }),
+      ]);
+      if (request !== switchRequest.current) return;
+      setAnchor(todayInFamilyTimeZone);
+      setDimension(next);
+    } catch {
+      if (request === switchRequest.current) setFailedDimension(next);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      if (request === switchRequest.current) {
+        setSwitching(false);
+        setShowSwitchMask(false);
+        setPendingDimension(null);
+      }
+    }
+  };
   const familyData = futurePeriod ? EMPTY_REPORT_ANALYTICS : reportQ.data;
   const expenseData = reportTopicData(familyData, expenseQ.data, !futurePeriod && hasExpenseFilters);
   const incomeData = reportTopicData(familyData, incomeQ.data, !futurePeriod && hasIncomeFilters);
@@ -1148,11 +1256,7 @@ export default function ReportScreen() {
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <View style={styles.flex}>
-        {loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator />
-          </View>
-        ) : reportLoadFailed ? (
+        {reportLoadFailed ? (
           <ReportLoadErrorState
             palette={palette}
             onRetry={() => {
@@ -1170,28 +1274,29 @@ export default function ReportScreen() {
             scrollIndicatorInsets={{ top: headerHeight, bottom: TabBarInset }}
           >
             {/* 报表主视角：先把信息架构固定为支出 / 收入 / 结余。 */}
-            <Host key={locale} ignoreSafeArea="all" style={styles.segmentHost}>
-              <Picker
-                modifiers={[pickerStyle('segmented')]}
-                selection={scope}
-                onSelectionChange={(value) => setScope(value as ReportScope)}
-              >
-                {REPORT_SCOPES.map((item) => (
-                  <UIText key={item.key} modifiers={[tag(item.key)]}>
-                    {t(item.labelKey)}
-                  </UIText>
-                ))}
-              </Picker>
-            </Host>
-
+            <View pointerEvents={switching || loading ? 'none' : 'auto'}>
+              <Host key={locale} ignoreSafeArea="all" style={styles.segmentHost}>
+                <Picker
+                  modifiers={[pickerStyle('segmented')]}
+                  selection={scope}
+                  onSelectionChange={(value) => setScope(value as ReportScope)}
+                >
+                  {REPORT_SCOPES.map((item) => (
+                    <UIText key={item.key} modifiers={[tag(item.key)]}>
+                      {t(item.labelKey)}
+                    </UIText>
+                  ))}
+                </Picker>
+              </Host>
+            </View>
             {/* 周期 + 维度切换：压成一行，减少报表顶部控件高度。 */}
             <View style={styles.periodControlRow}>
               <View style={styles.periodBar}>
-                <Pressable hitSlop={10} onPress={() => shiftPeriod(-1)}>
+                <Pressable hitSlop={10} disabled={switching || loading} onPress={() => shiftPeriod(-1)}>
                   <SymbolView name="chevron.left" tintColor={palette.textSecondary} size={18} />
                 </Pressable>
                 <Pressable
-                  disabled={dimension !== 'custom'}
+                  disabled={dimension !== 'custom' || switching || loading}
                   onPress={() => setCustomOpen(true)}
                   style={styles.periodLabelButton}
                 >
@@ -1226,7 +1331,7 @@ export default function ReportScreen() {
                     </ThemedText>
                   )}
                 </Pressable>
-                <Pressable hitSlop={10} onPress={() => shiftPeriod(1)} disabled={isCurrent}>
+                <Pressable hitSlop={10} onPress={() => shiftPeriod(1)} disabled={isCurrent || switching || loading}>
                   <SymbolView
                     name="chevron.right"
                     tintColor={isCurrent ? palette.textTertiary : palette.textSecondary}
@@ -1234,16 +1339,14 @@ export default function ReportScreen() {
                   />
                 </Pressable>
               </View>
-              <View style={styles.dimensionSegmentFrame}>
+              <View style={styles.dimensionSegmentFrame} pointerEvents={loading ? 'none' : 'auto'}>
                 <Host key={locale} ignoreSafeArea="all" style={styles.dimensionSegmentHost}>
                   <Picker
                     modifiers={[pickerStyle('segmented')]}
-                    selection={dimension}
+                    selection={switching ? (pendingDimension ?? dimension) : dimension}
                     onSelectionChange={(value) => {
                       const next = value as Dimension;
-                      setDimension(next);
-                      if (next === 'custom') setCustomOpen(true);
-                      else setAnchor(todayInFamilyTimeZone);
+                      void switchDimension(next);
                     }}
                   >
                     {DIMENSIONS.map((d) => (
@@ -1256,29 +1359,112 @@ export default function ReportScreen() {
               </View>
             </View>
 
-            {hasRefreshError ? (
-              <Pressable
-                style={[styles.card, styles.inlineStatus, { backgroundColor: palette.card }]}
-                accessibilityRole="button"
-                onPress={() => {
-                  if (reportQ.isError && !futurePeriod) void reportQ.refetch();
-                  if (scope === 'expense' && expenseQ.isError && hasExpenseFilters) void expenseQ.refetch();
-                  if (scope === 'income' && incomeQ.isError && hasIncomeFilters) void incomeQ.refetch();
-                  if (dimension === 'month' && budgetQ.isError) void budgetQ.refetch();
-                  if (dimension === 'month' && budgetProgressQ.isError) void budgetProgressQ.refetch();
-                  if (savingsQ.isError) void savingsQ.refetch();
-                }}
+            {failedDimension && switchFamilyId === familyQ.data?.id ? (
+              <View
+                style={[styles.card, { backgroundColor: palette.card, gap: Space[2] }]}
+                accessibilityLiveRegion="polite"
               >
-                <ThemedText style={{ color: palette.textSecondary }}>{t('report.refreshFailedCached')}</ThemedText>
-                <ThemedText style={{ color: palette.accent }}>{t('common.retry')}</ThemedText>
-              </Pressable>
+                <ThemedText style={{ color: palette.textPrimary }}>
+                  {t('report.periodSwitchFailed', {
+                    target: reportPeriodName(failedDimension),
+                    current: reportPeriodName(dimension),
+                  })}
+                </ThemedText>
+                <View style={{ flexDirection: 'row', gap: Space[4] }}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void switchDimension(failedDimension)}
+                    style={styles.switchAction}
+                  >
+                    <Text style={{ color: palette.accent }}>{t('common.retry')}</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setFailedDimension(null)}
+                    style={styles.switchAction}
+                  >
+                    <Text style={{ color: palette.textSecondary }}>{t('report.keepCurrentPeriod')}</Text>
+                  </Pressable>
+                </View>
+              </View>
             ) : null}
+            {loading ? (
+              <View
+                style={styles.reportSkeleton}
+                accessibilityLabel={t('common.loading')}
+                accessibilityRole="progressbar"
+              >
+                {[150, 110, 210].map((height, index) => (
+                  <View key={index} style={{ height, borderRadius: Radius.lg, backgroundColor: palette.card }} />
+                ))}
+              </View>
+            ) : (
+              <View>
+                <View
+                  pointerEvents={switching ? 'none' : 'auto'}
+                  accessibilityElementsHidden={switching}
+                  importantForAccessibility={switching ? 'no-hide-descendants' : 'auto'}
+                  style={{ gap: Space[4] }}
+                >
+                  {hasRefreshError ? (
+                    <Pressable
+                      style={[styles.card, styles.inlineStatus, { backgroundColor: palette.card }]}
+                      accessibilityRole="button"
+                      onPress={() => {
+                        if (reportQ.isError && !futurePeriod) void reportQ.refetch();
+                        if (scope === 'expense' && expenseQ.isError && hasExpenseFilters) void expenseQ.refetch();
+                        if (scope === 'income' && incomeQ.isError && hasIncomeFilters) void incomeQ.refetch();
+                        if (dimension === 'month' && budgetQ.isError) void budgetQ.refetch();
+                        if (dimension === 'month' && budgetProgressQ.isError) void budgetProgressQ.refetch();
+                        if (savingsQ.isError) void savingsQ.refetch();
+                      }}
+                    >
+                      <ThemedText style={{ color: palette.textSecondary }}>
+                        {t('report.refreshFailedCached')}
+                      </ThemedText>
+                      <ThemedText style={{ color: palette.accent }}>{t('common.retry')}</ThemedText>
+                    </Pressable>
+                  ) : null}
 
-            {familyData && familyData.summary.transactionCount > 0 && familyData.summary.transactionCount < 3 ? (
-              <ReportDataReadinessCard count={familyData.summary.transactionCount} palette={palette} />
-            ) : null}
-            {renderedCards}
-            {addCardEntry}
+                  {familyData && familyData.summary.transactionCount > 0 && familyData.summary.transactionCount < 3 ? (
+                    <ReportDataReadinessCard count={familyData.summary.transactionCount} palette={palette} />
+                  ) : null}
+                  {renderedCards}
+                  {addCardEntry}
+                </View>
+                {switching ? (
+                  <View
+                    style={[StyleSheet.absoluteFill, styles.switchOverlay]}
+                    accessibilityRole="progressbar"
+                    accessibilityLabel={t('report.periodSwitchLoading', {
+                      target: reportPeriodName(pendingDimension ?? dimension),
+                      current: reportPeriodName(dimension),
+                    })}
+                  >
+                    {showSwitchMask ? (
+                      <>
+                        <View style={[StyleSheet.absoluteFill, { backgroundColor: palette.base, opacity: 0.55 }]} />
+                        <View style={[styles.switchStatus, { backgroundColor: palette.card }]}>
+                          <ActivityIndicator color={palette.accent} />
+                          <View>
+                            <Text style={{ color: palette.textPrimary, fontWeight: '600' }}>
+                              {t('report.loadingPeriod', {
+                                period: reportPeriodName(pendingDimension ?? dimension),
+                              })}
+                            </Text>
+                            <Text style={{ color: palette.textSecondary }}>
+                              {t('report.showingPeriod', {
+                                period: reportPeriodName(dimension),
+                              })}
+                            </Text>
+                          </View>
+                        </View>
+                      </>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            )}
           </Animated.ScrollView>
         )}
 
@@ -1293,7 +1479,7 @@ export default function ReportScreen() {
               members={selectedFilterMembers}
               filterCount={activeFilters}
               description={filterDescription}
-              disabled={filterUnavailable}
+              disabled={filterUnavailable || switching}
               onPress={() => setFilterOpen(true)}
             />
           </Animated.View>
@@ -4176,6 +4362,16 @@ function MemberAnalysisSheet({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  reportSkeleton: { gap: Space[4] },
+  switchOverlay: { zIndex: 9, alignItems: 'center', paddingTop: Space[6] },
+  switchStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[3],
+    padding: Space[4],
+    borderRadius: Radius.lg,
+  },
+  switchAction: { minHeight: 44, justifyContent: 'center' },
   flex: { flex: 1 },
   headerClip: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden', zIndex: 10 },
   header: {
