@@ -239,6 +239,18 @@ function Body({
               sub={t('record.modifiedAt', { time: fullDate(txn.updated_at) })}
             />
           ) : null}
+          {txn.is_recurring ? (
+            <View style={[styles.recurringOrigin, { borderTopColor: palette.separator }]}>
+              <SymbolView
+                name={{ ios: 'clock', android: 'schedule', web: 'schedule' }}
+                size={16}
+                tintColor={palette.textSecondary}
+              />
+              <Text style={[styles.recurringText, { color: palette.textSecondary }]}>
+                {t('record.recurringOrigin')}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </Animated.View>
     </View>
@@ -275,4 +287,12 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 13 },
   fieldValue: { fontSize: 15, lineHeight: 21 },
   member: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
+  recurringOrigin: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: Space[2],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space[2],
+  },
+  recurringText: { fontSize: 13, flexShrink: 1 },
 });

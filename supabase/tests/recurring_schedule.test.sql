@@ -2,7 +2,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(22);
+select plan(25);
 
 select is(private.recurring_next_date('yearly', 29, 2, '2024-01-01'), date '2024-02-29', 'Leap year uses February 29');
 select is(private.recurring_next_date('yearly', 29, 2, '2025-01-01'), date '2025-02-28', 'Common year uses February 28');
@@ -41,6 +41,8 @@ select is(private.generate_due_recurring_transactions('10000000-0000-0000-0000-0
 select is((select occurred_at at time zone 'Asia/Shanghai' from public.transactions
   where family_id = '10000000-0000-0000-0000-000000000002'),
   (((now() at time zone 'Asia/Shanghai')::date + 1)::timestamp + interval '6 hours'), 'Entry timestamp is 06:00 Beijing');
+select is((select is_recurring from public.transactions where family_id = '10000000-0000-0000-0000-000000000002'), true, 'Generated entry records its origin');
+select is((select last_editor_user_id from public.transactions where family_id = '10000000-0000-0000-0000-000000000002'), null::uuid, 'Recording origin does not mark the entry as edited');
 
 -- Switching frequency after an entry was generated must not create a second
 -- entry on the same scheduled date.
@@ -53,6 +55,8 @@ select is(private.generate_due_recurring_transactions('10000000-0000-0000-0000-0
   0, 'Changing frequency does not duplicate an existing scheduled date');
 select is((select count(*)::integer from public.transactions where family_id = '10000000-0000-0000-0000-000000000002'),
   1, 'Only one entry exists after frequency change');
+delete from public.recurring_transactions where id = '10000000-0000-0000-0000-000000000004';
+select is((select is_recurring from public.transactions where family_id = '10000000-0000-0000-0000-000000000002'), true, 'Origin remains after deleting the rule');
 
 create function pg_temp.reject_test_transaction() returns trigger language plpgsql as $$
 begin

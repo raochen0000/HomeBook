@@ -276,6 +276,7 @@ const en = {
     expense: 'Expense',
     income: 'Income',
     recorder: 'Recorded by',
+    recurringOrigin: 'Created automatically by a scheduled transaction',
     time: 'Time',
     monthlyDay: 'Day of month',
     yearlyDay: 'Date each year',

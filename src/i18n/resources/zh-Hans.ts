@@ -276,6 +276,7 @@ const zhHans = {
     expense: '支出',
     income: '收入',
     recorder: '记录人',
+    recurringOrigin: '此流水由定时收支自动生成',
     time: '时间',
     monthlyDay: '每月记账日',
     yearlyDay: '每年记账日',

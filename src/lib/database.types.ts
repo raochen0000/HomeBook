@@ -1008,6 +1008,7 @@ export type Database = {
           family_id: string;
           id: string;
           is_deleted: boolean;
+          is_recurring: boolean;
           last_editor_user_id: string | null;
           note: string | null;
           occurred_at: string;
@@ -1025,6 +1026,7 @@ export type Database = {
           family_id: string;
           id?: string;
           is_deleted?: boolean;
+          is_recurring?: boolean;
           last_editor_user_id?: string | null;
           note?: string | null;
           occurred_at?: string;
@@ -1042,6 +1044,7 @@ export type Database = {
           family_id?: string;
           id?: string;
           is_deleted?: boolean;
+          is_recurring?: boolean;
           last_editor_user_id?: string | null;
           note?: string | null;
           occurred_at?: string;

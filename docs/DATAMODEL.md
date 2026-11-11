@@ -126,6 +126,7 @@ erDiagram
 | `occurred_at`               | timestamp |                            | 记账时间（按家庭时区归月）                        |
 | `recorder_user_id`          | UUID      | FK→USER                    | 记账人                                            |
 | `source`                    | enum      |                            | `normal` / `savings_deposit` / `savings_withdraw` |
+| `is_recurring`              | boolean   | 默认 false                 | 是否可确认由定时收支生成；删除规则后保留 |
 | `savings_goal_id`           | UUID      | FK，null                   | 储蓄类流水关联目标                                |
 | `sync_status`               | enum      |                            | `synced` / `pending`（离线队列）                  |
 | `is_deleted`                | bool      | default false              | 软删除标记                                        |
