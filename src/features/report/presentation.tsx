@@ -77,7 +77,7 @@ export function ReportFilterButton({
   onPress: () => void;
 }) {
   const palette = usePalette();
-  const visibleMembers = members.slice(0, 3);
+  const visibleMembers = members.slice(0, 5);
   const avatars = useAvatarFiles(visibleMembers.map((member) => ({ id: member.id, avatar_url: member.avatarUrl })));
   const overflow = members.length - visibleMembers.length;
   const showCount = filterCount > members.length;
