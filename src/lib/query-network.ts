@@ -5,6 +5,10 @@ let connected = true;
 let familyVerified = false;
 const listeners = new Set<(online: boolean) => void>();
 
+// The default Google reachability probe can be blocked while our backend remains reachable.
+// Use device connectivity as a hint and let the actual service requests report failures.
+NetInfo.configure({ reachabilityShouldRun: () => false });
+
 export function isNetworkAvailable(): boolean {
   return connected;
 }
@@ -30,7 +34,7 @@ export function subscribeFamilyVerification(listener: (online: boolean) => void)
 
 onlineManager.setEventListener((setOnline) =>
   NetInfo.addEventListener((state) => {
-    const next = state.isConnected !== false && state.isInternetReachable !== false;
+    const next = state.isConnected !== false;
     if (next !== connected) {
       connected = next;
       familyVerified = false;

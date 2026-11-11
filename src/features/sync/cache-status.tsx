@@ -41,7 +41,7 @@ export function CacheStatusNotice() {
     };
   }, [client]);
 
-  const offline = net.isConnected === false || net.isInternetReachable === false;
+  const offline = net.isConnected === false;
   if (!state.hasData || (!offline && !state.failed)) return null;
   const time = state.updatedAt
     ? new Intl.DateTimeFormat(INTL_LOCALE[locale], {

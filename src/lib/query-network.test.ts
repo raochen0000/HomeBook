@@ -7,6 +7,7 @@ const network = vi.hoisted(() => ({
 }));
 vi.mock('@react-native-community/netinfo', () => ({
   default: {
+    configure: vi.fn(),
     addEventListener: (listener: typeof network.listener) => {
       network.listener = listener;
       return () => {};
@@ -32,6 +33,14 @@ describe('family query network gate', () => {
     expect(onlineManager.isOnline()).toBe(true);
     unsubscribeGate();
     unsubscribeOnline();
+  });
+
+  it('does not block connected devices when an unrelated reachability probe fails', () => {
+    const unsubscribe = onlineManager.subscribe(() => {});
+    resumeFamilyQueries();
+    network.listener({ isConnected: true, isInternetReachable: false });
+    expect(onlineManager.isOnline()).toBe(true);
+    unsubscribe();
   });
 
   it('keeps the previous result visible offline and refreshes it only after identity verification', async () => {

@@ -9,7 +9,7 @@ export function CacheInlineNotice({ failed, updatedAt }: { failed: boolean; upda
   const net = useNetInfo();
   const palette = useSheetPalette();
   const { locale } = useLocalePreference();
-  if (!failed && net.isConnected !== false && net.isInternetReachable !== false) return null;
+  if (!failed && net.isConnected !== false) return null;
   const time =
     updatedAt > 0
       ? new Intl.DateTimeFormat(INTL_LOCALE[locale], {
