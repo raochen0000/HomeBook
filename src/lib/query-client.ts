@@ -1,12 +1,18 @@
 import { QueryClient } from '@tanstack/react-query';
 
-/** 全局 QueryClient。RN 无 window focus；家庭协作靠 Realtime + AppState 重拉，不靠窗口焦点。 */
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      retry: 1,
-      refetchOnWindowFocus: false,
+import './query-network';
+
+/** Each account/family gets its own client, so old in-flight responses cannot populate a new scope. */
+export function createQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 30_000,
+        retry: 1,
+        refetchOnWindowFocus: false,
+      },
+      // Writes must fail normally when offline; they must not be queued and replayed later.
+      mutations: { networkMode: 'always' },
     },
-  },
-});
+  });
+}

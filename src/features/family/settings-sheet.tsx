@@ -34,8 +34,10 @@ import {
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
+import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 import { alertOk, t, useLocalePreference } from '@/i18n';
+import { isNetworkAvailable } from '@/lib/query-network';
 
 function uploadFailureDetail(error: unknown): string {
   if (error instanceof ImageTooLargeError) return t('common.imageTooLarge');
@@ -70,15 +72,50 @@ function Body({ onClose }: { onClose: () => void }) {
   if (!family) {
     return (
       <View style={[styles.loadingRoot, { backgroundColor: palette.base }]}>
-        <ActivityIndicator />
+        {familyQ.isError || familyQ.fetchStatus === 'paused' || familyQ.isSuccess ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              void familyQ.refetch();
+              void profileQ.refetch();
+            }}
+          >
+            <Text style={{ color: palette.textSecondary }}>
+              {t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')} · {t('common.retry')}
+            </Text>
+          </Pressable>
+        ) : (
+          <ActivityIndicator />
+        )}
       </View>
     );
   }
 
-  return <SettingsForm key={family.id} family={family} isOwner={isOwner} onClose={onClose} />;
+  return (
+    <SettingsForm
+      key={family.id}
+      family={family}
+      isOwner={isOwner}
+      onClose={onClose}
+      failed={familyQ.isError || profileQ.isError}
+      updatedAt={familyQ.dataUpdatedAt}
+    />
+  );
 }
 
-function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: boolean; onClose: () => void }) {
+function SettingsForm({
+  family,
+  isOwner,
+  onClose,
+  failed,
+  updatedAt,
+}: {
+  family: Family;
+  isOwner: boolean;
+  onClose: () => void;
+  failed: boolean;
+  updatedAt: number;
+}) {
   const palette = useSheetPalette();
   useLocalePreference();
   const saveSettingsM = useUpdateFamilySettings();
@@ -156,6 +193,7 @@ function SettingsForm({ family, isOwner, onClose }: { family: Family; isOwner: b
           keyboardShouldPersistTaps="handled"
           contentInsetAdjustmentBehavior="automatic"
         >
+          <CacheInlineNotice failed={failed} updatedAt={updatedAt} />
           <Text style={[styles.groupTitle, { color: palette.textSecondary }]}>{t('family.profile')}</Text>
 
           <View style={styles.identityPreview}>

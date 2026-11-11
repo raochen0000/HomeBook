@@ -56,7 +56,7 @@ export default function MineScreen() {
     insets.top + Space[2],
     insets.top,
   );
-  const { session } = useSession();
+  const { session, offline } = useSession();
   const { data: profile } = useMyProfile();
   const { preference: themePreference, setPreference: setThemePreference } = useThemePreference();
   const { locale, setLocale } = useLocalePreference();
@@ -116,7 +116,10 @@ export default function MineScreen() {
             modifiers={[
               listRowInsets({ top: Space[3], bottom: Space[3], leading: Space[4], trailing: Space[4] }),
               contentShape(shapes.rectangle()),
-              onTapGesture(() => router.push('/account' as Href)),
+              onTapGesture(() => {
+                if (offline) Alert.alert(t('record.networkRetry'), undefined, alertOk());
+                else router.push('/account' as Href);
+              }),
             ]}
           >
             <ListUserAvatar uri={avatarUri} nickname={profile?.nickname ?? t('common.user')} size={60} />

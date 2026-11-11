@@ -1,4 +1,3 @@
-import { QueryClientProvider } from '@tanstack/react-query';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider, usePathname, useRouter, type Href } from 'expo-router';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useColorScheme } from 'react-native';
@@ -13,35 +12,22 @@ import { useRecurringCatchup } from '@/features/record/use-recurring-catchup';
 import { SearchProvider } from '@/features/search/search-provider';
 import { ThemePreferenceProvider, useThemePreference } from '@/features/settings/theme-preference';
 import { FamilyLiveSyncHost } from '@/features/sync/use-family-live-sync';
+import { QueryCacheProvider } from '@/features/sync/query-cache-provider';
+import { CacheStatusNotice } from '@/features/sync/cache-status';
 import { localePathRef, LocalePreferenceProvider, pendingLocaleRestoreRef, useLocalePreference } from '@/i18n';
 import { useSession } from '@/lib/auth';
-import { queryClient } from '@/lib/query-client';
-import { supabase } from '@/lib/supabase';
 
 export default function RootLayout() {
-  // 登录态变化时刷新所有查询，避免切换账号后读到上一个用户的缓存数据。
-  // SIGNED_OUT 直接清空：注销后 profile 已是墓碑「已注销用户」，invalidate 会把墓碑写回 UI。
-  useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
-        queryClient.clear();
-        return;
-      }
-      queryClient.invalidateQueries();
-    });
-    return () => sub.subscription.unsubscribe();
-  }, []);
-
   return (
-    <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-        <ThemePreferenceProvider>
-          <LocalePreferenceProvider>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      <ThemePreferenceProvider>
+        <LocalePreferenceProvider>
+          <QueryCacheProvider>
             <AppShell />
-          </LocalePreferenceProvider>
-        </ThemePreferenceProvider>
-      </SafeAreaProvider>
-    </QueryClientProvider>
+          </QueryCacheProvider>
+        </LocalePreferenceProvider>
+      </ThemePreferenceProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -73,7 +59,7 @@ function AppShell() {
   useEffect(() => {
     localePathRef.current = pathname;
   }, [pathname]);
-  const { session, loading } = useSession();
+  const { session, loading, offline } = useSession();
   const signedIn = !loading && !!session;
   const signedOut = !loading && !session;
   const showLaunchScreen = loading || !themePreferenceRestored;
@@ -104,14 +90,16 @@ function AppShell() {
             <Stack.Screen name="export" />
             <Stack.Screen name="feedback" />
             <Stack.Screen name="help" />
-            <Stack.Screen name="account/index" />
-            <Stack.Screen name="account/email" />
-            <Stack.Screen name="account/apple" />
-            <Stack.Screen name="account/password" />
             <Stack.Screen name="settings/notifications" />
             <Stack.Screen name="settings/record" />
             <Stack.Screen name="settings/recurring" />
             <Stack.Screen name="settings/report-cards" />
+          </Stack.Protected>
+          <Stack.Protected guard={signedIn && !offline}>
+            <Stack.Screen name="account/index" />
+            <Stack.Screen name="account/email" />
+            <Stack.Screen name="account/apple" />
+            <Stack.Screen name="account/password" />
           </Stack.Protected>
           <Stack.Protected guard={signedOut}>
             <Stack.Screen name="login" />
@@ -120,8 +108,9 @@ function AppShell() {
         <RestoreLocaleRoute />
       </SearchProvider>
       {/* 已登录：家庭协作同步（Realtime 门铃 + 回前台重拉）与关键通知兜底。 */}
-      {session ? <FamilyLiveSyncHost /> : null}
+      {session && !offline ? <FamilyLiveSyncHost /> : null}
       {session ? <NotificationGate /> : null}
+      {session ? <CacheStatusNotice /> : null}
       {/* 已登录时的全局轻提示；未登录由 login 路由自己挂 ToastHost。 */}
       {session ? <ToastHost /> : null}
       {showLaunchScreen ? <LaunchScreenOverlay /> : null}

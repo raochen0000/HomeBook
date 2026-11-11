@@ -89,6 +89,7 @@ import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { buildCategoryHierarchy, categoryDescendantIds, type CategoryHierarchy } from '@/lib/category-hierarchy';
 import { calendarDateInTimeZone, currentPeriod, formatAmount, maskAmount, signForNet } from '@/lib/format';
 import { memberDisplayName } from '@/lib/member-name';
+import { isNetworkAvailable } from '@/lib/query-network';
 import {
   balanceRate,
   calendarDayDifference,
@@ -304,7 +305,7 @@ export default function ReportScreen() {
 
   // 卡片显隐 / 排序 + 金额隐私（记账设置，个人级偏好）；行不存在回落默认。
   const prefs = prefsQ.data ?? DEFAULT_ACCOUNTING_PREFS;
-  const privacy = prefs.amount_privacy;
+  const privacy = prefsQ.data ? prefs.amount_privacy : true;
 
   const [dimension, setDimension] = useState<Dimension>('month');
   const [scope, setScope] = useState<ReportScope>('expense');
@@ -409,7 +410,7 @@ export default function ReportScreen() {
   );
   const hasExpenseFilters = filters.memberIds.length > 0 || expenseCategoryIds.length > 0;
   const hasIncomeFilters = filters.memberIds.length > 0 || incomeCategoryIds.length > 0;
-  const prerequisitesReady = !familyQ.isLoading && !familyQ.isError && !catsQ.isLoading && !catsQ.isError;
+  const prerequisitesReady = familyQ.data !== undefined && catsQ.data !== undefined;
   const reportQ = useReportAnalytics(familyInput, prerequisitesReady && !futurePeriod);
   const expenseQ = useReportAnalytics(
     expenseInput,
@@ -504,12 +505,13 @@ export default function ReportScreen() {
   const topicUnavailable = scope !== 'balance' && topicFiltersApplied && !reportData;
   const filteredCount = scope === 'balance' ? null : (reportData?.summary.transactionCount ?? null);
   const activeFilters = activeFilterCount(filters);
+  const identityUnavailable = !isNetworkAvailable() || familyQ.isError || profileQ.isError;
   const reportLoadFailed =
-    (!familyData && (reportQ.isError || reportQ.fetchStatus === 'paused')) ||
-    familyQ.isError ||
-    catsQ.isError ||
-    layoutQ.isError;
-  const filterUnavailable = catsQ.isLoading || layoutQ.isLoading || catsQ.isError || layoutQ.isError;
+    (!familyData && (reportQ.isError || (reportQ.fetchStatus === 'paused' && identityUnavailable))) ||
+    (!familyQ.data && (familyQ.isError || familyQ.fetchStatus === 'paused')) ||
+    (!catsQ.data && (catsQ.isError || (catsQ.fetchStatus === 'paused' && identityUnavailable))) ||
+    (!layoutQ.data && (layoutQ.isError || (layoutQ.fetchStatus === 'paused' && identityUnavailable)));
+  const filterUnavailable = !catsQ.data || !layoutQ.data;
   const hasRefreshError =
     (!futurePeriod && reportQ.isError && !!familyData) ||
     (scope === 'expense' && hasExpenseFilters && expenseQ.isError && !!expenseData) ||
@@ -775,7 +777,12 @@ export default function ReportScreen() {
     locale,
   ]);
 
-  const loading = reportQ.isLoading || familyQ.isLoading || catsQ.isLoading || layoutQ.isLoading;
+  const loading =
+    reportQ.isLoading ||
+    familyQ.isLoading ||
+    catsQ.isLoading ||
+    layoutQ.isLoading ||
+    (isNetworkAvailable() && !familyData && reportQ.isPending && !reportLoadFailed);
   const memberCountMax = Math.max(1, ...members.map((m) => m.count));
   const currentMonthRange = useMemo(() => periodRange('month', todayInFamilyTimeZone), [todayInFamilyTimeZone]);
   const selectedMonthIsCurrent = dimension === 'month' && range.start.getTime() === currentMonthRange.start.getTime();
@@ -1259,9 +1266,11 @@ export default function ReportScreen() {
         {reportLoadFailed ? (
           <ReportLoadErrorState
             palette={palette}
+            message={!isNetworkAvailable() ? t('common.noCachedData') : undefined}
             onRetry={() => {
               void reportQ.refetch();
               void familyQ.refetch();
+              void profileQ.refetch();
               void catsQ.refetch();
               void layoutQ.refetch();
             }}
@@ -1607,17 +1616,25 @@ function ReportDataReadinessCard({ count, palette }: { count: number; palette: R
   );
 }
 
-function ReportLoadErrorState({ palette, onRetry }: { palette: ReturnType<typeof usePalette>; onRetry: () => void }) {
+function ReportLoadErrorState({
+  palette,
+  onRetry,
+  message,
+}: {
+  palette: ReturnType<typeof usePalette>;
+  onRetry: () => void;
+  message?: string;
+}) {
   return (
     <View
       style={styles.reportErrorState}
       accessible
       accessibilityRole="alert"
-      accessibilityLabel={t('common.loadFailed')}
+      accessibilityLabel={message ?? t('common.loadFailed')}
     >
       <SymbolView name="exclamationmark.triangle" tintColor={palette.textTertiary} size={36} />
       <ThemedText style={[styles.reportErrorTitle, { color: palette.textPrimary }]}>
-        {t('common.loadFailed')}
+        {message ?? t('common.loadFailed')}
       </ThemedText>
       <Pressable
         style={[styles.reportRetryButton, { borderColor: palette.separator }]}

@@ -24,10 +24,12 @@ import {
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { toast } from '@/components/toast';
+import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
 import { Radius, Space, usePalette, useSheetPalette } from '@/constants/design';
 import { alertOk, t, useLocalePreference } from '@/i18n';
 import { INTL_LOCALE } from '@/i18n/locale';
 import { formatAmount } from '@/lib/format';
+import { isNetworkAvailable } from '@/lib/query-network';
 
 const MAX_ACTIVE = 5;
 
@@ -73,6 +75,8 @@ function Body({ initialGoalId }: { initialGoalId?: string | null }) {
   const palette = useSheetPalette();
   useLocalePreference();
   const goalsQ = useSavingsGoals();
+  const familyQ = useMyFamily();
+  const profileQ = useMyProfile();
   const [view, setView] = useState<ViewState>(
     initialGoalId ? { mode: 'detail', goalId: initialGoalId } : { mode: 'list' },
   );
@@ -82,7 +86,33 @@ function Body({ initialGoalId }: { initialGoalId?: string | null }) {
 
   let content: React.ReactNode;
   if (view.mode === 'list') {
-    content = <GoalList palette={palette} goals={goals} loading={goalsQ.isLoading} setView={setView} />;
+    content =
+      !goalsQ.data &&
+      (goalsQ.isError ||
+        familyQ.isError ||
+        profileQ.isError ||
+        (goalsQ.fetchStatus === 'paused' && !isNetworkAvailable())) ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            void familyQ.refetch();
+            void profileQ.refetch();
+            void goalsQ.refetch();
+          }}
+          style={styles.root}
+        >
+          <Text style={{ color: palette.textSecondary }}>
+            {t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')} · {t('common.retry')}
+          </Text>
+        </Pressable>
+      ) : (
+        <GoalList
+          palette={palette}
+          goals={goals}
+          loading={goalsQ.isLoading || (!goalsQ.data && goalsQ.isPending)}
+          setView={setView}
+        />
+      );
   } else if (view.mode === 'form') {
     content = <GoalForm goal={view.goal} onBack={() => setView({ mode: 'list' })} />;
   } else if (view.mode === 'txn') {
@@ -100,7 +130,17 @@ function Body({ initialGoalId }: { initialGoalId?: string | null }) {
     content = g ? <GoalDetail goal={g} onBack={() => setView({ mode: 'list' })} setView={setView} /> : null;
   }
 
-  return <View style={[styles.root, { backgroundColor: palette.base }]}>{content}</View>;
+  return (
+    <View style={[styles.root, { backgroundColor: palette.base }]}>
+      {goalsQ.data ? (
+        <CacheInlineNotice
+          failed={goalsQ.isError || familyQ.isError || profileQ.isError}
+          updatedAt={goalsQ.dataUpdatedAt}
+        />
+      ) : null}
+      {content}
+    </View>
+  );
 }
 
 // ── 目标列表 ─────────────────────────────────────────────────────────────────

@@ -138,10 +138,12 @@ function TransactionRow({
   row,
   onPress,
   contentVerticalInset,
+  hidden,
 }: {
   row: RowData;
   onPress?: (id: string) => void;
   contentVerticalInset: number;
+  hidden: boolean;
 }) {
   const palette = usePalette();
   return (
@@ -168,14 +170,18 @@ function TransactionRow({
               {row.title}
             </Text>
             <Spacer />
-            <AmountText
-              cents={row.amountCents}
-              sign={row.sign}
-              color={row.amountColor}
-              integerSize={17}
-              decimalSize={13}
-              weight="regular"
-            />
+            {hidden ? (
+              <Text modifiers={[font({ size: 17 }), foregroundColor(row.amountColor)]}>****</Text>
+            ) : (
+              <AmountText
+                cents={row.amountCents}
+                sign={row.sign}
+                color={row.amountColor}
+                integerSize={17}
+                decimalSize={13}
+                weight="regular"
+              />
+            )}
           </HStack>
           {/* 第二行：记录人/修改者头像 + 时间（左）｜备注（最右，溢出省略隐藏） */}
           <HStack spacing={Space[2]} alignment="center" modifiers={[frame({ maxWidth: 9999 })]}>
@@ -224,6 +230,7 @@ export function DayGroup({
   onRowPress,
   onEdit,
   onDelete,
+  hidden = false,
   headerHorizontalInset = Space[4],
   rowInsets = { horizontal: Space[4], vertical: Space[3] },
 }: {
@@ -233,6 +240,7 @@ export function DayGroup({
   onRowPress?: (id: string) => void;
   onEdit?: (id: string) => void;
   onDelete?: (id: string) => void;
+  hidden?: boolean;
   /** 日期标题与当日合计相对页面边缘的距离。 */
   headerHorizontalInset?: number;
   /** 流水内容相对分组卡片边缘的内边距。 */
@@ -246,7 +254,7 @@ export function DayGroup({
       <Text modifiers={[font({ size: 13 }), foregroundColor(palette.textSecondary)]}>{label}</Text>
       <Spacer />
       <Text modifiers={[font({ size: 13, weight: 'bold' }), foregroundColor(netColor(totalCents, palette))]}>
-        {formatAmount(totalCents, signForNet(totalCents))}
+        {hidden ? '****' : formatAmount(totalCents, signForNet(totalCents))}
       </Text>
     </HStack>
   );
@@ -267,7 +275,12 @@ export function DayGroup({
             fixedSize({ horizontal: false, vertical: true }),
           ]}
         >
-          <TransactionRow row={row} onPress={onRowPress} contentVerticalInset={rowInsets.vertical ?? 0} />
+          <TransactionRow
+            row={row}
+            onPress={onRowPress}
+            contentVerticalInset={rowInsets.vertical ?? 0}
+            hidden={hidden}
+          />
           {/* allowsFullSwipe=false：滑到底也不自动触发首个动作（否则误触「编辑」）。
               删除按钮不用 role="destructive"（那会让 SwiftUI 在点击时直接把行收起，取消后不复原）；
               改用红色 tint，真正的二次确认与危险色交给 RN Alert。 */}

@@ -69,6 +69,7 @@ import {
 } from '@/lib/category-hierarchy';
 import { clockTime, dayKey, humanDay, signForType } from '@/lib/format';
 import { memberDisplayName } from '@/lib/member-name';
+import { isNetworkAvailable } from '@/lib/query-network';
 import {
   hasAnyQuery,
   resolveAmountRange,
@@ -235,7 +236,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
 
   const searchInput = useMemo(() => {
     void locale;
-    if (!valid || !hasCurrentQuery || !catsQ.isSuccess || !layoutQ.isSuccess) return null;
+    if (!valid || !hasCurrentQuery || !catsQ.data || !layoutQ.data) return null;
     const keywordLower = deferredFilters.keyword.trim().toLowerCase();
     const keywordCategoryIds = matchingCategoryIds(
       keywordLower,
@@ -271,17 +272,7 @@ function SearchBody({ onClose }: { onClose: () => void }) {
       amountMin: minCents,
       amountMax: maxCents,
     };
-  }, [
-    valid,
-    hasCurrentQuery,
-    deferredFilters,
-    catsQ.isSuccess,
-    layoutQ.isSuccess,
-    membersQ.data,
-    myId,
-    locale,
-    hierarchy,
-  ]);
+  }, [valid, hasCurrentQuery, deferredFilters, catsQ.data, layoutQ.data, membersQ.data, myId, locale, hierarchy]);
   const searchQ = useSearchTransactions(searchInput);
 
   const { groups } = useMemo(() => {
@@ -561,13 +552,27 @@ function SearchBody({ onClose }: { onClose: () => void }) {
           <InvalidFiltersEmptyState />
         ) : presentation === 'history' ? (
           <HistoryCloud history={history} onPick={setKeyword} />
-        ) : presentation === 'skeleton' || searchQ.isLoading || catsQ.isLoading || layoutQ.isLoading ? (
+        ) : presentation === 'skeleton' ||
+          searchQ.isLoading ||
+          catsQ.isLoading ||
+          layoutQ.isLoading ||
+          (isNetworkAvailable() &&
+            !familyQ.isError &&
+            !profileQ.isError &&
+            (!catsQ.data || !layoutQ.data || !searchQ.data) &&
+            [catsQ, layoutQ, searchQ].some((query) => query.fetchStatus === 'paused')) ? (
           <SearchResultsSkeleton />
-        ) : catsQ.isError || layoutQ.isError || searchQ.isError ? (
+        ) : (!catsQ.data && (catsQ.isError || catsQ.fetchStatus === 'paused' || familyQ.isError)) ||
+          (!layoutQ.data && (layoutQ.isError || layoutQ.fetchStatus === 'paused' || familyQ.isError)) ||
+          (!searchQ.data && (searchQ.isError || searchQ.fetchStatus === 'paused' || familyQ.isError)) ? (
           <View style={styles.center}>
-            <Text style={{ color: palette.textSecondary }}>{t('search.loadFailed')}</Text>
+            <Text style={{ color: palette.textSecondary }}>
+              {t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')}
+            </Text>
             <Pressable
               onPress={() => {
+                void familyQ.refetch();
+                void profileQ.refetch();
                 void catsQ.refetch();
                 void layoutQ.refetch();
                 void searchQ.refetch();

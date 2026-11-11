@@ -26,6 +26,7 @@ import {
   shapes,
 } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { onlineManager } from '@tanstack/react-query';
 import { Link, useRouter, type Href } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -71,6 +72,7 @@ import { useManualCollapsibleHeader } from '@/features/shared/use-collapsible-he
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { useSession } from '@/lib/auth';
 import { daysToMonthEnd } from '@/lib/budget';
+import { isNetworkAvailable } from '@/lib/query-network';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import {
   clockTime,
@@ -213,14 +215,16 @@ export default function HomeScreen() {
   const createFamilyM = useCreateFamily();
 
   // 记账设置偏好（accounting_preferences，个人级）：金额隐私 + 首页月度总结横幅开关等。
-  const accountingPrefs = useAccountingPrefs().data ?? DEFAULT_ACCOUNTING_PREFS;
+  const accountingPrefsQ = useAccountingPrefs();
+  const accountingPrefs = accountingPrefsQ.data ?? DEFAULT_ACCOUNTING_PREFS;
   const saveAccountingPrefs = useSaveAccountingPrefs();
 
   // 脉搏卡只消费完整账期的服务端概览；不再依赖首页流水首屏页。
   // 无家庭时 RPC 成功但无行，data 为 null；这是空态，不能继续显示「加载中」。
+  const identityUnavailable = !isNetworkAvailable() || familyQ.isError || profileQ.isError;
   const overview = resolveHomeOverview({
     isPending: dashboardQ.isPending,
-    isError: dashboardQ.isError,
+    isError: dashboardQ.isError || (dashboardQ.fetchStatus === 'paused' && identityUnavailable),
     data: dashboardQ.data,
   });
 
@@ -257,10 +261,11 @@ export default function HomeScreen() {
 
   // 金额显隐（眼睛）：统一到「记账设置 → 金额隐私模式」的服务端偏好（accountingPrefs 见上），
   // 跨设备一致；点眼睛即 toggle 该偏好（乐观更新）。
-  const amountsHidden = accountingPrefs.amount_privacy;
+  const amountsHidden = accountingPrefsQ.data ? accountingPrefs.amount_privacy : true;
   const toggleAmounts = useCallback(() => {
+    if (!accountingPrefsQ.data) return;
     saveAccountingPrefs.mutate({ ...accountingPrefs, amount_privacy: !accountingPrefs.amount_privacy });
-  }, [saveAccountingPrefs, accountingPrefs]);
+  }, [saveAccountingPrefs, accountingPrefs, accountingPrefsQ.data]);
 
   // 月末计数提示条的「已关闭」记忆：关掉后本月内不再出现。
   const [countBannerDismissed, setCountBannerDismissed] = useState(false);
@@ -380,6 +385,10 @@ export default function HomeScreen() {
     }
     let fid = familyQ.data?.id ?? profileQ.data?.current_family_id ?? null;
     if (!fid) {
+      if (!onlineManager.isOnline() || !familyQ.isSuccess || familyQ.isFetching || profileQ.isError) {
+        Alert.alert(t('home.cannotRecordTitle'), t('record.networkRetry'), alertOk());
+        return;
+      }
       try {
         const fam = (await createFamilyM.mutateAsync({ name: t('home.myHome') })) as { id: string };
         fid = fam.id;
@@ -417,7 +426,12 @@ export default function HomeScreen() {
     new Date().getDate() >= 25 &&
     (dashboardQ.data?.transaction_count ?? 0) > 0 &&
     !countBannerDismissed;
-  const showEmptyLedger = !!session && !transactionsQ.isLoading && groups.length === 0;
+  const showEmptyLedger = !!session && transactionsQ.isSuccess && groups.length === 0;
+  const feedUnavailable =
+    !transactionsQ.data &&
+    (transactionsQ.isError ||
+      (transactionsQ.fetchStatus === 'paused' && identityUnavailable) ||
+      (!familyId && (familyQ.isError || profileQ.isError || familyQ.fetchStatus === 'paused')));
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
@@ -467,10 +481,26 @@ export default function HomeScreen() {
                     pageHorizontalInset={HOME_CONTENT_INSETS.dayHeaderHorizontal}
                   />
                 ) : (
-                  <PulseCardSkeleton
-                    contentInsets={HOME_CONTENT_INSETS.hero}
-                    message={overview.status === 'error' ? t('common.loadFailed') : t('common.loading')}
-                  />
+                  <VStack>
+                    <PulseCardSkeleton
+                      contentInsets={HOME_CONTENT_INSETS.hero}
+                      message={
+                        overview.status === 'error'
+                          ? t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')
+                          : t('common.loading')
+                      }
+                    />
+                    {overview.status === 'error' ? (
+                      <Button
+                        label={t('common.retry')}
+                        onPress={() => {
+                          void familyQ.refetch();
+                          void profileQ.refetch();
+                          void dashboardQ.refetch();
+                        }}
+                      />
+                    ) : null}
+                  </VStack>
                 )}
               </Section>
               {showLastMonthReminder ? (
@@ -496,7 +526,26 @@ export default function HomeScreen() {
                   />
                 </Section>
               ) : null}
-              {transactionsQ.isLoading ? (
+              {feedUnavailable ? (
+                <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
+                  <VStack
+                    modifiers={[
+                      listRowInsets({ top: Space[2], bottom: Space[2], leading: Space[4], trailing: Space[4] }),
+                    ]}
+                  >
+                    <EndOfListHint text={t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')} />
+                    <Button
+                      label={t('common.retry')}
+                      onPress={() => {
+                        void familyQ.refetch();
+                        void profileQ.refetch();
+                        void dashboardQ.refetch();
+                        if (familyId) void transactionsQ.refetch();
+                      }}
+                    />
+                  </VStack>
+                </Section>
+              ) : (!transactionsQ.data && transactionsQ.isPending) || (!familyId && familyQ.isLoading) ? (
                 <Section modifiers={[listRowBackground(palette.base), listRowSeparator('hidden')]}>
                   <VStack
                     modifiers={[
@@ -512,6 +561,7 @@ export default function HomeScreen() {
                     key={g.key}
                     label={g.label}
                     totalCents={g.totalCents}
+                    hidden={amountsHidden}
                     rows={g.rows}
                     onRowPress={openDetail}
                     onEdit={openEdit}
@@ -530,15 +580,25 @@ export default function HomeScreen() {
                       ...(transactionsQ.hasNextPage
                         ? [
                             onAppear(() => {
-                              if (!transactionsQ.isFetchingNextPage) transactionsQ.fetchNextPage();
+                              if (onlineManager.isOnline() && !transactionsQ.isFetchingNextPage)
+                                transactionsQ.fetchNextPage();
                             }),
                           ]
                         : []),
                     ]}
                   >
-                    <EndOfListHint
-                      text={transactionsQ.isFetchingNextPage ? t('common.loadingMore') : t('common.loadMore')}
-                    />
+                    {!isNetworkAvailable() ? (
+                      <EndOfListHint text={t('common.connectForMore')} />
+                    ) : transactionsQ.isFetchingNextPage ? (
+                      <EndOfListHint text={t('common.loadingMore')} />
+                    ) : (
+                      <Button
+                        label={t('common.loadMore')}
+                        onPress={() => {
+                          if (onlineManager.isOnline()) void transactionsQ.fetchNextPage();
+                        }}
+                      />
+                    )}
                   </VStack>
                 </Section>
               ) : null}

@@ -4,16 +4,25 @@
  */
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAllNotifications, useDeleteNotification, useDeleteNotifications, type Notification } from '@/api';
+import {
+  useAllNotifications,
+  useDeleteNotification,
+  useDeleteNotifications,
+  useMyFamily,
+  useMyProfile,
+  type Notification,
+} from '@/api';
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, Typography, useSheetPalette } from '@/constants/design';
 import { notificationHrefForItem } from '@/features/notifications/notification-routes';
+import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
 import { i18n, t, useLocalePreference } from '@/i18n';
 import { fromI18nLanguage, INTL_LOCALE } from '@/i18n/locale';
+import { isNetworkAvailable } from '@/lib/query-network';
 
 type Payload = Record<string, unknown> | null;
 type NotificationTone = 'accent' | 'danger' | 'info' | 'success' | 'warning';
@@ -146,6 +155,8 @@ function Body({ onClose }: { onClose: () => void }) {
   const palette = useSheetPalette();
   useLocalePreference();
   const listQ = useAllNotifications();
+  const familyQ = useMyFamily();
+  const profileQ = useMyProfile();
   const deleteOne = useDeleteNotification();
   const deleteAll = useDeleteNotifications();
   const router = useRouter();
@@ -157,8 +168,33 @@ function Body({ onClose }: { onClose: () => void }) {
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（自动保存型：纯标题，DESIGN §9.9）；关闭靠下滑手势 */}
         <SheetHeader title={t('notifications.center')} />
+        {listQ.data ? (
+          <CacheInlineNotice
+            failed={listQ.isError || familyQ.isError || profileQ.isError}
+            updatedAt={listQ.dataUpdatedAt}
+          />
+        ) : null}
 
-        {items.length === 0 ? (
+        {!listQ.data ? (
+          <View style={styles.center}>
+            {listQ.isError || familyQ.isError || profileQ.isError || !isNetworkAvailable() ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  void familyQ.refetch();
+                  void profileQ.refetch();
+                  void listQ.refetch();
+                }}
+              >
+                <Text style={{ color: palette.textSecondary }}>
+                  {t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')} · {t('common.retry')}
+                </Text>
+              </Pressable>
+            ) : (
+              <ActivityIndicator />
+            )}
+          </View>
+        ) : items.length === 0 ? (
           <View style={styles.center}>
             <SymbolView name="bell.slash" tintColor={palette.textTertiary} size={48} />
             <Text selectable style={[styles.emptyTitle, { color: palette.textPrimary }]}>

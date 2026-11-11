@@ -115,12 +115,13 @@ export function useCreateTransaction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: createTransaction,
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: () => {
+      void Promise.all([
         qc.invalidateQueries({ queryKey: queryKeys.transactions }),
         qc.invalidateQueries({ queryKey: queryKeys.analytics }),
         qc.invalidateQueries({ queryKey: ['home_dashboard'] }),
-      ]),
+      ]);
+    },
   });
 }
 
@@ -136,12 +137,13 @@ export function useUpdateTransaction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: updateTransaction,
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: () => {
+      void Promise.all([
         qc.invalidateQueries({ queryKey: queryKeys.transactions }),
         qc.invalidateQueries({ queryKey: queryKeys.analytics }),
         qc.invalidateQueries({ queryKey: ['home_dashboard'] }),
-      ]),
+      ]);
+    },
   });
 }
 
@@ -155,11 +157,12 @@ export function useSoftDeleteTransaction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: softDeleteTransaction,
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: () => {
+      void Promise.all([
         qc.invalidateQueries({ queryKey: queryKeys.transactions }),
         qc.invalidateQueries({ queryKey: queryKeys.analytics }),
         qc.invalidateQueries({ queryKey: ['home_dashboard'] }),
-      ]),
+      ]);
+    },
   });
 }

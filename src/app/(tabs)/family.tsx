@@ -53,6 +53,7 @@ import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { budgetLevel, daysToMonthEnd } from '@/lib/budget';
 import { currentPeriodInTimeZone, formatAmount } from '@/lib/format';
 import { memberDisplayName } from '@/lib/member-name';
+import { isNetworkAvailable } from '@/lib/query-network';
 
 /** 瓦片角标用的紧凑金额：分 → 「¥1,280」（取整到元，带千分位）。 */
 function formatCny(cents: number): string {
@@ -105,6 +106,19 @@ export default function FamilyScreen() {
 
   // 家庭活跃度由服务端对完整历史流水聚合，日期边界以家庭时区为准。
   const activity = activityQ.data;
+  const missingMessage = (failed: boolean) =>
+    t(
+      !isNetworkAvailable()
+        ? 'common.noCachedData'
+        : failed || familyQ.isError || profileQ.isError
+          ? 'common.loadFailed'
+          : 'common.loading',
+    );
+  const activityMessage =
+    activity === undefined || (activity?.latest_transaction_id && latestTransactionQ.data === undefined)
+      ? missingMessage(activityQ.isError || latestTransactionQ.isError)
+      : null;
+  const membersMessage = membershipsQ.data === undefined ? missingMessage(membershipsQ.isError) : null;
   const stats = {
     monthCount: activity?.month_count ?? 0,
     streak: activity?.family_streak ?? 0,
@@ -118,10 +132,15 @@ export default function FamilyScreen() {
   // ── 预算执行（口径同预算页：仅日常支出，排除储蓄流水）──
   const budgetTotal = budgetQ.data?.budget?.total_amount ?? null;
   const budgetUsed = budgetProgressQ.data?.usedAmount ?? 0;
+  const budgetMessage =
+    budgetQ.data === undefined || (budgetTotal !== null && budgetProgressQ.data === undefined)
+      ? missingMessage(budgetQ.isError || budgetProgressQ.isError)
+      : null;
   const budgetRemaining = budgetTotal == null ? 0 : budgetTotal - budgetUsed;
   const budgetPct = budgetTotal && budgetTotal > 0 ? Math.round((budgetUsed / budgetTotal) * 100) : 0;
-  const budgetSub =
-    budgetTotal == null
+  const budgetSub = budgetMessage
+    ? '—'
+    : budgetTotal == null
       ? t('settings.notSet')
       : budgetRemaining >= 0
         ? t('common.leftover', { amount: formatCny(budgetRemaining) })
@@ -130,7 +149,12 @@ export default function FamilyScreen() {
   // ── 储蓄目标：数量角标 + 「家庭当下」精选目标（截止日最近的进行中目标）──
   const goals = useMemo(() => savingsQ.data ?? [], [savingsQ.data]);
   const goalCount = goals.length;
-  const savingsSub = goalCount > 0 ? t('common.goalCount', { count: goalCount }) : t('family.poolMoney');
+  const savingsMessage = savingsQ.data === undefined ? missingMessage(savingsQ.isError) : null;
+  const savingsSub = savingsMessage
+    ? '—'
+    : goalCount > 0
+      ? t('common.goalCount', { count: goalCount })
+      : t('family.poolMoney');
   const featuredGoal = useMemo<SavingsGoal | null>(() => {
     // 只在未达成目标里选：优先有截止日且最近的；其余按原顺序（最新创建在前）兜底。已达成的不展示。
     const active = goals.filter((g) => g.saved_amount < g.target_amount);
@@ -237,6 +261,25 @@ export default function FamilyScreen() {
           <View style={styles.center}>
             <ActivityIndicator />
           </View>
+        ) : !family &&
+          (familyQ.isError ||
+            profileQ.isError ||
+            familyQ.fetchStatus === 'paused' ||
+            profileQ.fetchStatus === 'paused') ? (
+          <View style={styles.center}>
+            <ThemedText style={{ color: palette.textSecondary }}>
+              {t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')}
+            </ThemedText>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                void familyQ.refetch();
+                void profileQ.refetch();
+              }}
+            >
+              <ThemedText style={{ color: palette.accent }}>{t('common.retry')}</ThemedText>
+            </Pressable>
+          </View>
         ) : !family ? (
           // ── 无家庭：创建 / 加入 ──
           <View style={styles.center}>
@@ -322,15 +365,15 @@ export default function FamilyScreen() {
               <BlurView intensity={24} tint="dark" style={styles.heroStats}>
                 <HeroStat
                   icon="book.closed.fill"
-                  value={`${stats.monthCount}`}
-                  unit={t('common.countUnit')}
+                  value={activity === undefined ? '—' : `${stats.monthCount}`}
+                  unit={activity === undefined ? undefined : t('common.countUnit')}
                   label={t('family.monthRecorded')}
                 />
                 <View style={styles.heroStatDivider} />
                 <HeroStat
                   icon="flame.fill"
-                  value={`${stats.streak}`}
-                  unit={t('common.dayUnit')}
+                  value={activity === undefined ? '—' : `${stats.streak}`}
+                  unit={activity === undefined ? undefined : t('common.dayUnit')}
                   label={t('family.streak')}
                 />
                 <View style={styles.heroStatDivider} />
@@ -345,12 +388,14 @@ export default function FamilyScreen() {
                 <FamilyNowCard
                   palette={palette}
                   budgetSet={budgetTotal != null}
+                  budgetMessage={budgetMessage}
                   budgetUsed={budgetUsed}
                   budgetTotal={budgetTotal ?? 0}
                   budgetPct={budgetPct}
                   budgetRemaining={budgetRemaining}
                   daysLeft={daysToMonthEnd()}
                   goal={featuredGoal}
+                  savingsMessage={savingsMessage}
                   activeGoalCount={activeGoalCount}
                   isOwner={isOwner}
                   onBudget={() => setBudgetOpen(true)}
@@ -360,6 +405,9 @@ export default function FamilyScreen() {
 
                 <FamilyCollaborationCard
                   members={members}
+                  memberCount={family.member_count}
+                  membersMessage={membersMessage}
+                  activityMessage={activityMessage}
                   todayCount={stats.todayCount}
                   monthParticipantCount={stats.monthParticipantCount}
                   myMonthCount={stats.myMonthCount}
@@ -367,11 +415,18 @@ export default function FamilyScreen() {
                   latestTransaction={stats.latestMonthTransaction}
                   latestCategoryName={latestMonthCategory}
                   latestRecorderName={latestMonthRecorder}
-                  canInvite={isOwner && members.length < MAX_FAMILY_MEMBERS}
+                  canInvite={isOwner && family.member_count < MAX_FAMILY_MEMBERS}
                   onManage={() => setMemberManageOpen(true)}
                   onRecord={() => setRecordOpen(true)}
                   onInvite={onInvite}
                   onViewLatest={() => setDetailTransaction(stats.latestMonthTransaction)}
+                  onRetry={() => {
+                    void familyQ.refetch();
+                    void profileQ.refetch();
+                    void membershipsQ.refetch();
+                    void activityQ.refetch();
+                    if (activity?.latest_transaction_id) void latestTransactionQ.refetch();
+                  }}
                 />
               </>
             )}
@@ -562,6 +617,9 @@ function HeroStat({
 // ── 多人家庭：首页协作概览（名册与权限操作下沉至成员管理 Sheet）──
 function FamilyCollaborationCard({
   members,
+  memberCount,
+  membersMessage,
+  activityMessage,
   todayCount,
   monthParticipantCount,
   myMonthCount,
@@ -574,8 +632,12 @@ function FamilyCollaborationCard({
   onRecord,
   onInvite,
   onViewLatest,
+  onRetry,
 }: {
   members: FamilyMembership[];
+  memberCount: number;
+  membersMessage: string | null;
+  activityMessage: string | null;
   todayCount: number;
   monthParticipantCount: number;
   myMonthCount: number;
@@ -588,6 +650,7 @@ function FamilyCollaborationCard({
   onRecord: () => void;
   onInvite: () => void;
   onViewLatest: () => void;
+  onRetry: () => void;
 }) {
   const palette = usePalette();
   useLocalePreference();
@@ -616,95 +679,113 @@ function FamilyCollaborationCard({
               {t('family.collaboration')}
             </ThemedText>
             <ThemedText style={[styles.collaborationCount, { color: palette.textTertiary }]}>
-              {members.length}/{MAX_FAMILY_MEMBERS}
+              {memberCount}/{MAX_FAMILY_MEMBERS}
             </ThemedText>
           </View>
           <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={16} />
         </Pressable>
 
-        <View
-          style={styles.collaborationAvatars}
-          accessibilityLabel={t('family.membersA11y', { count: members.length })}
-          accessible
-        >
-          {members.map((member) => (
-            <UserAvatar key={member.id} avatarUrl={member.avatarUrl} nickname={member.nickname} size={44} />
-          ))}
-        </View>
-
-        {!hasTodayActivity ? (
-          <View style={styles.collaborationEmpty}>
-            <View style={styles.collaborationEmptyHeadline}>
-              <Image
-                source={require('@/assets/images/family-records-empty.svg')}
-                style={styles.collaborationEmptyIcon}
-                contentFit="contain"
-                accessible={false}
-              />
-              <ThemedText style={[styles.collaborationEmptyTitle, { color: palette.textPrimary }]}>
-                {t('family.emptyToday')}
-              </ThemedText>
-            </View>
+        {membersMessage ? (
+          <Pressable accessibilityRole="button" onPress={onRetry}>
+            <ThemedText style={[styles.collaborationEmptyDetail, { color: palette.textSecondary }]}>
+              {membersMessage} · {t('common.retry')}
+            </ThemedText>
+          </Pressable>
+        ) : (
+          <View
+            style={styles.collaborationAvatars}
+            accessibilityLabel={t('family.membersA11y', { count: members.length })}
+            accessible
+          >
+            {members.map((member) => (
+              <UserAvatar key={member.id} avatarUrl={member.avatarUrl} nickname={member.nickname} size={44} />
+            ))}
           </View>
-        ) : null}
+        )}
 
-        {hasMonthActivity ? (
+        {activityMessage ? (
+          <Pressable accessibilityRole="button" onPress={onRetry}>
+            <ThemedText style={[styles.collaborationEmptyDetail, { color: palette.textSecondary }]}>
+              {activityMessage} · {t('common.retry')}
+            </ThemedText>
+          </Pressable>
+        ) : (
           <>
-            <View style={[styles.collaborationStats, { backgroundColor: palette.elevated }]}>
-              <CollaborationStat
-                label={t('family.monthJoin')}
-                value={`${monthParticipantCount} ${t('common.peopleUnit')}`}
-                color={palette.success}
-              />
-              <View style={[styles.collaborationStatDivider, { backgroundColor: palette.separator }]} />
-              <CollaborationStat
-                label={t('family.streakShort')}
-                value={`${myStreak} ${t('common.dayUnit')}`}
-                color={palette.warning}
-              />
-              <View style={[styles.collaborationStatDivider, { backgroundColor: palette.separator }]} />
-              <CollaborationStat
-                label={t('family.monthCount')}
-                value={`${myMonthCount} ${t('common.countUnit')}`}
-                color={palette.accent}
-              />
-            </View>
-            <View style={styles.collaborationRecentRow}>
-              <View style={[styles.collaborationRecentDot, { backgroundColor: palette.accent }]} />
-              <View style={styles.collaborationRecentText}>
-                <ThemedText
-                  style={[styles.collaborationRecentTitle, { color: palette.textSecondary }]}
-                  numberOfLines={1}
-                >
-                  {latestText}
-                </ThemedText>
-                <ThemedText
-                  style={[styles.collaborationRecentAmount, { color: palette.textPrimary }]}
-                  numberOfLines={1}
-                >
-                  {formatAmount(latestTransaction.amount)}
-                </ThemedText>
+            {!hasTodayActivity ? (
+              <View style={styles.collaborationEmpty}>
+                <View style={styles.collaborationEmptyHeadline}>
+                  <Image
+                    source={require('@/assets/images/family-records-empty.svg')}
+                    style={styles.collaborationEmptyIcon}
+                    contentFit="contain"
+                    accessible={false}
+                  />
+                  <ThemedText style={[styles.collaborationEmptyTitle, { color: palette.textPrimary }]}>
+                    {t('family.emptyToday')}
+                  </ThemedText>
+                </View>
               </View>
-              <Pressable
-                onPress={onViewLatest}
-                style={styles.collaborationViewAction}
-                accessibilityRole="button"
-                accessibilityLabel={t('family.viewLatest')}
-                accessibilityHint={t('family.viewLatestHint')}
-              >
-                <ThemedText style={[styles.collaborationViewActionText, { color: palette.accent }]}>
-                  {t('family.viewActivity')}
-                </ThemedText>
-              </Pressable>
-            </View>
-          </>
-        ) : null}
+            ) : null}
 
-        {!hasMonthActivity ? (
-          <ThemedText style={[styles.collaborationEmptyDetail, { color: palette.textSecondary }]}>
-            {t('family.emptyMonth')}
-          </ThemedText>
-        ) : null}
+            {hasMonthActivity ? (
+              <>
+                <View style={[styles.collaborationStats, { backgroundColor: palette.elevated }]}>
+                  <CollaborationStat
+                    label={t('family.monthJoin')}
+                    value={`${monthParticipantCount} ${t('common.peopleUnit')}`}
+                    color={palette.success}
+                  />
+                  <View style={[styles.collaborationStatDivider, { backgroundColor: palette.separator }]} />
+                  <CollaborationStat
+                    label={t('family.streakShort')}
+                    value={`${myStreak} ${t('common.dayUnit')}`}
+                    color={palette.warning}
+                  />
+                  <View style={[styles.collaborationStatDivider, { backgroundColor: palette.separator }]} />
+                  <CollaborationStat
+                    label={t('family.monthCount')}
+                    value={`${myMonthCount} ${t('common.countUnit')}`}
+                    color={palette.accent}
+                  />
+                </View>
+                <View style={styles.collaborationRecentRow}>
+                  <View style={[styles.collaborationRecentDot, { backgroundColor: palette.accent }]} />
+                  <View style={styles.collaborationRecentText}>
+                    <ThemedText
+                      style={[styles.collaborationRecentTitle, { color: palette.textSecondary }]}
+                      numberOfLines={1}
+                    >
+                      {latestText}
+                    </ThemedText>
+                    <ThemedText
+                      style={[styles.collaborationRecentAmount, { color: palette.textPrimary }]}
+                      numberOfLines={1}
+                    >
+                      {formatAmount(latestTransaction.amount)}
+                    </ThemedText>
+                  </View>
+                  <Pressable
+                    onPress={onViewLatest}
+                    style={styles.collaborationViewAction}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('family.viewLatest')}
+                    accessibilityHint={t('family.viewLatestHint')}
+                  >
+                    <ThemedText style={[styles.collaborationViewActionText, { color: palette.accent }]}>
+                      {t('family.viewActivity')}
+                    </ThemedText>
+                  </Pressable>
+                </View>
+              </>
+            ) : null}
+
+            {!hasMonthActivity ? (
+              <ThemedText style={[styles.collaborationEmptyDetail, { color: palette.textSecondary }]}>
+                {t('family.emptyMonth')}
+              </ThemedText>
+            ) : null}
+          </>
+        )}
 
         {/* 记账是可连续完成的主任务；成功后更新内容，不撤走入口。邀请只由户主权限与人数上限决定。 */}
         <View style={styles.collaborationActions}>
@@ -752,12 +833,14 @@ function CollaborationStat({ label, value, color }: { label: string; value: stri
 function FamilyNowCard({
   palette,
   budgetSet,
+  budgetMessage,
   budgetUsed,
   budgetTotal,
   budgetPct,
   budgetRemaining,
   daysLeft,
   goal,
+  savingsMessage,
   activeGoalCount,
   isOwner,
   onBudget,
@@ -766,12 +849,14 @@ function FamilyNowCard({
 }: {
   palette: ReturnType<typeof usePalette>;
   budgetSet: boolean;
+  budgetMessage: string | null;
   budgetUsed: number;
   budgetTotal: number;
   budgetPct: number;
   budgetRemaining: number;
   daysLeft: number;
   goal: SavingsGoal | null;
+  savingsMessage: string | null;
   activeGoalCount: number;
   isOwner: boolean;
   onBudget: () => void;
@@ -807,7 +892,7 @@ function FamilyNowCard({
               <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
             </View>
           </View>
-          {budgetSet ? (
+          {!budgetMessage && budgetSet ? (
             <>
               <View style={styles.nowAmountRow}>
                 <View style={styles.nowAmountLeft}>
@@ -834,7 +919,7 @@ function FamilyNowCard({
             </>
           ) : (
             <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>
-              {isOwner ? t('family.setBudget') : t('family.askOwnerBudget')}
+              {budgetMessage ?? (isOwner ? t('family.setBudget') : t('family.askOwnerBudget'))}
             </ThemedText>
           )}
         </Pressable>
@@ -842,7 +927,7 @@ function FamilyNowCard({
         <View style={[styles.divider, { backgroundColor: palette.separator }]} />
 
         {/* 储蓄行：有目标 → 精选目标进度（点进详情）；无 → 引导建目标 */}
-        {goal ? (
+        {!savingsMessage && goal ? (
           <Pressable style={styles.nowBlock} onPress={() => onGoalDetail(goal.id)}>
             <View style={styles.nowHead}>
               <View style={styles.nowHeadL}>
@@ -884,7 +969,9 @@ function FamilyNowCard({
               </View>
               <SymbolView name="chevron.right" tintColor={palette.textTertiary} size={13} />
             </View>
-            <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>{t('family.startGoal')}</ThemedText>
+            <ThemedText style={[styles.nowFoot, { color: palette.textSecondary }]}>
+              {savingsMessage ?? t('family.startGoal')}
+            </ThemedText>
           </Pressable>
         )}
       </View>

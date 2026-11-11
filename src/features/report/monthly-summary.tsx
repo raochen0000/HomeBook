@@ -18,6 +18,7 @@ import { Radius, Space, usePalette } from '@/constants/design';
 import { displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { currentPeriod, currentPeriodInTimeZone, formatAmount, formatMonthDay, signForNet } from '@/lib/format';
 import { memberDisplayName } from '@/lib/member-name';
+import { isNetworkAvailable } from '@/lib/query-network';
 
 const WARM_KEYS_SETTLED = [
   'summary.warmCount',
@@ -183,14 +184,26 @@ function Screen({ initialPeriod }: { initialPeriod?: string }) {
           </Pressable>
         </View>
 
-        {summaryQ.isLoading ? (
+        {summaryQ.isLoading ||
+        (!summaryQ.data && summaryQ.isPending && isNetworkAvailable() && !familyQ.isError && !profileQ.isError) ? (
           <View style={styles.center}>
             <ActivityIndicator color={palette.accent} />
           </View>
-        ) : summaryQ.isError ? (
+        ) : !summaryQ.data && (summaryQ.isError || summaryQ.fetchStatus === 'paused') ? (
           <View style={styles.center}>
             <SymbolView name="exclamationmark.triangle" tintColor={palette.textTertiary} size={40} />
-            <Text style={{ color: palette.textSecondary }}>{t('common.loadFailed')}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                void familyQ.refetch();
+                void profileQ.refetch();
+                void summaryQ.refetch();
+              }}
+            >
+              <Text style={{ color: palette.textSecondary }}>
+                {t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')} · {t('common.retry')}
+              </Text>
+            </Pressable>
           </View>
         ) : !summary ? (
           <View style={styles.center} {...pan.panHandlers}>

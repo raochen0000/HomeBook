@@ -33,6 +33,7 @@ import {
   tint,
 } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { onlineManager } from '@tanstack/react-query';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -56,16 +57,20 @@ import {
   useHasTransactions,
   useHiddenCategoryIds,
   useMemberships,
+  useMyFamily,
+  useMyProfile,
   useUpdateTransaction,
   type Category,
   type Transaction,
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
+import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
 import { playToastHaptic, toast, ToastNotice, type ToastItem } from '@/components/toast';
 import { Radius, Space, useCategoryColors, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, INTL_LOCALE, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { buildCategoryHierarchy, categoryPath, selectableRecordCategories } from '@/lib/category-hierarchy';
+import { isNetworkAvailable } from '@/lib/query-network';
 
 import {
   loadCategoryUsage,
@@ -169,11 +174,14 @@ function RecordForm({
   const layoutQ = useCategoryLayout();
   const hiddenQ = useHiddenCategoryIds();
   const membersQ = useMemberships();
+  const familyQ = useMyFamily();
+  const profileQ = useMyProfile();
   const createM = useCreateTransaction();
   const updateM = useUpdateTransaction();
   const hasTransactionsQ = useHasTransactions(familyId);
   // 只用本次等待控制按钮。请求超过 8 秒后 mutation 可能仍在飞，按钮要先恢复。
   const [awaitingSave, setAwaitingSave] = useState(false);
+  const saveInFlight = useRef(false);
   const [continueToast, setContinueToast] = useState<ToastItem | null>(null);
   const continueToastSeq = useRef(0);
   const mountedRef = useRef(true);
@@ -274,7 +282,7 @@ function RecordForm({
   // 用户选择优先；否则使用本人最近分类，首次或失效时回退到对应的「其他」。
   const effectiveCategoryId = useMemo(() => {
     if (keepingOriginalGroup) return categoryId;
-    if (categoryId && categories.some((c) => c.id === categoryId)) return categoryId;
+    if (categoryId) return categories.some((c) => c.id === categoryId) ? categoryId : null;
     if (recent[type] && categories.some((c) => c.id === recent[type])) return recent[type];
     return categories[0]?.id ?? null;
   }, [categoryId, categories, keepingOriginalGroup, recent, type]);
@@ -285,7 +293,7 @@ function RecordForm({
   const toolbarHeight = Math.max(48, Math.ceil(48 * fontScale));
 
   const cents = rawToCents(raw);
-  const categoriesReady = categoriesQ.isSuccess && layoutQ.isSuccess && hiddenQ.isSuccess;
+  const categoriesReady = categoriesQ.data !== undefined && layoutQ.data !== undefined && hiddenQ.data !== undefined;
   const canSave =
     cents > 0 && !!effectiveCategoryId && !!familyId && !saving && categoriesReady && (!!editing || recentLoaded);
   const amountColor = type === 'expense' ? palette.expense : palette.income;
@@ -309,11 +317,59 @@ function RecordForm({
   };
 
   const handleSave = async () => {
-    if (!canSave || !effectiveCategoryId) return;
+    if (!canSave || !effectiveCategoryId || saveInFlight.current) return;
+    saveInFlight.current = true;
     // 家庭第一笔？只查询是否存在任意流水，不加载历史列表。
     const isFirstRecord = !editing && hasTransactionsQ.isSuccess && !hasTransactionsQ.data;
     setAwaitingSave(true);
+    const startedAt = Date.now();
+    let writeStarted = false;
     try {
+      if (!onlineManager.isOnline()) {
+        Alert.alert(t('record.networkRetry'), undefined, alertOk());
+        return;
+      }
+      // Cache is for display. Before a write, confirm stale family/category/member reads online.
+      const [latestCategories, latestLayout, latestHidden, latestFamily, latestMembers] = await withDeadline(
+        Promise.all([
+          categoriesQ.refetch({ throwOnError: true, cancelRefetch: false }).then((r) => r.data),
+          layoutQ.refetch({ throwOnError: true, cancelRefetch: false }).then((r) => r.data),
+          hiddenQ.refetch({ throwOnError: true, cancelRefetch: false }).then((r) => r.data),
+          familyQ.isStale || familyQ.isError
+            ? familyQ.refetch({ throwOnError: true, cancelRefetch: false }).then((r) => r.data)
+            : familyQ.data,
+          membersQ.isStale || membersQ.isError
+            ? membersQ.refetch({ throwOnError: true, cancelRefetch: false }).then((r) => r.data)
+            : membersQ.data,
+        ]),
+        SAVE_NETWORK_TIMEOUT_MS,
+      );
+      if (!mountedRef.current) return;
+      if (!latestCategories || !latestLayout || !latestHidden || latestFamily?.id !== familyId || !latestMembers) {
+        Alert.alert(t('record.networkRetry'), undefined, alertOk());
+        return;
+      }
+      const selectable = selectableRecordCategories(
+        buildCategoryHierarchy(latestCategories, latestLayout),
+        type,
+        latestHidden,
+        editing?.category_id,
+      );
+      const preservingOriginal = !!editing && effectiveCategoryId === editing.category_id && type === editing.type;
+      if (!preservingOriginal && !selectable.some((category) => category.id === effectiveCategoryId)) {
+        setCategoryId(effectiveCategoryId);
+        Alert.alert(t('common.categoryChanged'), undefined, alertOk());
+        return;
+      }
+      if (
+        !latestMembers.some((member) => member.userId === recorderUserId) ||
+        (recorderUserId !== recorderId &&
+          !latestMembers.some((member) => member.userId === recorderId && member.role === 'owner'))
+      ) {
+        Alert.alert(t('record.networkRetry'), undefined, alertOk());
+        return;
+      }
+      writeStarted = true;
       if (editing) {
         await withDeadline(
           updateM.mutateAsync({
@@ -325,7 +381,7 @@ function RecordForm({
             occurred_at: occurredAt.toISOString(),
             recorder_user_id: recorderUserId,
           }),
-          SAVE_NETWORK_TIMEOUT_MS,
+          Math.max(1, SAVE_NETWORK_TIMEOUT_MS - (Date.now() - startedAt)),
         );
         if (!mountedRef.current) return;
         onUpdated();
@@ -344,7 +400,7 @@ function RecordForm({
           note: note || null,
           occurred_at: occurredAt.toISOString(),
         }),
-        SAVE_NETWORK_TIMEOUT_MS,
+        Math.max(1, SAVE_NETWORK_TIMEOUT_MS - (Date.now() - startedAt)),
       );
       if (!mountedRef.current) return;
       if (recorderUserId === recorderId) {
@@ -382,12 +438,17 @@ function RecordForm({
       }
     } catch (e) {
       if (!mountedRef.current) return;
+      if (writeStarted && (isSaveAttemptTimeout(e) || isLikelyNetworkError(e))) {
+        Alert.alert(t('record.saveUncertain'), undefined, alertOk());
+        return;
+      }
       if (isSaveAttemptTimeout(e) || isLikelyNetworkError(e)) {
         Alert.alert(t('record.networkRetry'), undefined, alertOk());
         return;
       }
       Alert.alert(t('record.saveFailed'), (e as Error).message ?? String(e), alertOk());
     } finally {
+      saveInFlight.current = false;
       if (mountedRef.current) setAwaitingSave(false);
     }
   };
@@ -467,19 +528,37 @@ function RecordForm({
     <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
       {/* 分类：完整网格；只在此区域滚动，备注／时间／记账人保持可见。 */}
       <View style={styles.catArea} onLayout={(e) => setCatAreaW(e.nativeEvent.layout.width)}>
-        {categoriesQ.isLoading || layoutQ.isLoading || hiddenQ.isLoading || !usageLoaded ? (
+        {categoriesReady ? (
+          <CacheInlineNotice
+            failed={familyQ.isError || profileQ.isError || categoriesQ.isError || layoutQ.isError || hiddenQ.isError}
+            updatedAt={Math.min(categoriesQ.dataUpdatedAt, layoutQ.dataUpdatedAt, hiddenQ.dataUpdatedAt)}
+          />
+        ) : null}
+        {(!categoriesReady &&
+          (categoriesQ.isLoading ||
+            layoutQ.isLoading ||
+            hiddenQ.isLoading ||
+            (isNetworkAvailable() &&
+              !familyQ.isError &&
+              !profileQ.isError &&
+              [categoriesQ, layoutQ, hiddenQ].some((query) => query.fetchStatus === 'paused')))) ||
+        !usageLoaded ? (
           <View style={styles.catLoading}>
             <ActivityIndicator />
           </View>
         ) : !categoriesReady ? (
           <Pressable
             onPress={() => {
+              void familyQ.refetch();
+              void profileQ.refetch();
               void categoriesQ.refetch();
               void layoutQ.refetch();
               void hiddenQ.refetch();
             }}
           >
-            <Text style={{ color: palette.textSecondary }}>{t('common.retry')}</Text>
+            <Text style={{ color: palette.textSecondary }}>
+              {t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')} · {t('common.retry')}
+            </Text>
           </Pressable>
         ) : (
           <ScrollView style={styles.catScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -490,6 +569,9 @@ function RecordForm({
             ) : null}
             {categories.length === 0 && !keepingOriginalGroup ? (
               <Text style={{ color: palette.textSecondary }}>{t('record.noSubcategories')}</Text>
+            ) : null}
+            {categoryId && !effectiveCategoryId ? (
+              <Text style={{ color: palette.textSecondary }}>{t('common.categoryChanged')}</Text>
             ) : null}
             <View style={styles.catGrid}>{categories.map((c) => renderCat(c, catItemW))}</View>
           </ScrollView>
@@ -639,7 +721,12 @@ function RecordForm({
           <Picker
             modifiers={[pickerStyle('segmented')]}
             selection={type}
-            onSelectionChange={(value) => setType(value as TxnType)}
+            onSelectionChange={(value) => {
+              if ((value === 'expense' || value === 'income') && value !== type) {
+                setType(value);
+                setCategoryId(null);
+              }
+            }}
           >
             <UIText modifiers={[tag('expense')]}>{t('record.expense')}</UIText>
             <UIText modifiers={[tag('income')]}>{t('record.income')}</UIText>

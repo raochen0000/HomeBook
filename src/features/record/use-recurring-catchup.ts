@@ -24,8 +24,8 @@ function todayKey(): string {
 }
 
 export function useRecurringCatchup() {
-  const { session } = useSession();
-  const userId = session?.user.id ?? null;
+  const { session, offline } = useSession();
+  const userId = offline ? null : (session?.user.id ?? null);
   const qc = useQueryClient();
   const running = useRef(false);
 

@@ -24,7 +24,8 @@ export type { FamilyCoverCrop, PickedFamilyCover } from '@/adapters/storage';
 
 /** 当前登录用户的 profile；未登录返回 null。 */
 export async function fetchMyProfile(): Promise<Profile | null> {
-  const { data: sessionData } = await supabase.auth.getSession();
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
   if (!sessionData.session) return null;
   // 必须按自己过滤：profiles 的 RLS 是「自己或同家庭成员」，多人家庭下 select('*') 会返回多行，
   // .single() 遇多行会报错。显式 .eq('id', 自己) 才能稳定只取本人这一行。
@@ -34,7 +35,7 @@ export async function fetchMyProfile(): Promise<Profile | null> {
 }
 
 export function useMyProfile() {
-  return useQuery({ queryKey: queryKeys.profile, queryFn: fetchMyProfile });
+  return useQuery({ queryKey: queryKeys.profile, queryFn: fetchMyProfile, networkMode: 'always' });
 }
 
 export type FamilyMember = LedgerMember;
@@ -116,13 +117,16 @@ export function useMemberships() {
 
 /** 当前用户所属家庭；无则返回 null（RLS 只返回本人家庭）。 */
 export async function fetchMyFamily(): Promise<Family | null> {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  if (!sessionData.session) throw new Error('A verified session is required to refresh family data');
   const { data, error } = await supabase.from('families').select('*').maybeSingle();
   if (error) throw error;
   return data;
 }
 
 export function useMyFamily() {
-  return useQuery({ queryKey: queryKeys.family, queryFn: fetchMyFamily });
+  return useQuery({ queryKey: queryKeys.family, queryFn: fetchMyFamily, networkMode: 'always' });
 }
 
 export async function createFamily(name: string, timezone = 'Asia/Shanghai'): Promise<Family> {
@@ -186,11 +190,13 @@ export function usePreviewFamily() {
 }
 
 /** 创建/加入家庭后，profile 与 family 都需刷新。 */
-function useFamilyMutation<TArgs>(fn: (args: TArgs) => Promise<unknown>) {
+function useFamilyMutation<TArgs>(fn: (args: TArgs) => Promise<Family>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSuccess: () => {
+    onSuccess: (family) => {
+      // A successful join/create must not keep showing the previous family's cached queries.
+      qc.setQueryData(queryKeys.family, family);
       qc.invalidateQueries({ queryKey: queryKeys.profile });
       qc.invalidateQueries({ queryKey: queryKeys.family });
       qc.invalidateQueries({ queryKey: queryKeys.memberships });
@@ -251,7 +257,13 @@ export function useRemoveMember() {
 /** 无参生命周期操作（退出/解散），mutateAsync() 不带参数。 */
 function useVoidLifecycleMutation(fn: () => Promise<void>) {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: fn, onSuccess: () => qc.invalidateQueries() });
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      qc.setQueryData(queryKeys.family, null);
+      void qc.invalidateQueries();
+    },
+  });
 }
 
 export function useLeaveFamily() {

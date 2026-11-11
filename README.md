@@ -18,11 +18,13 @@ App 已装在模拟器上时，改 `.tsx` 走 Fast Refresh 自动刷新，**无�
 ### 重新编译原生 App（加了原生模块 / 模拟器崩溃或被重置时）
 
 ```bash
-npm run ios:sim        # 编译（模拟器，免签名）+ 安装 + 启动到「已启动的模拟器」
+npm run ios:sim        # 编译（模拟器临时签名）+ 安装 + 启动到「已启动的模拟器」
 npm run ios:sim:clean  # 救援版：重装 Pod（源码模式）+ 清构建缓存 + 重编。pod/codegen 乱了时用
 ```
 
 ### ⚠️ 重要约束
+
+- **模拟器需使用本机临时签名**：`ios:sim` 用 ad hoc 签名（`CODE_SIGN_IDENTITY=-`，不需要 Apple 开发证书）。完全关闭签名会使模拟器 Keychain 缺少授权，导致加密缓存无法保存；真机和发布构建仍使用正常签名流程。
 
 - **不要用 `npm run ios`（`expo run:ios`）**：在当前 Xcode 26 / iOS 26 模拟器上，`@expo/cli` 会把模拟器误判成真机、索要签名证书而失败。统一用 `npm run ios:sim`。
 - **`ExpoModulesCore` 必须从源码编译**：`ios/Podfile.properties.json` 里的 `"EXPO_USE_PRECOMPILED_MODULES": "false"` 不能丢，否则启动会 dyld 崩溃（`Symbol not found: ExpoModulesCore.Record.from`）。`npx expo prebuild --clean` 会冲掉这行——若跑了它，需补回该行并执行 `npm run ios:sim:clean`。

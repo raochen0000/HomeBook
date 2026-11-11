@@ -30,7 +30,8 @@ import {
   tag,
 } from '@expo/ui/swift-ui/modifiers';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useMemo, useState } from 'react';
+import { onlineManager } from '@tanstack/react-query';
+import { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -50,18 +51,23 @@ import {
   useCreateRecurringRule,
   useHiddenCategoryIds,
   useMemberships,
+  useMyFamily,
+  useMyProfile,
   useUpdateRecurringRule,
   type Category,
   type RecurringFrequency,
   type RecurringRule,
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
+import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
 import { Radius, Space, useCategoryColors, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { buildCategoryHierarchy, categoryPath, selectableRecordCategories } from '@/lib/category-hierarchy';
+import { isNetworkAvailable } from '@/lib/query-network';
 
 import { MemberPopover } from './member-popover';
+import { isLikelyNetworkError, isSaveAttemptTimeout, SAVE_NETWORK_TIMEOUT_MS, withDeadline } from './save-attempt';
 
 type TxnType = 'expense' | 'income';
 
@@ -126,9 +132,13 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   const layoutQ = useCategoryLayout();
   const hiddenQ = useHiddenCategoryIds();
   const membersQ = useMemberships();
+  const familyQ = useMyFamily();
+  const profileQ = useMyProfile();
   const createM = useCreateRecurringRule();
   const updateM = useUpdateRecurringRule();
-  const saving = createM.isPending || updateM.isPending;
+  const [validating, setValidating] = useState(false);
+  const saveInFlight = useRef(false);
+  const saving = createM.isPending || updateM.isPending || validating;
 
   const [type, setType] = useState<TxnType>(editing?.type === 'income' ? 'income' : 'expense');
   const [raw, setRaw] = useState(editing?.amount ? (editing.amount / 100).toString() : '');
@@ -167,7 +177,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
 
   const effectiveCategoryId = useMemo(() => {
     if (keepingOriginalGroup) return categoryId;
-    if (categoryId && categories.some((c) => c.id === categoryId)) return categoryId;
+    if (categoryId) return categories.some((c) => c.id === categoryId) ? categoryId : null;
     return categories[0]?.id ?? null;
   }, [categoryId, categories, keepingOriginalGroup]);
 
@@ -177,9 +187,9 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
     !!effectiveCategoryId &&
     !!familyId &&
     !saving &&
-    categoriesQ.isSuccess &&
-    layoutQ.isSuccess &&
-    hiddenQ.isSuccess;
+    categoriesQ.data !== undefined &&
+    layoutQ.data !== undefined &&
+    hiddenQ.data !== undefined;
   const amountColor = type === 'expense' ? palette.expense : palette.income;
   const sign = type === 'expense' ? '-' : '+';
   const parts = displayParts(raw);
@@ -203,8 +213,54 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
   };
 
   const handleSave = async () => {
-    if (!canSave || !effectiveCategoryId) return;
+    if (!canSave || !effectiveCategoryId || saveInFlight.current) return;
+    saveInFlight.current = true;
+    setValidating(true);
+    let writeStarted = false;
     try {
+      if (!onlineManager.isOnline()) {
+        Alert.alert(t('record.networkRetry'), undefined, alertOk());
+        return;
+      }
+      const [latestCategories, latestLayout, latestHidden, latestFamily, latestMembers] = await withDeadline(
+        Promise.all([
+          categoriesQ.refetch({ throwOnError: true, cancelRefetch: false }).then((r) => r.data),
+          layoutQ.refetch({ throwOnError: true, cancelRefetch: false }).then((r) => r.data),
+          hiddenQ.refetch({ throwOnError: true, cancelRefetch: false }).then((r) => r.data),
+          familyQ.isStale || familyQ.isError
+            ? familyQ.refetch({ throwOnError: true, cancelRefetch: false }).then((r) => r.data)
+            : familyQ.data,
+          membersQ.isStale || membersQ.isError
+            ? membersQ.refetch({ throwOnError: true, cancelRefetch: false }).then((r) => r.data)
+            : membersQ.data,
+        ]),
+        SAVE_NETWORK_TIMEOUT_MS,
+      );
+      if (!latestCategories || !latestLayout || !latestHidden || latestFamily?.id !== familyId || !latestMembers) {
+        Alert.alert(t('record.networkRetry'), undefined, alertOk());
+        return;
+      }
+      const selectable = selectableRecordCategories(
+        buildCategoryHierarchy(latestCategories, latestLayout),
+        type,
+        latestHidden,
+        editing?.category_id,
+      );
+      const preservingOriginal = !!editing && effectiveCategoryId === editing.category_id && type === editing.type;
+      if (!preservingOriginal && !selectable.some((category) => category.id === effectiveCategoryId)) {
+        setCategoryId(effectiveCategoryId);
+        Alert.alert(t('common.categoryChanged'), undefined, alertOk());
+        return;
+      }
+      if (
+        !latestMembers.some((member) => member.userId === recorderUserId) ||
+        (recorderUserId !== recorderId &&
+          !latestMembers.some((member) => member.userId === recorderId && member.role === 'owner'))
+      ) {
+        Alert.alert(t('record.networkRetry'), undefined, alertOk());
+        return;
+      }
+      writeStarted = true;
       if (editing) {
         await updateM.mutateAsync({
           id: editing.id,
@@ -238,7 +294,14 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
       onSaved?.();
       onClose();
     } catch (e) {
-      Alert.alert(t('record.saveFailed'), (e as Error).message ?? String(e), alertOk());
+      if (writeStarted && isLikelyNetworkError(e))
+        Alert.alert(t('record.recurringSaveUncertain'), undefined, alertOk());
+      else if (isSaveAttemptTimeout(e) || isLikelyNetworkError(e))
+        Alert.alert(t('record.networkRetry'), undefined, alertOk());
+      else Alert.alert(t('record.saveFailed'), e instanceof Error ? e.message : String(e), alertOk());
+    } finally {
+      saveInFlight.current = false;
+      setValidating(false);
     }
   };
 
@@ -307,7 +370,10 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
             modifiers={[pickerStyle('segmented')]}
             selection={type}
             onSelectionChange={(value) => {
-              if (value === 'expense' || value === 'income') setType(value);
+              if ((value === 'expense' || value === 'income') && value !== type) {
+                setType(value);
+                setCategoryId(null);
+              }
             }}
           >
             <UIText modifiers={[tag('expense')]}>{t('record.expense')}</UIText>
@@ -325,21 +391,41 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
         <View style={styles.middleFlex}>
           <View style={[styles.detailCard, { backgroundColor: palette.card }]}>
             <View style={styles.catArea} onLayout={(event) => setCatAreaW(event.nativeEvent.layout.width)}>
-              {categoriesQ.isLoading || layoutQ.isLoading || hiddenQ.isLoading ? (
-                <View style={styles.catLoading}>
-                  <ActivityIndicator />
-                </View>
-              ) : !categoriesQ.isSuccess || !layoutQ.isSuccess || !hiddenQ.isSuccess ? (
-                <Pressable
-                  onPress={() => {
-                    void categoriesQ.refetch();
-                    void layoutQ.refetch();
-                    void hiddenQ.refetch();
-                  }}
-                  accessibilityRole="button"
-                >
-                  <Text style={{ color: palette.textSecondary }}>{t('common.retry')}</Text>
-                </Pressable>
+              {categoriesQ.data && layoutQ.data && hiddenQ.data ? (
+                <CacheInlineNotice
+                  failed={
+                    familyQ.isError || profileQ.isError || categoriesQ.isError || layoutQ.isError || hiddenQ.isError
+                  }
+                  updatedAt={Math.min(categoriesQ.dataUpdatedAt, layoutQ.dataUpdatedAt, hiddenQ.dataUpdatedAt)}
+                />
+              ) : null}
+              {!categoriesQ.data || !layoutQ.data || !hiddenQ.data ? (
+                categoriesQ.isLoading ||
+                layoutQ.isLoading ||
+                hiddenQ.isLoading ||
+                (isNetworkAvailable() &&
+                  !familyQ.isError &&
+                  !profileQ.isError &&
+                  [categoriesQ, layoutQ, hiddenQ].some((query) => query.fetchStatus === 'paused')) ? (
+                  <View style={styles.catLoading}>
+                    <ActivityIndicator />
+                  </View>
+                ) : (
+                  <Pressable
+                    onPress={() => {
+                      void familyQ.refetch();
+                      void profileQ.refetch();
+                      void categoriesQ.refetch();
+                      void layoutQ.refetch();
+                      void hiddenQ.refetch();
+                    }}
+                    accessibilityRole="button"
+                  >
+                    <Text style={{ color: palette.textSecondary }}>
+                      {t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')} · {t('common.retry')}
+                    </Text>
+                  </Pressable>
+                )
               ) : (
                 <ScrollView
                   style={styles.catScroll}
@@ -353,6 +439,9 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
                   ) : null}
                   {categories.length === 0 && !keepingOriginalGroup ? (
                     <Text style={{ color: palette.textSecondary }}>{t('record.noSubcategories')}</Text>
+                  ) : null}
+                  {categoryId && !effectiveCategoryId ? (
+                    <Text style={{ color: palette.textSecondary }}>{t('common.categoryChanged')}</Text>
                   ) : null}
                   <View style={styles.catGrid}>{categories.map(renderCat)}</View>
                 </ScrollView>

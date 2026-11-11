@@ -6,6 +6,7 @@
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   findNodeHandle,
   KeyboardAvoidingView,
@@ -33,11 +34,13 @@ import {
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
+import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { budgetLevel, daysToMonthEnd } from '@/lib/budget';
 import { categoryColorKey } from '@/lib/category-style';
 import { currentPeriodInTimeZone, formatAmount, monthLabel } from '@/lib/format';
+import { isNetworkAvailable } from '@/lib/query-network';
 
 const toCents = (raw: string) => Math.round(Number(raw || '0') * 100);
 
@@ -85,14 +88,43 @@ function Body() {
 
   const budget = budgetQ.data?.budget ?? null;
   const cats = budgetQ.data?.categories ?? [];
+  const missing = budgetQ.data === undefined || (!!budget && progressQ.data === undefined);
+  const failed =
+    familyQ.isError || profileQ.isError || budgetQ.isError || (!!budget && progressQ.isError) || !isNetworkAvailable();
 
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.flex}>
         {/* 悬浮磨砂标题区（自动保存/预览型：纯标题，DESIGN §9.9）；onClose 由下滑手势承担 */}
         <SheetHeader title={t('budget.titled', { month: monthLabel(new Date()) })} />
+        {!missing ? (
+          <CacheInlineNotice
+            failed={budgetQ.isError || progressQ.isError || familyQ.isError || profileQ.isError}
+            updatedAt={budgetQ.dataUpdatedAt}
+          />
+        ) : null}
 
-        {budgetQ.isLoading ? null : !budget ? (
+        {missing ? (
+          <View style={styles.center}>
+            {failed ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  void familyQ.refetch();
+                  void profileQ.refetch();
+                  void budgetQ.refetch();
+                  void progressQ.refetch();
+                }}
+              >
+                <Text style={{ color: palette.textSecondary }}>
+                  {t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')} · {t('common.retry')}
+                </Text>
+              </Pressable>
+            ) : (
+              <ActivityIndicator />
+            )}
+          </View>
+        ) : !budget ? (
           <View style={styles.center}>
             <SymbolView name="chart.pie" tintColor={palette.textTertiary} size={48} />
             <Text style={{ color: palette.textSecondary }}>{t('budget.empty')}</Text>

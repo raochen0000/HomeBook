@@ -71,8 +71,8 @@ export async function registerPushDevice(devicePushToken?: DevicePushToken): Pro
 }
 
 export function usePushRegistration() {
-  const { session } = useSession();
-  const userId = session?.user.id ?? null;
+  const { session, offline } = useSession();
+  const userId = offline ? null : (session?.user.id ?? null);
 
   useEffect(() => {
     if (!PUSH_DELIVERY_ENABLED) return;

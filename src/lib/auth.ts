@@ -4,7 +4,7 @@
  * 用户主表 = `auth.users`（Supabase Auth）+ `public.profiles`（业务字段，由 handle_new_user 触发器自动建行）。
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Session, User } from '@supabase/supabase-js';
+import { isAuthRetryableFetchError, type Session, type User } from '@supabase/supabase-js';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
@@ -12,7 +12,7 @@ import { Platform } from 'react-native';
 import { unregisterCurrentDevice } from '@/api/device-tokens';
 import { t } from '@/i18n/instance';
 
-import { findObsoleteAuthStorageKeys, isSupabaseAuthStorageKey } from './auth-storage';
+import { findObsoleteAuthStorageKeys, isSupabaseAuthStorageKey, parseOfflineDisplaySession } from './auth-storage';
 import { classifyEmailSignInFailure, isObfuscatedExistingSignUpUser } from './email-auth-flow';
 import { beginLoginIdentityRead, rememberLoginIdentities } from './login-identity-cache';
 import { normalizeDefaultNickname } from './profile';
@@ -72,31 +72,112 @@ async function clearLocalSession(): Promise<void> {
   if (error) throw error;
 }
 
-/** 新 Cloud 包首次启动时，旧项目的 JWT 只能强制重新登录，绝不尝试迁移或复用。 */
-async function clearObsoleteProjectSessions(): Promise<void> {
-  const obsoleteKeys = findObsoleteAuthStorageKeys(await AsyncStorage.getAllKeys(), supabaseAuthStorageKey);
-  if (obsoleteKeys.length > 0) await AsyncStorage.multiRemove(obsoleteKeys);
+let obsoleteSessionsCleanup: Promise<void> | null = null;
+
+/** 多个会话订阅者共享一次清理，避免启动时重复枚举全部本地存储键。 */
+function clearObsoleteProjectSessions(): Promise<void> {
+  if (!obsoleteSessionsCleanup) {
+    obsoleteSessionsCleanup = (async () => {
+      const obsoleteKeys = findObsoleteAuthStorageKeys(await AsyncStorage.getAllKeys(), supabaseAuthStorageKey);
+      if (obsoleteKeys.length > 0) await AsyncStorage.multiRemove(obsoleteKeys);
+    })().catch((error: unknown) => {
+      obsoleteSessionsCleanup = null;
+      throw error;
+    });
+  }
+  return obsoleteSessionsCleanup;
 }
 
 /** 订阅当前会话；loading 用于首帧避免登录页闪现。 */
-export function useSession(): { session: Session | null; loading: boolean } {
+let offlineSessionRead: Promise<Session | null> | null = null;
+let sessionRead: ReturnType<typeof supabase.auth.getSession> | null = null;
+
+function readSessionOnce(): ReturnType<typeof supabase.auth.getSession> {
+  if (!sessionRead) {
+    sessionRead = supabase.auth.getSession().finally(() => {
+      sessionRead = null;
+    });
+  }
+  return sessionRead;
+}
+
+function readOfflineDisplaySession(): Promise<Session | null> {
+  if (!offlineSessionRead) {
+    offlineSessionRead = AsyncStorage.getItem(supabaseAuthStorageKey)
+      .then(parseOfflineDisplaySession)
+      .catch(() => null)
+      .finally(() => {
+        offlineSessionRead = null;
+      });
+  }
+  return offlineSessionRead;
+}
+
+export function useSession(): { session: Session | null; loading: boolean; offline: boolean } {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [offline, setOffline] = useState(false);
 
   useEffect(() => {
+    let active = true;
+    let signedOut = false;
+    let latestEvent = 0;
+    const restoreOffline = async (expectedEvent: number) => {
+      const displaySession = await readOfflineDisplaySession();
+      if (!active || signedOut || latestEvent !== expectedEvent || !displaySession) return;
+      setSession(displaySession);
+      setOffline(true);
+      setLoading(false);
+    };
     // 旧项目键清理和当前项目会话读取并行。清理函数只删除当前 storage key 之外的键，
     // 不会与 getSession 访问同一条会话记录；避免全量枚举本地键阻塞启动。
     void clearObsoleteProjectSessions().catch(() => {});
-    void supabase.auth
-      .getSession()
-      .then(({ data }) => setSession(data.session))
-      .catch(() => setSession(null))
-      .finally(() => setLoading(false));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
-    return () => sub.subscription.unsubscribe();
+    const startedAtEvent = latestEvent;
+    // This identity only unlocks the encrypted local view. It contains no credentials and
+    // cannot authorize writes; a real SDK session still has to be recovered independently.
+    if (Platform.OS !== 'web') void restoreOffline(startedAtEvent);
+    void readSessionOnce()
+      .then(({ data, error }) => {
+        if (!active || signedOut || latestEvent !== startedAtEvent) return;
+        if (error && isAuthRetryableFetchError(error)) {
+          void restoreOffline(startedAtEvent).then(() => {
+            if (active) setLoading(false);
+          });
+          return;
+        }
+        latestEvent += 1;
+        setSession(data.session);
+        setOffline(false);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (active && !signedOut)
+          void restoreOffline(startedAtEvent).then(() => {
+            if (active) setLoading(false);
+          });
+      });
+    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
+      if (event === 'SIGNED_OUT') {
+        latestEvent += 1;
+        signedOut = true;
+        setSession(null);
+        setOffline(false);
+        setLoading(false);
+      } else if (next) {
+        latestEvent += 1;
+        signedOut = false;
+        setSession(next);
+        setOffline(false);
+        setLoading(false);
+      }
+    });
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
-  return { session, loading };
+  return { session, loading, offline };
 }
 
 /**

@@ -36,9 +36,11 @@ import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { isLikelyNetworkError } from '@/features/record/save-attempt';
+import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { automaticCategoryColorKey, categoryColorKey, customCategoryColorKey } from '@/lib/category-style';
 import { currentPeriodInTimeZone, formatAmount } from '@/lib/format';
+import { isNetworkAvailable } from '@/lib/query-network';
 
 type SymbolName = Extract<SymbolViewProps['name'], string>;
 type IconGroup = { title: string; icons: readonly SymbolName[] };
@@ -587,20 +589,34 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
     );
   };
 
-  if (catsQ.isLoading || layoutQ.isLoading || hiddenQ.isLoading) return <ActivityIndicator />;
-  if (catsQ.isError || layoutQ.isError || hiddenQ.isError)
+  if (
+    (!catsQ.data || !layoutQ.data || !hiddenQ.data) &&
+    (catsQ.isLoading ||
+      layoutQ.isLoading ||
+      hiddenQ.isLoading ||
+      (isNetworkAvailable() &&
+        !familyQ.isError &&
+        !profileQ.isError &&
+        [catsQ, layoutQ, hiddenQ].some((query) => query.fetchStatus === 'paused')))
+  )
+    return <ActivityIndicator />;
+  if (!catsQ.data || !layoutQ.data || !hiddenQ.data)
     return (
       <View style={styles.root}>
         <SheetHeader title={t('category.title')} />
         <Pressable
           style={styles.content}
           onPress={() => {
+            void familyQ.refetch();
+            void profileQ.refetch();
             void catsQ.refetch();
             void layoutQ.refetch();
             void hiddenQ.refetch();
           }}
         >
-          <Text style={{ color: palette.accent }}>{t('common.retry')}</Text>
+          <Text style={{ color: palette.accent }}>
+            {t(isNetworkAvailable() ? 'common.loadFailed' : 'common.noCachedData')} · {t('common.retry')}
+          </Text>
         </Pressable>
       </View>
     );
@@ -624,6 +640,10 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
         </Host>
 
         <ScrollView contentContainerStyle={styles.content}>
+          <CacheInlineNotice
+            failed={catsQ.isError || layoutQ.isError || hiddenQ.isError || familyQ.isError || profileQ.isError}
+            updatedAt={Math.min(catsQ.dataUpdatedAt, layoutQ.dataUpdatedAt, hiddenQ.dataUpdatedAt)}
+          />
           {/* 新增 */}
           <Pressable
             onPress={() => setView({ mode: 'new', type, isGroup: true })}

@@ -9,6 +9,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { useMyFamily, useMyProfile } from '@/api';
 import { useSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
+import { suspendFamilyQueries } from '@/lib/query-network';
 
 import { invalidateFamilyLiveQueries } from './family-live-queries';
 
@@ -37,6 +38,7 @@ function useFamilyLiveSync() {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       debounceTimer.current = setTimeout(() => {
         debounceTimer.current = null;
+        suspendFamilyQueries();
         void invalidateFamilyLiveQueries(queryClient);
       }, REALTIME_DEBOUNCE_MS);
     };
@@ -46,6 +48,7 @@ function useFamilyLiveSync() {
         clearTimeout(debounceTimer.current);
         debounceTimer.current = null;
       }
+      suspendFamilyQueries();
       void invalidateFamilyLiveQueries(queryClient);
     };
 
