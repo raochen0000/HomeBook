@@ -4,9 +4,9 @@
  * 用户主表 = `auth.users`（Supabase Auth）+ `public.profiles`（业务字段，由 handle_new_user 触发器自动建行）。
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { isAuthRetryableFetchError, type Session, type User } from '@supabase/supabase-js';
+import type { Session, User } from '@supabase/supabase-js';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import { useEffect, useState } from 'react';
+import { createContext, createElement, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Platform } from 'react-native';
 
 import { unregisterCurrentDevice } from '@/api/device-tokens';
@@ -16,6 +16,7 @@ import { findObsoleteAuthStorageKeys, isSupabaseAuthStorageKey, parseOfflineDisp
 import { classifyEmailSignInFailure, isObfuscatedExistingSignUpUser } from './email-auth-flow';
 import { beginLoginIdentityRead, rememberLoginIdentities } from './login-identity-cache';
 import { normalizeDefaultNickname } from './profile';
+import { isNetworkAvailable, subscribeNetworkAvailability } from './query-network';
 import { supabase, supabaseAuthStorageKey } from './supabase';
 
 /** GoTrue 持久化会话键（`sb-<ref>-auth-token` 及其 -user / -code-verifier 后缀）。 */
@@ -113,10 +114,46 @@ function readOfflineDisplaySession(): Promise<Session | null> {
   return offlineSessionRead;
 }
 
-export function useSession(): { session: Session | null; loading: boolean; offline: boolean } {
+type SessionState = {
+  session: Session | null;
+  loading: boolean;
+  offline: boolean;
+  unavailable: boolean;
+  retry: () => void;
+};
+const SessionContext = createContext<SessionState | null>(null);
+
+export function SessionProvider({ children }: { children: ReactNode }) {
+  const value = useSessionState();
+  return createElement(SessionContext.Provider, { value }, children);
+}
+
+export function useSession(): SessionState {
+  const value = useContext(SessionContext);
+  if (!value) throw new Error('useSession must be used inside SessionProvider');
+  return value;
+}
+
+function useSessionState(): SessionState {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!unavailable) return;
+    let wasDisconnected = !isNetworkAvailable();
+    return subscribeNetworkAvailability(() => {
+      if (!isNetworkAvailable()) wasDisconnected = true;
+      else if (wasDisconnected) {
+        wasDisconnected = false;
+        setUnavailable(false);
+        setLoading(true);
+        setAttempt((value) => value + 1);
+      }
+    });
+  }, [unavailable]);
 
   useEffect(() => {
     let active = true;
@@ -124,10 +161,12 @@ export function useSession(): { session: Session | null; loading: boolean; offli
     let latestEvent = 0;
     const restoreOffline = async (expectedEvent: number) => {
       const displaySession = await readOfflineDisplaySession();
-      if (!active || signedOut || latestEvent !== expectedEvent || !displaySession) return;
+      if (!active || signedOut || latestEvent !== expectedEvent || !displaySession) return false;
       setSession(displaySession);
       setOffline(true);
+      setUnavailable(false);
       setLoading(false);
+      return true;
     };
     // 旧项目键清理和当前项目会话读取并行。清理函数只删除当前 storage key 之外的键，
     // 不会与 getSession 访问同一条会话记录；避免全量枚举本地键阻塞启动。
@@ -139,21 +178,28 @@ export function useSession(): { session: Session | null; loading: boolean; offli
     void readSessionOnce()
       .then(({ data, error }) => {
         if (!active || signedOut || latestEvent !== startedAtEvent) return;
-        if (error && isAuthRetryableFetchError(error)) {
-          void restoreOffline(startedAtEvent).then(() => {
-            if (active) setLoading(false);
+        if (error) {
+          void restoreOffline(startedAtEvent).then((restored) => {
+            if (active && !signedOut && latestEvent === startedAtEvent && !restored) {
+              setUnavailable(true);
+              setLoading(false);
+            }
           });
           return;
         }
         latestEvent += 1;
         setSession(data.session);
         setOffline(false);
+        setUnavailable(false);
         setLoading(false);
       })
       .catch(() => {
         if (active && !signedOut)
-          void restoreOffline(startedAtEvent).then(() => {
-            if (active) setLoading(false);
+          void restoreOffline(startedAtEvent).then((restored) => {
+            if (active && !signedOut && latestEvent === startedAtEvent && !restored) {
+              setUnavailable(true);
+              setLoading(false);
+            }
           });
       });
     const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
@@ -162,12 +208,14 @@ export function useSession(): { session: Session | null; loading: boolean; offli
         signedOut = true;
         setSession(null);
         setOffline(false);
+        setUnavailable(false);
         setLoading(false);
       } else if (next) {
         latestEvent += 1;
         signedOut = false;
         setSession(next);
         setOffline(false);
+        setUnavailable(false);
         setLoading(false);
       }
     });
@@ -175,9 +223,19 @@ export function useSession(): { session: Session | null; loading: boolean; offli
       active = false;
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [attempt]);
 
-  return { session, loading, offline };
+  return {
+    session,
+    loading,
+    offline,
+    unavailable,
+    retry: () => {
+      setUnavailable(false);
+      setLoading(true);
+      setAttempt((value) => value + 1);
+    },
+  };
 }
 
 /**

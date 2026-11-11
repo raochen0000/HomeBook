@@ -1,10 +1,20 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Pressable, Text, View } from 'react-native';
 
 import { LaunchScreenOverlay } from '@/components/launch-screen';
+import { usePalette } from '@/constants/design';
+import { isLikelyNetworkError } from '@/features/record/save-attempt';
+import { t, useLocalePreference } from '@/i18n';
 import { useSession } from '@/lib/auth';
 import { createQueryClient } from '@/lib/query-client';
-import { resumeFamilyQueries, subscribeFamilyVerification, suspendFamilyQueries } from '@/lib/query-network';
+import {
+  isNetworkAvailable,
+  reportNetworkTransportFailure,
+  resumeFamilyQueries,
+  subscribeFamilyVerification,
+  suspendFamilyQueries,
+} from '@/lib/query-network';
 import { createQueryCacheSnapshot, restoreQueryCacheSnapshot } from '@/lib/query-cache-snapshot';
 import {
   activateQueryCache,
@@ -36,7 +46,9 @@ function familyFromQuery(key: readonly unknown[], data: unknown): string | null 
 
 /** Wait for the current identity before restoring its encrypted data. */
 export function QueryCacheProvider({ children }: { children: ReactNode }) {
-  const { session, loading } = useSession();
+  const { session, loading, unavailable, retry } = useSession();
+  const palette = usePalette();
+  useLocalePreference();
   const userId = session?.user.id ?? null;
   const lastUser = useRef<string | null>(null);
 
@@ -60,6 +72,16 @@ export function QueryCacheProvider({ children }: { children: ReactNode }) {
   }, [userId]);
 
   if (loading) return <LaunchScreenOverlay />;
+  if (unavailable && !session) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.base, gap: 12 }}>
+        <Text style={{ color: palette.textSecondary }}>{t('common.noCachedData')}</Text>
+        <Pressable accessibilityRole="button" onPress={retry}>
+          <Text style={{ color: palette.accent }}>{t('common.retry')}</Text>
+        </Pressable>
+      </View>
+    );
+  }
   return (
     <QuerySession key={userId ?? 'signed-out'} userId={userId}>
       {children}
@@ -107,12 +129,14 @@ function QuerySession({ userId, children }: { userId: string | null; children: R
     let familyId = state.familyId;
     let profileVerified = false;
     let familyVerified = false;
+    let gateOpen = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const verifyIdentity = (online: boolean) => {
       if (!active || isQueryCacheBlocked(userId)) return;
       profileVerified = false;
       familyVerified = false;
+      gateOpen = false;
       void client.cancelQueries({
         predicate: (query) => query.queryKey[0] !== 'profile' && query.queryKey[0] !== 'family',
       });
@@ -139,7 +163,12 @@ function QuerySession({ userId, children }: { userId: string | null; children: R
     };
 
     const unsubscribe = client.getQueryCache().subscribe((event) => {
-      if (!active || isQueryCacheBlocked(userId) || event.type !== 'updated' || event.action.type !== 'success') return;
+      if (!active || isQueryCacheBlocked(userId) || event.type !== 'updated') return;
+      if (event.action.type === 'error') {
+        if (isLikelyNetworkError(event.query.state.error)) reportNetworkTransportFailure();
+        return;
+      }
+      if (event.action.type !== 'success') return;
       const nextFamily = familyFromQuery(event.query.queryKey, event.query.state.data);
       if (nextFamily !== undefined && familyId && nextFamily !== familyId) {
         // Replace the entire client instead of merely invalidating shared query keys.
@@ -169,12 +198,20 @@ function QuerySession({ userId, children }: { userId: string | null; children: R
       if (!event.action.manual && event.query.queryKey[0] === 'profile') profileVerified = true;
       if (!event.action.manual && event.query.queryKey[0] === 'family') familyVerified = true;
       if (
+        !gateOpen &&
         profileVerified &&
         familyVerified &&
         familyFromQuery(['profile'], client.getQueryData(['profile'])) ===
           familyFromQuery(['family'], client.getQueryData(['family']))
       ) {
+        gateOpen = true;
         resumeFamilyQueries();
+        if (isNetworkAvailable()) {
+          void client.refetchQueries(
+            { type: 'active', predicate: (query) => query.state.status === 'error' },
+            { cancelRefetch: false },
+          );
+        }
       }
       scheduleWrite();
     });

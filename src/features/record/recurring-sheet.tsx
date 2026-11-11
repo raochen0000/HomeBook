@@ -59,7 +59,7 @@ import {
   type RecurringRule,
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
-import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
+import { CacheInlineNotice, hasSettledRefreshFailure } from '@/features/sync/cache-inline-notice';
 import { Radius, Space, useCategoryColors, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
@@ -393,9 +393,7 @@ function RecurringForm({ familyId, recorderId, editing, onClose, onSaved }: Omit
             <View style={styles.catArea} onLayout={(event) => setCatAreaW(event.nativeEvent.layout.width)}>
               {categoriesQ.data && layoutQ.data && hiddenQ.data ? (
                 <CacheInlineNotice
-                  failed={
-                    familyQ.isError || profileQ.isError || categoriesQ.isError || layoutQ.isError || hiddenQ.isError
-                  }
+                  failed={hasSettledRefreshFailure([familyQ, profileQ, categoriesQ, layoutQ, hiddenQ])}
                   updatedAt={Math.min(categoriesQ.dataUpdatedAt, layoutQ.dataUpdatedAt, hiddenQ.dataUpdatedAt)}
                 />
               ) : null}

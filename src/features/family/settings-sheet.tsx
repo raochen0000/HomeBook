@@ -34,7 +34,7 @@ import {
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
-import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
+import { CacheInlineNotice, hasSettledRefreshFailure } from '@/features/sync/cache-inline-notice';
 import { Radius, Space, useSheetPalette } from '@/constants/design';
 import { alertOk, t, useLocalePreference } from '@/i18n';
 import { isNetworkAvailable } from '@/lib/query-network';
@@ -97,7 +97,7 @@ function Body({ onClose }: { onClose: () => void }) {
       family={family}
       isOwner={isOwner}
       onClose={onClose}
-      failed={familyQ.isError || profileQ.isError}
+      failed={hasSettledRefreshFailure([familyQ, profileQ])}
       updatedAt={familyQ.dataUpdatedAt}
     />
   );

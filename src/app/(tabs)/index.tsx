@@ -27,7 +27,7 @@ import {
 } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onlineManager } from '@tanstack/react-query';
-import { Link, useRouter, type Href } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Platform, Pressable, StyleSheet, View } from 'react-native';
@@ -436,14 +436,7 @@ export default function HomeScreen() {
   return (
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       <View style={styles.flex}>
-        {!session ? (
-          <View style={styles.center}>
-            <ThemedText style={{ color: palette.textSecondary }}>{t('common.pleaseLogin')}</ThemedText>
-            <Link href={'/mine' as Href}>
-              <ThemedText style={{ color: palette.info }}>{t('common.goLogin')}</ThemedText>
-            </Link>
-          </View>
-        ) : (
+        {session ? (
           <Host key={locale} style={styles.flex}>
             {/* insetGrouped List：按日分组 = 白卡 Section，行内左滑「编辑/删除」（原生 swipeActions 仅在 List 内生效）。 */}
             <List
@@ -604,7 +597,7 @@ export default function HomeScreen() {
               ) : null}
             </List>
           </Host>
-        )}
+        ) : null}
 
         {showEmptyLedger ? (
           <View

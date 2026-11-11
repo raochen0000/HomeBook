@@ -15,16 +15,18 @@ import { FamilyLiveSyncHost } from '@/features/sync/use-family-live-sync';
 import { QueryCacheProvider } from '@/features/sync/query-cache-provider';
 import { CacheStatusNotice } from '@/features/sync/cache-status';
 import { localePathRef, LocalePreferenceProvider, pendingLocaleRestoreRef, useLocalePreference } from '@/i18n';
-import { useSession } from '@/lib/auth';
+import { SessionProvider, useSession } from '@/lib/auth';
 
 export default function RootLayout() {
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <ThemePreferenceProvider>
         <LocalePreferenceProvider>
-          <QueryCacheProvider>
-            <AppShell />
-          </QueryCacheProvider>
+          <SessionProvider>
+            <QueryCacheProvider>
+              <AppShell />
+            </QueryCacheProvider>
+          </SessionProvider>
         </LocalePreferenceProvider>
       </ThemePreferenceProvider>
     </SafeAreaProvider>
@@ -110,7 +112,7 @@ function AppShell() {
       {/* 已登录：家庭协作同步（Realtime 门铃 + 回前台重拉）与关键通知兜底。 */}
       {session && !offline ? <FamilyLiveSyncHost /> : null}
       {session ? <NotificationGate /> : null}
-      {session ? <CacheStatusNotice /> : null}
+      {session ? <CacheStatusNotice key={pathname} /> : null}
       {/* 已登录时的全局轻提示；未登录由 login 路由自己挂 ToastHost。 */}
       {session ? <ToastHost /> : null}
       {showLaunchScreen ? <LaunchScreenOverlay /> : null}

@@ -24,7 +24,7 @@ import {
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { toast } from '@/components/toast';
-import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
+import { CacheInlineNotice, hasSettledRefreshFailure } from '@/features/sync/cache-inline-notice';
 import { Radius, Space, usePalette, useSheetPalette } from '@/constants/design';
 import { alertOk, t, useLocalePreference } from '@/i18n';
 import { INTL_LOCALE } from '@/i18n/locale';
@@ -134,7 +134,7 @@ function Body({ initialGoalId }: { initialGoalId?: string | null }) {
     <View style={[styles.root, { backgroundColor: palette.base }]}>
       {goalsQ.data ? (
         <CacheInlineNotice
-          failed={goalsQ.isError || familyQ.isError || profileQ.isError}
+          failed={hasSettledRefreshFailure([goalsQ, familyQ, profileQ])}
           updatedAt={goalsQ.dataUpdatedAt}
         />
       ) : null}

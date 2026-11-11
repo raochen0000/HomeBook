@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { onlineManager, useQueryClient } from '@tanstack/react-query';
 /**
  * 报表（Tab 2，流程 9 完整版）：周/月/年维度切换 + 收支结余概览 + 结余率仪表 + 消费趋势折线
  * + 累计同期对比双线 + 收支对比双柱 + 支出分类占比环形图 + 分类环比 + 成员贡献条形图
@@ -8,14 +8,34 @@ import { useQueryClient } from '@tanstack/react-query';
  * / 分类环比 / 成员贡献 / 大额 Top N 仅算「支出 + source=normal」；收入结构仅算 source=normal 收入
  * （均排除储蓄类）。
  */
-import { BottomSheet, DatePicker, Group, Host, Picker, RNHostView, Text as UIText } from '@expo/ui/swift-ui';
 import {
+  BottomSheet,
+  Button as UIButton,
+  DatePicker,
+  Group,
+  Host,
+  Image as UIImage,
+  Picker,
+  Popover,
+  RNHostView,
+  Text as UIText,
+} from '@expo/ui/swift-ui';
+import {
+  accessibilityLabel,
+  buttonStyle,
+  contentShape,
   datePickerStyle,
+  fixedSize,
+  font,
+  foregroundColor,
+  frame,
   labelsHidden,
+  padding,
   pickerStyle,
   presentationBackground,
   presentationDetents,
   presentationDragIndicator,
+  shapes,
   tag,
 } from '@expo/ui/swift-ui/modifiers';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -62,6 +82,7 @@ import { queryKeys } from '@/api/keys';
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { ThemedText } from '@/components/themed-text';
+import { UserAvatar } from '@/components/user-avatar';
 import { Radius, Space, TabBarInset, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { BudgetSheet } from '@/features/budget/budget-sheet';
 import {
@@ -81,15 +102,17 @@ import {
 import { compactReportCards, reportComparisonChange, reportComparisonRangeLabel } from '@/lib/report-presentation';
 import { Donut } from '@/features/report/donut';
 import { MoreStatsEntryCard, MoreStatsSheet } from '@/features/report/more-stats-ui';
+import { isOfflinePeriodUnavailable } from '@/features/report/period-availability';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
 import { useCollapsibleHeader } from '@/features/shared/use-collapsible-header';
+import { hasSettledRefreshFailure } from '@/features/sync/cache-inline-notice';
 import { displayCategoryName, i18n, INTL_LOCALE, t, useLocalePreference } from '@/i18n';
 import { fromI18nLanguage } from '@/i18n/locale';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
 import { buildCategoryHierarchy, categoryDescendantIds, type CategoryHierarchy } from '@/lib/category-hierarchy';
 import { calendarDateInTimeZone, currentPeriod, formatAmount, maskAmount, signForNet } from '@/lib/format';
 import { memberDisplayName } from '@/lib/member-name';
-import { isNetworkAvailable } from '@/lib/query-network';
+import { isNetworkAvailable, requestNetworkRecovery, useNetworkAvailable } from '@/lib/query-network';
 import {
   balanceRate,
   calendarDayDifference,
@@ -115,7 +138,7 @@ type CatSlice = { id: string; name: string; amount: number; color: string; symbo
 /** 分类下钻：单类用 id；「其它」聚合用 categoryIds。 */
 type CategoryDetail = { id: string; name: string; categoryIds?: string[]; type?: 'expense' | 'income' };
 type DisplayCatSlice = CatSlice & { categoryIds?: string[] };
-type Member = { id: string; name: string; amount: number; count: number };
+type Member = { id: string; name: string; avatarName: string; avatarUrl: string | null; amount: number; count: number };
 const EXPENSE_CATEGORY_TOP_COUNT = 5;
 const EXPENSE_CATEGORY_OTHER_ID = '__other__';
 type ReportFilters = { memberIds: string[]; categoryIds: string[] };
@@ -265,6 +288,12 @@ export default function ReportScreen() {
     return () => clearTimeout(timer);
   }, [switching, pendingDimension]);
   const [failedDimension, setFailedDimension] = useState<Dimension | null>(null);
+  const networkAvailable = useNetworkAvailable();
+  const wasNetworkAvailable = useRef(networkAvailable);
+  useEffect(() => {
+    if (!wasNetworkAvailable.current && networkAvailable) setFailedDimension(null);
+    wasNetworkAvailable.current = networkAvailable;
+  }, [networkAvailable]);
   useEffect(
     () => () => {
       switchRequest.current += 1;
@@ -421,6 +450,7 @@ export default function ReportScreen() {
     prerequisitesReady && !futurePeriod && hasIncomeFilters && (scope === 'income' || memberAnalysisOpen),
   );
   const switchDimension = async (next: Dimension) => {
+    requestNetworkRecovery();
     const request = ++switchRequest.current;
     if (switching && next === dimension) {
       setSwitching(false);
@@ -442,7 +472,6 @@ export default function ReportScreen() {
     setPendingDimension(next);
     setSwitchFamilyId(familyQ.data?.id);
     setShowSwitchMask(false);
-    setSwitching(true);
     const nextRange = periodRange(next, todayInFamilyTimeZone);
     const previous = periodRange(next, shiftAnchor(next, todayInFamilyTimeZone, -1));
     const history = periodRange(next, shiftAnchor(next, todayInFamilyTimeZone, -5));
@@ -460,6 +489,20 @@ export default function ReportScreen() {
         ? { ...input, memberIds: filters.memberIds, categoryIds: incomeCategoryIds }
         : { ...input, memberIds: filters.memberIds, categoryIds: expenseCategoryIds };
     const needsTopic = scope === 'income' ? hasIncomeFilters : scope === 'expense' && hasExpenseFilters;
+    if (
+      isOfflinePeriodUnavailable(
+        isNetworkAvailable(),
+        queryClient.getQueryData(queryKeys.reportAnalytics(input)),
+        needsTopic,
+        needsTopic ? queryClient.getQueryData(queryKeys.reportAnalytics(topicInput)) : undefined,
+      )
+    ) {
+      setPendingDimension(null);
+      setSwitching(false);
+      setFailedDimension(next);
+      return;
+    }
+    setSwitching(true);
     const load = (params: ReportAnalyticsInput) =>
       queryClient.ensureQueryData({
         queryKey: queryKeys.reportAnalytics(params),
@@ -513,12 +556,12 @@ export default function ReportScreen() {
     (!layoutQ.data && (layoutQ.isError || (layoutQ.fetchStatus === 'paused' && identityUnavailable)));
   const filterUnavailable = !catsQ.data || !layoutQ.data;
   const hasRefreshError =
-    (!futurePeriod && reportQ.isError && !!familyData) ||
-    (scope === 'expense' && hasExpenseFilters && expenseQ.isError && !!expenseData) ||
-    (scope === 'income' && hasIncomeFilters && incomeQ.isError && !!incomeData) ||
-    (dimension === 'month' && budgetQ.isError && !!budgetQ.data) ||
-    (dimension === 'month' && budgetProgressQ.isError && !!budgetProgressQ.data) ||
-    (savingsQ.isError && !!savingsQ.data);
+    (!futurePeriod && !!familyData && hasSettledRefreshFailure([reportQ])) ||
+    (scope === 'expense' && hasExpenseFilters && !!expenseData && hasSettledRefreshFailure([expenseQ])) ||
+    (scope === 'income' && hasIncomeFilters && !!incomeData && hasSettledRefreshFailure([incomeQ])) ||
+    (dimension === 'month' && !!budgetQ.data && hasSettledRefreshFailure([budgetQ])) ||
+    (dimension === 'month' && !!budgetProgressQ.data && hasSettledRefreshFailure([budgetProgressQ])) ||
+    (!!savingsQ.data && hasSettledRefreshFailure([savingsQ]));
 
   const comparison = useMemo(
     () => comparablePeriods(range, prevRange, todayInFamilyTimeZone),
@@ -633,6 +676,7 @@ export default function ReportScreen() {
     const memberNameById = new Map(
       mem.map((member) => [member.id, memberDisplayName(member.nickname, member.departed)]),
     );
+    const memberById = new Map(mem.map((member) => [member.id, member]));
     if (myId) memberNameById.set(myId, t('common.me'));
 
     // 分类展示信息（识别色 + 图标）按分类预先计算；流水循环只查 Map。
@@ -714,6 +758,8 @@ export default function ReportScreen() {
     const memberRows = (analytics?.members ?? []).map((item) => ({
       id: item.userId,
       name: memberNameById.get(item.userId) ?? memberFallback,
+      avatarName: memberById.get(item.userId)?.nickname ?? memberFallback,
+      avatarUrl: memberById.get(item.userId)?.avatar_url ?? null,
       amount: item.expenseNormalAmount,
       count: item.count,
     }));
@@ -992,7 +1038,6 @@ export default function ReportScreen() {
     ),
     expense_category: (
       <MonthlyExpenseCategoryCard
-        header={topicHeader(t('report.expenseMix'))}
         key={topicSelectionKey}
         categories={byCat}
         total={expenseTotal}
@@ -1267,12 +1312,20 @@ export default function ReportScreen() {
           <ReportLoadErrorState
             palette={palette}
             message={!isNetworkAvailable() ? t('common.noCachedData') : undefined}
-            onRetry={() => {
-              void reportQ.refetch();
-              void familyQ.refetch();
-              void profileQ.refetch();
-              void catsQ.refetch();
-              void layoutQ.refetch();
+            onRetry={async () => {
+              if (!(await requestNetworkRecovery())) return;
+              if (!onlineManager.isOnline() || familyQ.isError || profileQ.isError) {
+                await Promise.allSettled([
+                  familyQ.refetch({ cancelRefetch: false }),
+                  profileQ.refetch({ cancelRefetch: false }),
+                ]);
+              }
+              if (!onlineManager.isOnline()) return;
+              await Promise.allSettled([
+                reportQ.refetch({ cancelRefetch: false }),
+                catsQ.refetch({ cancelRefetch: false }),
+                layoutQ.refetch({ cancelRefetch: false }),
+              ]);
             }}
           />
         ) : (
@@ -1374,10 +1427,12 @@ export default function ReportScreen() {
                 accessibilityLiveRegion="polite"
               >
                 <ThemedText style={{ color: palette.textPrimary }}>
-                  {t('report.periodSwitchFailed', {
-                    target: reportPeriodName(failedDimension),
-                    current: reportPeriodName(dimension),
-                  })}
+                  {networkAvailable
+                    ? t('report.periodSwitchFailed', {
+                        target: reportPeriodName(failedDimension),
+                        current: reportPeriodName(dimension),
+                      })
+                    : `${t('common.noCachedData')} · ${t('report.showingPeriod', { period: reportPeriodName(dimension) })}`}
                 </ThemedText>
                 <View style={{ flexDirection: 'row', gap: Space[4] }}>
                   <Pressable
@@ -1622,27 +1677,60 @@ function ReportLoadErrorState({
   message,
 }: {
   palette: ReturnType<typeof usePalette>;
-  onRetry: () => void;
+  onRetry: () => Promise<unknown>;
   message?: string;
 }) {
+  const [retrying, setRetrying] = useState(false);
+  const retryInFlight = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const retry = async () => {
+    if (retryInFlight.current) return;
+    retryInFlight.current = true;
+    setRetrying(true);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const minimumDisplay = new Promise<void>((resolve) => setTimeout(resolve, 300));
+    try {
+      await Promise.race([
+        Promise.resolve().then(onRetry),
+        new Promise<void>((resolve) => {
+          timeout = setTimeout(resolve, 8_000);
+        }),
+      ]).catch(() => {});
+      await minimumDisplay;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      retryInFlight.current = false;
+      if (mounted.current) setRetrying(false);
+    }
+  };
+
   return (
-    <View
-      style={styles.reportErrorState}
-      accessible
-      accessibilityRole="alert"
-      accessibilityLabel={message ?? t('common.loadFailed')}
-    >
+    <View style={styles.reportErrorState}>
       <SymbolView name="exclamationmark.triangle" tintColor={palette.textTertiary} size={36} />
-      <ThemedText style={[styles.reportErrorTitle, { color: palette.textPrimary }]}>
+      <ThemedText accessibilityLiveRegion="polite" style={[styles.reportErrorTitle, { color: palette.textPrimary }]}>
         {message ?? t('common.loadFailed')}
       </ThemedText>
       <Pressable
         style={[styles.reportRetryButton, { borderColor: palette.separator }]}
-        onPress={onRetry}
+        onPress={() => void retry()}
+        disabled={retrying}
         accessibilityRole="button"
         accessibilityLabel={t('common.retry')}
+        accessibilityState={{ disabled: retrying, busy: retrying }}
       >
-        <SymbolView name="arrow.clockwise" tintColor={palette.accent} size={15} />
+        {retrying ? (
+          <ActivityIndicator color={palette.accent} size="small" />
+        ) : (
+          <SymbolView name="arrow.clockwise" tintColor={palette.accent} size={15} />
+        )}
         <ThemedText style={[styles.reportRetryText, { color: palette.accent }]}>{t('common.retry')}</ThemedText>
       </Pressable>
     </View>
@@ -3346,7 +3434,6 @@ function buildExpenseCategoryRows(categories: CatSlice[], otherColor: string): D
 }
 
 function MonthlyExpenseCategoryCard({
-  header,
   categories,
   total,
   palette,
@@ -3354,7 +3441,6 @@ function MonthlyExpenseCategoryCard({
   onOpenDetail,
   emptyText = t('report.emptyMonthExpense'),
 }: {
-  header?: ReactNode;
   categories: CatSlice[];
   total: number;
   palette: ReturnType<typeof usePalette>;
@@ -3363,6 +3449,7 @@ function MonthlyExpenseCategoryCard({
   emptyText?: string;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
   const { locale } = useLocalePreference();
   const rows = useMemo(() => {
     void locale;
@@ -3378,7 +3465,50 @@ function MonthlyExpenseCategoryCard({
         count: categories.length,
       })}
     >
-      {header ?? <ReportCardHeader title={t('report.expenseMix')} />}
+      <View style={styles.cardHeaderRow}>
+        <View style={styles.expenseMixTitleGroup}>
+          <Text accessibilityRole="header" style={[styles.expenseMixTitle, { color: palette.textPrimary }]}>
+            {t('report.expenseMix')}
+          </Text>
+          {/* 滚动到屏幕边缘时，由外层页面处理安全区，避免 SwiftUI 再次偏移触发器。 */}
+          <Host ignoreSafeArea="all" style={styles.expenseMixInfoHost}>
+            <Popover isPresented={infoOpen} onIsPresentedChange={setInfoOpen} arrowEdge="top">
+              <Popover.Trigger>
+                <UIButton
+                  onPress={() => setInfoOpen(true)}
+                  modifiers={[
+                    buttonStyle('plain'),
+                    accessibilityLabel(t('report.chartInfo', { title: t('report.expenseMix') })),
+                  ]}
+                >
+                  <UIImage
+                    systemName="info.circle"
+                    size={14}
+                    color={palette.textSecondary}
+                    modifiers={[frame({ width: 44, height: 44 }), contentShape(shapes.rectangle())]}
+                  />
+                </UIButton>
+              </Popover.Trigger>
+              <Popover.Content>
+                <UIText
+                  modifiers={[
+                    font({ size: 14 }),
+                    foregroundColor(palette.textPrimary),
+                    padding({ all: Space[4] }),
+                    frame({ width: 260, alignment: 'leading' }),
+                    fixedSize({ horizontal: false, vertical: true }),
+                  ]}
+                >
+                  {t('report.expenseMixInfo')}
+                </UIText>
+              </Popover.Content>
+            </Popover>
+          </Host>
+        </View>
+        <ThemedText style={[styles.expenseMixTotal, { color: palette.textPrimary }]}>
+          {t('report.expenseMixTotal', { amount: maskAmount(formatAmount(total, ''), hidden) })}
+        </ThemedText>
+      </View>
       {categories.length === 0 ? (
         <View style={styles.emptyBox}>
           <SymbolView name="chart.pie" tintColor={palette.textTertiary} size={40} />
@@ -3393,14 +3523,7 @@ function MonthlyExpenseCategoryCard({
             trackColor={palette.base}
             accessibilityLabel={t('report.mixChartA11y', { name: rows[0]?.name ?? t('report.noneYet') })}
             onSlicePress={(index) => setSelectedId(rows[index]?.id ?? null)}
-          >
-            <ThemedText style={[styles.donutCaption, { color: palette.textSecondary }]}>
-              {t('report.totalExpense')}
-            </ThemedText>
-            <ThemedText style={[styles.monthlyDonutTotal, { color: palette.textPrimary }]}>
-              {maskAmount(formatAmount(total, ''), hidden)}
-            </ThemedText>
-          </Donut>
+          />
           <View style={styles.monthlyCategoryList}>
             {rows.map((category) => {
               const percent = total > 0 ? Math.round((category.amount / total) * 100) : 0;
@@ -3485,10 +3608,13 @@ function MonthlyMemberCard({
       ) : (
         <View style={styles.memberList}>
           {members.map((member) => (
-            <View key={member.id} style={styles.memberRow}>
-              <ThemedText style={[styles.memberName, { color: palette.textPrimary }]} numberOfLines={1}>
-                {member.name}
-              </ThemedText>
+            <View
+              key={member.id}
+              style={styles.memberRow}
+              accessible
+              accessibilityLabel={`${member.name}，${t('report.countWithUnit', { count: hidden ? '****' : member.count })}`}
+            >
+              <UserAvatar avatarUrl={member.avatarUrl} nickname={member.avatarName} size={32} />
               <View style={styles.memberBarWrap}>
                 <View style={[styles.memberBarTrack, { backgroundColor: palette.base }]}>
                   <View
@@ -3499,7 +3625,7 @@ function MonthlyMemberCard({
                   />
                 </View>
               </View>
-              <ThemedText style={[styles.memberCount, { color: palette.textPrimary }]}>
+              <ThemedText style={[styles.memberCount, { color: palette.textPrimary }]} numberOfLines={1}>
                 {hidden ? '****' : member.count}
               </ThemedText>
             </View>
@@ -3825,7 +3951,12 @@ function CategoryDetailSheet({
           {detailQ.isLoading ? (
             <ActivityIndicator />
           ) : detailQ.isError && !firstPage ? (
-            <ReportLoadErrorState palette={palette} onRetry={() => void detailQ.refetch()} />
+            <ReportLoadErrorState
+              palette={palette}
+              onRetry={async () => {
+                if (await requestNetworkRecovery()) await detailQ.refetch({ cancelRefetch: false });
+              }}
+            />
           ) : (
             <ScrollView contentContainerStyle={styles.sheetContent}>
               <View style={[styles.detailSummaryCard, { backgroundColor: palette.card }]}>
@@ -4467,6 +4598,16 @@ const styles = StyleSheet.create({
   inlineStatus: { minHeight: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Space[3] },
   noMargin: { marginBottom: 0 },
   cardHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space[3] },
+  expenseMixTitleGroup: { flexDirection: 'row', alignItems: 'center', flexShrink: 1 },
+  expenseMixTitle: { fontSize: 17, fontWeight: '600' },
+  expenseMixInfoHost: { width: 44, height: 44 },
+  expenseMixTotal: {
+    flexShrink: 1,
+    textAlign: 'right',
+    fontSize: 16,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
   cardHeaderAction: { flexDirection: 'row', alignItems: 'center', gap: Space[1] },
   dataReadinessCard: {
     minHeight: 68,
@@ -4577,7 +4718,6 @@ const styles = StyleSheet.create({
   chartMeta: { fontSize: 13, fontWeight: '500', fontVariant: ['tabular-nums'] },
   categoryCaption: { fontSize: 12, fontWeight: '400' },
   monthlyCategoryBody: { alignItems: 'center', gap: Space[3], paddingTop: Space[3] },
-  monthlyDonutTotal: { fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'] },
   monthlyCategoryList: { alignSelf: 'stretch', gap: 0 },
   monthlyCategoryRow: {
     minHeight: 36,
@@ -4686,7 +4826,7 @@ const styles = StyleSheet.create({
   insightActionText: { fontSize: 12, lineHeight: 16, fontWeight: '700' },
   insightMinorList: { gap: Space[2] },
   insightMinorRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
-  insightDot: { width: 8, height: 8, borderRadius: Radius.full, marginTop: 6 },
+  insightDot: { width: 8, height: 8, borderRadius: Radius.full },
   insightMinorTitle: { width: 82, fontSize: 13, fontWeight: '700' },
   insightMinorBody: { flex: 1, fontSize: 13 },
   insightDetailHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: Space[3] },
@@ -4741,7 +4881,6 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 17, fontWeight: '600', marginBottom: Space[3] },
   emptyBox: { alignItems: 'center', justifyContent: 'center', gap: Space[2], paddingVertical: Space[6] },
   donutWrap: { alignItems: 'center', paddingVertical: Space[2] },
-  donutCaption: { fontSize: 12 },
   donutTotal: { fontSize: 22, fontWeight: '700', fontVariant: ['tabular-nums'] },
   list: { marginTop: Space[4] },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: 40 },
@@ -4755,12 +4894,11 @@ const styles = StyleSheet.create({
   memberList: { gap: Space[3] },
   memberTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2], marginBottom: Space[3] },
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: Space[3] },
-  memberName: { fontSize: 14, width: 72 },
   memberBarWrap: { flex: 1 },
   memberBarTrack: { height: 10, borderRadius: Radius.full, overflow: 'hidden' },
   memberBarFill: { height: '100%', borderRadius: Radius.full },
   memberAmount: { fontSize: 13, fontVariant: ['tabular-nums'], width: 76, textAlign: 'right' },
-  memberCount: { fontSize: 16, fontWeight: '600', fontVariant: ['tabular-nums'], width: 28, textAlign: 'right' },
+  memberCount: { fontSize: 16, fontWeight: '600', fontVariant: ['tabular-nums'], textAlign: 'right' },
   memberContributionRow: { flexDirection: 'row', alignItems: 'center', gap: Space[2], paddingVertical: Space[2] },
   memberContributionName: { width: 72, fontSize: 13, fontWeight: '600' },
   memberContributionBars: { flex: 1, gap: Space[1] },

@@ -36,7 +36,7 @@ import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SHEET_HEADER_HEIGHT, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { isLikelyNetworkError } from '@/features/record/save-attempt';
-import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
+import { CacheInlineNotice, hasSettledRefreshFailure } from '@/features/sync/cache-inline-notice';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { automaticCategoryColorKey, categoryColorKey, customCategoryColorKey } from '@/lib/category-style';
 import { currentPeriodInTimeZone, formatAmount } from '@/lib/format';
@@ -641,7 +641,7 @@ function List({ palette, setView }: { palette: ReturnType<typeof usePalette>; se
 
         <ScrollView contentContainerStyle={styles.content}>
           <CacheInlineNotice
-            failed={catsQ.isError || layoutQ.isError || hiddenQ.isError || familyQ.isError || profileQ.isError}
+            failed={hasSettledRefreshFailure([catsQ, layoutQ, hiddenQ, familyQ, profileQ])}
             updatedAt={Math.min(catsQ.dataUpdatedAt, layoutQ.dataUpdatedAt, hiddenQ.dataUpdatedAt)}
           />
           {/* 新增 */}

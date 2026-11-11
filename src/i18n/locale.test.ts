@@ -44,3 +44,19 @@ describe('family.moreGoals plural', () => {
     expect(t('family.moreGoals', { count: 2 })).toBe(' · 2 more goals');
   });
 });
+
+describe('cached status translations', () => {
+  afterEach(() => setAppLocale('zh'));
+
+  it('uses the requested locale for both the title and timestamp while the global language differs', () => {
+    setAppLocale('en');
+    expect(t('common.cachedStatus', { lng: toI18nLanguage('zh') })).toBe('数据可能未更新');
+    expect(t('common.cachedOldest', { lng: toI18nLanguage('zh'), time: '11/11 16:33' })).toBe('最早更新 11/11 16:33');
+
+    setAppLocale('zh');
+    expect(t('common.cachedStatus', { lng: toI18nLanguage('en') })).toBe('Data may be outdated');
+    expect(t('common.cachedOldest', { lng: toI18nLanguage('en'), time: '11/11 16:33' })).toBe(
+      'Oldest update: 11/11 16:33',
+    );
+  });
+});

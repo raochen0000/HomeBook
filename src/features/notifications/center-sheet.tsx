@@ -19,7 +19,7 @@ import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
 import { Radius, Space, Typography, useSheetPalette } from '@/constants/design';
 import { notificationHrefForItem } from '@/features/notifications/notification-routes';
-import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
+import { CacheInlineNotice, hasSettledRefreshFailure } from '@/features/sync/cache-inline-notice';
 import { i18n, t, useLocalePreference } from '@/i18n';
 import { fromI18nLanguage, INTL_LOCALE } from '@/i18n/locale';
 import { isNetworkAvailable } from '@/lib/query-network';
@@ -170,7 +170,7 @@ function Body({ onClose }: { onClose: () => void }) {
         <SheetHeader title={t('notifications.center')} />
         {listQ.data ? (
           <CacheInlineNotice
-            failed={listQ.isError || familyQ.isError || profileQ.isError}
+            failed={hasSettledRefreshFailure([listQ, familyQ, profileQ])}
             updatedAt={listQ.dataUpdatedAt}
           />
         ) : null}

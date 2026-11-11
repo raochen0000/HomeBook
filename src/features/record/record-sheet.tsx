@@ -64,7 +64,7 @@ import {
   type Transaction,
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
-import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
+import { CacheInlineNotice, hasSettledRefreshFailure } from '@/features/sync/cache-inline-notice';
 import { playToastHaptic, toast, ToastNotice, type ToastItem } from '@/components/toast';
 import { Radius, Space, useCategoryColors, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, INTL_LOCALE, t, useLocalePreference } from '@/i18n';
@@ -530,7 +530,7 @@ function RecordForm({
       <View style={styles.catArea} onLayout={(e) => setCatAreaW(e.nativeEvent.layout.width)}>
         {categoriesReady ? (
           <CacheInlineNotice
-            failed={familyQ.isError || profileQ.isError || categoriesQ.isError || layoutQ.isError || hiddenQ.isError}
+            failed={hasSettledRefreshFailure([familyQ, profileQ, categoriesQ, layoutQ, hiddenQ])}
             updatedAt={Math.min(categoriesQ.dataUpdatedAt, layoutQ.dataUpdatedAt, hiddenQ.dataUpdatedAt)}
           />
         ) : null}

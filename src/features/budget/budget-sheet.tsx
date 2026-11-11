@@ -34,7 +34,7 @@ import {
 } from '@/api';
 import { PageSheet } from '@/components/page-sheet';
 import { SHEET_CONTENT_TOP_PADDING, SheetHeader } from '@/components/sheet-header';
-import { CacheInlineNotice } from '@/features/sync/cache-inline-notice';
+import { CacheInlineNotice, hasSettledRefreshFailure } from '@/features/sync/cache-inline-notice';
 import { Radius, Space, useCategoryColors, usePalette, useSheetPalette } from '@/constants/design';
 import { alertOk, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { budgetLevel, daysToMonthEnd } from '@/lib/budget';
@@ -99,7 +99,7 @@ function Body() {
         <SheetHeader title={t('budget.titled', { month: monthLabel(new Date()) })} />
         {!missing ? (
           <CacheInlineNotice
-            failed={budgetQ.isError || progressQ.isError || familyQ.isError || profileQ.isError}
+            failed={hasSettledRefreshFailure([budgetQ, progressQ, familyQ, profileQ])}
             updatedAt={budgetQ.dataUpdatedAt}
           />
         ) : null}
