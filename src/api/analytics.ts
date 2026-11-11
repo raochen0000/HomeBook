@@ -201,8 +201,11 @@ export function useFamilyActivity() {
   return useQuery({ queryKey: queryKeys.familyActivity, queryFn: fetchFamilyActivity });
 }
 
-export async function fetchReportAnalytics(input: ReportAnalyticsInput): Promise<ReportAnalytics> {
-  const { data, error } = await supabase.rpc('get_report_analytics', {
+export async function fetchReportAnalytics(
+  input: ReportAnalyticsInput,
+  signal?: AbortSignal,
+): Promise<ReportAnalytics> {
+  const request = supabase.rpc('get_report_analytics', {
     p_start: input.start,
     p_end: input.end,
     p_previous_start: input.previousStart,
@@ -210,6 +213,7 @@ export async function fetchReportAnalytics(input: ReportAnalyticsInput): Promise
     p_member_ids: input.memberIds,
     p_category_ids: input.categoryIds,
   });
+  const { data, error } = await (signal ? request.abortSignal(signal) : request);
   if (error) throw error;
   return parseReportAnalytics(data);
 }

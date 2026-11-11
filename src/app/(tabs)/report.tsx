@@ -9,15 +9,12 @@ import { onlineManager, useQueryClient } from '@tanstack/react-query';
  * （均排除储蓄类）。
  */
 import {
-  BottomSheet,
   Button as UIButton,
   DatePicker,
-  Group,
   Host,
   Image as UIImage,
   Picker,
   Popover,
-  RNHostView,
   Text as UIText,
 } from '@expo/ui/swift-ui';
 import {
@@ -32,9 +29,6 @@ import {
   labelsHidden,
   padding,
   pickerStyle,
-  presentationBackground,
-  presentationDetents,
-  presentationDragIndicator,
   shapes,
   tag,
 } from '@expo/ui/swift-ui/modifiers';
@@ -101,6 +95,8 @@ import {
 } from '@/features/report/presentation';
 import { compactReportCards, reportComparisonChange, reportComparisonRangeLabel } from '@/lib/report-presentation';
 import { Donut } from '@/features/report/donut';
+import { ReportFilterSheet } from '@/features/report/filter-sheet';
+import { filterRequests, prepareFilterResults } from '@/features/report/filter-logic';
 import { MoreStatsEntryCard, MoreStatsSheet } from '@/features/report/more-stats-ui';
 import { isOfflinePeriodUnavailable } from '@/features/report/period-availability';
 import { SavingsSheet } from '@/features/savings/savings-sheet';
@@ -194,10 +190,6 @@ function periodName(dimension: Dimension): string {
 const EMPTY_FILTERS: ReportFilters = { memberIds: [], categoryIds: [] };
 const DEFAULT_INCOME_TARGETS: IncomeTargets = { annual: 0, custom: 0, activeRatio: 70 };
 const INCOME_TARGETS_KEY = 'homebook:report-income-targets:v1';
-
-function arrayToggle(list: string[], id: string): string[] {
-  return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
-}
 
 function activeFilterCount(filters: ReportFilters): number {
   return filters.memberIds.length + filters.categoryIds.length;
@@ -357,7 +349,34 @@ export default function ReportScreen() {
   const [anchorOverride, setAnchor] = useState<Date | null>(null);
   const anchor = anchorOverride ?? todayInFamilyTimeZone;
   const [filters, setFilters] = useState<ReportFilters>(EMPTY_FILTERS);
-  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterOpenPending, setFilterOpen] = useState(false);
+  const [filterFamilyId, setFilterFamilyId] = useState<string | undefined>();
+  const filterOpen = filterOpenPending && filterFamilyId === familyQ.data?.id;
+  const [filterDraft, setFilterDraft] = useState<ReportFilters>(EMPTY_FILTERS);
+  const [filterPending, setFilterPending] = useState<'confirm' | 'reset' | null>(null);
+  const [filterError, setFilterError] = useState(false);
+  const filterAttempt = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      filterAttempt.current?.abort();
+      filterAttempt.current = null;
+    },
+    [familyQ.data?.id],
+  );
+  const openFilter = () => {
+    setFilterPending(null);
+    setFilterFamilyId(familyQ.data?.id);
+    setFilterDraft({ memberIds: [...filters.memberIds], categoryIds: [...filters.categoryIds] });
+    setFilterError(false);
+    setFilterOpen(true);
+  };
+  const closeFilter = () => {
+    filterAttempt.current?.abort();
+    filterAttempt.current = null;
+    setFilterPending(null);
+    setFilterError(false);
+    setFilterOpen(false);
+  };
   const [incomeTargets, setIncomeTargets] = useState<IncomeTargets>(DEFAULT_INCOME_TARGETS);
   const [incomeTargetOpen, setIncomeTargetOpen] = useState(false);
   const [customStartOverride, setCustomStart] = useState<Date | null>(null);
@@ -546,7 +565,6 @@ export default function ReportScreen() {
   const topicQ = scope === 'income' ? incomeQ : expenseQ;
   const topicFiltersApplied = scope === 'income' ? hasIncomeFilters : hasExpenseFilters;
   const topicUnavailable = scope !== 'balance' && topicFiltersApplied && !reportData;
-  const filteredCount = scope === 'balance' ? null : (reportData?.summary.transactionCount ?? null);
   const activeFilters = activeFilterCount(filters);
   const identityUnavailable = !isNetworkAvailable() || familyQ.isError || profileQ.isError;
   const reportLoadFailed =
@@ -622,6 +640,76 @@ export default function ReportScreen() {
     prerequisitesReady && !futurePeriod && !filterOpen && comparisonVisible && !!comparison?.inProgress;
   const currentComparisonQ = useReportAnalytics(currentComparisonInput, fetchPartialComparison);
   const previousComparisonQ = useReportAnalytics(previousComparisonInput, fetchPartialComparison);
+
+  const submitFilter = async (action: 'confirm' | 'reset') => {
+    if (filterAttempt.current) return;
+    const next = action === 'reset' ? EMPTY_FILTERS : filterDraft;
+    if (action === 'reset') setFilterDraft(EMPTY_FILTERS);
+    const same = (a: string[], b: string[]) => a.length === b.length && a.every((id) => b.includes(id));
+    if (same(next.memberIds, filters.memberIds) && same(next.categoryIds, filters.categoryIds)) {
+      closeFilter();
+      return;
+    }
+    const controller = new AbortController();
+    filterAttempt.current = controller;
+    setFilterError(false);
+    setFilterPending(action);
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const selectedCategories = categoryIdsForReportType(
+        next.categoryIds,
+        catsQ.data ?? [],
+        scope === 'income' ? 'income' : 'expense',
+      );
+      const input = { ...familyInput, memberIds: next.memberIds, categoryIds: selectedCategories };
+      const currentCategories = scope === 'income' ? incomeCategoryIds : expenseCategoryIds;
+      const topicChanged = !same(next.memberIds, filters.memberIds) || !same(selectedCategories, currentCategories);
+      const requests = filterRequests(input, {
+        changed: topicChanged,
+        future: futurePeriod,
+        scope,
+        comparisonVisible,
+        comparisonInProgress: !!comparison?.inProgress,
+        currentComparison: currentComparisonInput,
+        previousComparison: previousComparisonInput,
+      });
+      const results = await prepareFilterResults(
+        requests,
+        async (params) => {
+          const key = queryKeys.reportAnalytics(params);
+          const state = queryClient.getQueryState<ReportAnalytics>(key);
+          if (
+            state?.data &&
+            !state.isInvalidated &&
+            (!isNetworkAvailable() || Date.now() - state.dataUpdatedAt < 30_000)
+          ) {
+            return { key, data: state.data, cached: true };
+          }
+          if (!isNetworkAvailable()) throw new Error('Offline');
+          return { key, data: await fetchReportAnalytics(params, controller.signal), cached: false };
+        },
+        controller.signal,
+      );
+      if (filterAttempt.current !== controller) return;
+      if (controller.signal.aborted) throw new Error('Timed out');
+      results.forEach(({ key, data, cached }) => {
+        if (!cached) queryClient.setQueryData(key, data);
+      });
+      setFilters(next);
+      filterAttempt.current = null;
+      setFilterPending(null);
+      setFilterOpen(false);
+    } catch {
+      if (filterAttempt.current === controller) {
+        controller.abort();
+        filterAttempt.current = null;
+        setFilterPending(null);
+        setFilterError(true);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -1255,7 +1343,7 @@ export default function ReportScreen() {
                   ? t('report.emptyComparisonExpense')
                   : t('report.noMemberRecords', { period: periodText })
           }
-          onAdjust={topicFiltersApplied ? () => setFilterOpen(true) : undefined}
+          onAdjust={topicFiltersApplied ? openFilter : undefined}
         >
           {showPrevious ? (
             <ReportDisclosure
@@ -1544,7 +1632,7 @@ export default function ReportScreen() {
               filterCount={activeFilters}
               description={filterDescription}
               disabled={filterUnavailable || switching}
-              onPress={() => setFilterOpen(true)}
+              onPress={openFilter}
             />
           </Animated.View>
         </View>
@@ -1625,16 +1713,15 @@ export default function ReportScreen() {
       />
       <ReportFilterSheet
         visible={filterOpen}
-        filters={filters}
+        filters={filterDraft}
         members={ledgerMembers}
         categories={catsQ.data ?? []}
         hierarchy={hierarchy}
-        matchedCount={filteredCount}
-        scope={scope}
-        futurePeriod={futurePeriod}
-        matchedFailed={topicUnavailable && (topicQ.isError || topicQ.fetchStatus === 'paused')}
-        onChange={setFilters}
-        onClose={() => setFilterOpen(false)}
+        pending={filterPending}
+        error={filterError}
+        onChange={setFilterDraft}
+        onSubmit={(action) => void submitFilter(action)}
+        onClose={closeFilter}
       />
       <IncomeTargetSheet
         visible={incomeTargetOpen}
@@ -1773,223 +1860,6 @@ function AddReportCardButton({
       <SymbolView name="plus.circle" tintColor={palette.accent} size={18} />
       <ThemedText style={[styles.addCardText, { color: palette.accent }]}>{t('report.addCard')}</ThemedText>
       <ThemedText style={[styles.addCardCount, { color: palette.textSecondary }]}>{hiddenCount}</ThemedText>
-    </Pressable>
-  );
-}
-
-function ReportFilterSheet({
-  visible,
-  filters,
-  members,
-  categories,
-  hierarchy,
-  matchedCount,
-  scope,
-  futurePeriod,
-  matchedFailed,
-  onChange,
-  onClose,
-}: {
-  visible: boolean;
-  filters: ReportFilters;
-  members: { id: string; nickname: string }[];
-  categories: Category[];
-  hierarchy: CategoryHierarchy;
-  matchedCount: number | null;
-  scope: ReportScope;
-  futurePeriod: boolean;
-  matchedFailed: boolean;
-  onChange: (filters: ReportFilters) => void;
-  onClose: () => void;
-}) {
-  const palette = useSheetPalette();
-  const expenseCategories = categories.filter(
-    (c) => c.type === 'expense' && !hierarchy.layoutById.get(c.id)?.parent_category_id,
-  );
-  const incomeCategories = categories.filter(
-    (c) => c.type === 'income' && !hierarchy.layoutById.get(c.id)?.parent_category_id,
-  );
-  const setMember = (id: string) => onChange({ ...filters, memberIds: arrayToggle(filters.memberIds, id) });
-  const setCategory = (id: string) => onChange({ ...filters, categoryIds: arrayToggle(filters.categoryIds, id) });
-  const toggleGroup = (id: string) => {
-    const ids = categoryDescendantIds(id, hierarchy);
-    const selected = new Set(filters.categoryIds);
-    const remove = ids.every((item) => selected.has(item));
-    for (const item of ids) {
-      if (remove) selected.delete(item);
-      else selected.add(item);
-    }
-    onChange({ ...filters, categoryIds: [...selected] });
-  };
-  const renderCategoryFilter = (category: Category) => {
-    const group =
-      hierarchy.layoutById.get(category.id)?.is_group && (hierarchy.childrenByParent.get(category.id)?.length ?? 0) > 0;
-    const ids = group ? categoryDescendantIds(category.id, hierarchy) : [category.id];
-    const selectedCount = ids.filter((id) => filters.categoryIds.includes(id)).length;
-    return (
-      <Fragment key={category.id}>
-        <FilterChip
-          label={`${displayCategoryName(category.name, category.is_system)}${group && selectedCount > 0 && selectedCount < ids.length ? ` (${t('category.partial')})` : ''}`}
-          selected={selectedCount === ids.length}
-          palette={palette}
-          onPress={() => (group ? toggleGroup(category.id) : setCategory(category.id))}
-        />
-        {group
-          ? ids.map((id) => {
-              const child = hierarchy.byId.get(id);
-              if (!child) return null;
-              const label =
-                id === category.id ? t('category.unspecified') : displayCategoryName(child.name, child.is_system);
-              return (
-                <FilterChip
-                  key={id}
-                  label={`${displayCategoryName(category.name, category.is_system)} / ${label}`}
-                  selected={filters.categoryIds.includes(id)}
-                  palette={palette}
-                  onPress={() => setCategory(id)}
-                />
-              );
-            })
-          : null}
-      </Fragment>
-    );
-  };
-  const reset = () => onChange(EMPTY_FILTERS);
-
-  return (
-    <Host style={styles.filterSheetAnchor}>
-      <BottomSheet
-        isPresented={visible}
-        onIsPresentedChange={(presented) => {
-          if (!presented) onClose();
-        }}
-      >
-        <Group
-          modifiers={[
-            presentationDetents([{ fraction: 0.9 }]),
-            presentationDragIndicator('visible'),
-            presentationBackground(palette.base),
-          ]}
-        >
-          <RNHostView>
-            <View style={[styles.root, { backgroundColor: palette.base }]}>
-              <SafeAreaView edges={['left', 'right']} style={styles.flex}>
-                <SheetHeader title={t('report.globalFilter')} onClose={onClose} />
-                <ScrollView contentContainerStyle={styles.sheetContent}>
-                  <View style={[styles.filterSummaryCard, { backgroundColor: palette.card }]}>
-                    <View style={[styles.filterSummaryIcon, { backgroundColor: palette.cardPill }]}>
-                      <SymbolView name="line.3.horizontal.decrease" tintColor={palette.accent} size={18} />
-                    </View>
-                    <View style={styles.flex}>
-                      <Text style={[styles.filterSummaryTitle, { color: palette.textPrimary }]}>
-                        {t('report.filterUnify')}
-                      </Text>
-                      <Text style={[styles.filterSummaryText, { color: palette.textSecondary }]}>
-                        {t('report.filterUnifyHint')}
-                      </Text>
-                    </View>
-                  </View>
-                  <FilterSection title={t('report.filterMembers')} palette={palette}>
-                    {members.map((member) => (
-                      <FilterChip
-                        key={member.id}
-                        label={member.nickname}
-                        selected={filters.memberIds.includes(member.id)}
-                        palette={palette}
-                        onPress={() => setMember(member.id)}
-                      />
-                    ))}
-                  </FilterSection>
-                  <FilterSection title={t('report.filterExpenseCats')} palette={palette}>
-                    {expenseCategories.map(renderCategoryFilter)}
-                  </FilterSection>
-                  <FilterSection title={t('report.filterIncomeCats')} palette={palette}>
-                    {incomeCategories.map(renderCategoryFilter)}
-                  </FilterSection>
-                  <View style={[styles.pendingFilterCard, { backgroundColor: palette.card }]}>
-                    <SymbolView name="tray" tintColor={palette.textTertiary} size={20} />
-                    <View style={styles.flex}>
-                      <Text style={[styles.pendingFilterTitle, { color: palette.textPrimary }]}>
-                        {t('report.pendingAccount')}
-                      </Text>
-                      <Text style={[styles.pendingFilterText, { color: palette.textSecondary }]}>
-                        {t('report.pendingAccountHint')}
-                      </Text>
-                    </View>
-                  </View>
-                </ScrollView>
-                <View
-                  style={[styles.filterFooter, { backgroundColor: palette.base, borderTopColor: palette.separator }]}
-                >
-                  <Text style={[styles.filterFooterMeta, { color: palette.textSecondary }]}>
-                    {futurePeriod
-                      ? t('report.futureReportHint')
-                      : scope === 'balance'
-                        ? t('report.filterBalanceHint')
-                        : matchedCount == null
-                          ? t(matchedFailed ? 'common.loadFailed' : 'report.filterCountLoading')
-                          : t('report.matchedTopicCount', {
-                              scope: t(scope === 'expense' ? 'record.expense' : 'record.income'),
-                              count: matchedCount,
-                            })}
-                  </Text>
-                  <Pressable style={[styles.filterReset, { borderColor: palette.separator }]} onPress={reset}>
-                    <Text style={[styles.filterResetText, { color: palette.textPrimary }]}>{t('common.reset')}</Text>
-                  </Pressable>
-                </View>
-              </SafeAreaView>
-            </View>
-          </RNHostView>
-        </Group>
-      </BottomSheet>
-    </Host>
-  );
-}
-
-function FilterSection({
-  title,
-  palette,
-  children,
-}: {
-  title: string;
-  palette: ReturnType<typeof usePalette>;
-  children: ReactNode;
-}) {
-  return (
-    <View style={[styles.filterSection, { backgroundColor: palette.card }]}>
-      <Text style={[styles.filterSectionTitle, { color: palette.textPrimary }]}>{title}</Text>
-      <View style={styles.filterChips}>{children}</View>
-    </View>
-  );
-}
-
-function FilterChip({
-  label,
-  selected,
-  palette,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  palette: ReturnType<typeof usePalette>;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      hitSlop={4}
-      style={[
-        styles.filterChip,
-        {
-          borderColor: selected ? palette.accent : palette.separator,
-          backgroundColor: selected ? palette.accent : 'transparent',
-        },
-      ]}
-      onPress={onPress}
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: selected }}
-    >
-      {selected ? <SymbolView name="checkmark" tintColor={palette.onAccent} size={12} /> : null}
-      <Text style={[styles.filterChipText, { color: selected ? palette.onAccent : palette.textPrimary }]}>{label}</Text>
     </Pressable>
   );
 }
