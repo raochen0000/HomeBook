@@ -13,6 +13,7 @@ import { Image } from 'expo-image';
 import { useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -33,9 +34,10 @@ import { displayCategoryName, t } from '@/i18n';
 import { categoryDescendantIds, type CategoryHierarchy } from '@/lib/category-hierarchy';
 import { selectedCategoryCount } from './filter-logic';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
+import { summarizeSelectedLabels } from '@/lib/search-labels';
 
 export type ReportFilters = { memberIds: string[]; categoryIds: string[] };
-type Member = { id: string; nickname: string; avatarUrl: string | null };
+type Member = { id: string; nickname: string; avatarUrl: string | null; accessibilityLabel?: string };
 type Action = 'confirm' | 'reset';
 
 function FilterAvatar({ member, size }: { member: Member; size: number }) {
@@ -65,6 +67,7 @@ export function ReportFilterSheet({
   onChange,
   onSubmit,
   onClose,
+  search,
 }: {
   visible: boolean;
   filters: ReportFilters;
@@ -76,6 +79,15 @@ export function ReportFilterSheet({
   onChange: (value: ReportFilters) => void;
   onSubmit: (action: Action) => void;
   onClose: () => void;
+  search?: {
+    before: ReactNode;
+    after: ReactNode;
+    showExpense: boolean;
+    showIncome: boolean;
+    confirmLabel: string;
+    loading: boolean;
+    invalid: boolean;
+  };
 }) {
   const palette = useSheetPalette();
   const colors = useCategoryColors();
@@ -259,6 +271,25 @@ export function ReportFilterSheet({
   };
   const categorySummary = (type: 'expense' | 'income') => {
     const count = selectedCategoryCount(roots(type), hierarchy, filters.categoryIds);
+    if (search && count) {
+      const labels = roots(type).flatMap((root) => {
+        const ids = categoryDescendantIds(root.id, hierarchy);
+        if (ids.every((id) => filters.categoryIds.includes(id))) {
+          return [displayCategoryName(root.name, root.is_system)];
+        }
+        return ids.flatMap((id) => {
+          if (!filters.categoryIds.includes(id)) return [];
+          const category = hierarchy.byId.get(id);
+          if (!category) return [];
+          return [id === root.id ? t('category.unspecified') : displayCategoryName(category.name, category.is_system)];
+        });
+      });
+      return (
+        <Text numberOfLines={1} style={{ color: palette.textSecondary, flexShrink: 1 }}>
+          {summarizeSelectedLabels(labels)}
+        </Text>
+      );
+    }
     return (
       <Text style={{ color: palette.textSecondary }}>
         {count ? t('report.filterSelectedItems', { count }) : t('report.filterAllItems')}
@@ -267,12 +298,21 @@ export function ReportFilterSheet({
   };
   return (
     <PageSheet visible={visible} onClose={onClose} allowSwipeDismissal>
-      <View style={[styles.root, { backgroundColor: palette.base }]}>
+      <KeyboardAvoidingView
+        enabled={!!search}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={[styles.root, { backgroundColor: palette.base }]}
+      >
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.root}>
           <ScrollView
+            keyboardShouldPersistTaps="handled"
             contentContainerStyle={[styles.content, { paddingBottom: Math.max(footerHeight, 90) + Space[3] }]}
           >
-            <Text style={[styles.hint, { color: palette.textSecondary }]}>{t('report.filterUnifyHint')}</Text>
+            {search ? (
+              search.before
+            ) : (
+              <Text style={[styles.hint, { color: palette.textSecondary }]}>{t('report.filterUnifyHint')}</Text>
+            )}
             {section(
               t('report.filterMembers'),
               open.members,
@@ -300,7 +340,7 @@ export function ReportFilterSheet({
                       disabled={!!pending}
                       onPress={() => onChange({ ...filters, memberIds: toggle(filters.memberIds, m.id) })}
                       accessibilityRole="checkbox"
-                      accessibilityLabel={m.nickname}
+                      accessibilityLabel={m.accessibilityLabel ?? m.nickname}
                       accessibilityState={{ checked: selected, disabled: !!pending }}
                       style={[styles.avatar, { borderColor: selected ? palette.accent : 'transparent' }]}
                     >
@@ -329,20 +369,23 @@ export function ReportFilterSheet({
                 ) : null}
               </View>,
             )}
-            {section(
-              t('report.filterExpenseCats'),
-              open.expense,
-              () => setOpen({ ...open, expense: !open.expense }),
-              categorySummary('expense'),
-              renderCategories('expense'),
-            )}
-            {section(
-              t('report.filterIncomeCats'),
-              open.income,
-              () => setOpen({ ...open, income: !open.income }),
-              categorySummary('income'),
-              renderCategories('income'),
-            )}
+            {(!search || search.showExpense) &&
+              section(
+                t('report.filterExpenseCats'),
+                open.expense,
+                () => setOpen({ ...open, expense: !open.expense }),
+                categorySummary('expense'),
+                renderCategories('expense'),
+              )}
+            {(!search || search.showIncome) &&
+              section(
+                t('report.filterIncomeCats'),
+                open.income,
+                () => setOpen({ ...open, income: !open.income }),
+                categorySummary('income'),
+                renderCategories('income'),
+              )}
+            {search?.after}
             {error ? (
               <Text accessibilityRole="alert" style={{ color: palette.danger }}>
                 {t('report.filterApplyFailed')}
@@ -359,9 +402,9 @@ export function ReportFilterSheet({
               styles.footer,
               {
                 paddingBottom:
-                  Platform.OS === 'ios'
+                  (Platform.OS === 'ios'
                     ? Math.max(Space[2], Math.round(insets.bottom * 0.35))
-                    : Math.max(insets.bottom, Space[2]),
+                    : Math.max(insets.bottom, Space[2])) + (search ? Space[3] : 0),
               },
             ]}
           >
@@ -384,9 +427,14 @@ export function ReportFilterSheet({
               <BlurView tint="default" intensity={30} style={StyleSheet.absoluteFill} />
             </MaskedView>
             {(['reset', 'confirm'] as const).map((action) => {
-              const label = t(action === 'reset' ? 'common.reset' : 'common.confirm');
-              const isLoading = pending === action;
+              const label = search
+                ? action === 'reset'
+                  ? t('common.clear')
+                  : search.confirmLabel
+                : t(action === 'reset' ? 'common.reset' : 'common.confirm');
+              const isLoading = pending === action || (!!search && action === 'confirm' && search.loading);
               const primary = action === 'confirm';
+              const disabled = !!pending || (!!search && primary && search.invalid);
               return nativeGlass && buttonWidth > 0 ? (
                 <View key={action} style={styles.buttonHost}>
                   <Host style={styles.nativeButtonHost} ignoreSafeArea="all">
@@ -400,12 +448,12 @@ export function ReportFilterSheet({
                         glassEffect({
                           glass: {
                             variant: 'regular',
-                            interactive: !pending,
+                            interactive: !disabled,
                             ...(primary ? { tint: palette.accent } : {}),
                           },
                           shape: 'capsule',
                         }),
-                        ...(pending ? [swiftUIDisabled(true)] : []),
+                        ...(disabled ? [swiftUIDisabled(true)] : []),
                       ]}
                     />
                   </Host>
@@ -418,11 +466,11 @@ export function ReportFilterSheet({
               ) : (
                 <Pressable
                   key={action}
-                  disabled={!!pending}
+                  disabled={disabled}
                   onPress={() => onSubmit(action)}
                   accessibilityRole="button"
                   accessibilityLabel={label}
-                  accessibilityState={{ disabled: !!pending, busy: isLoading }}
+                  accessibilityState={{ disabled, busy: isLoading }}
                   style={[
                     styles.button,
                     primary
@@ -442,9 +490,9 @@ export function ReportFilterSheet({
               );
             })}
           </View>
-          <SheetHeader title={t('report.globalFilter')} onClose={onClose} />
+          <SheetHeader title={search ? t('search.filters') : t('report.globalFilter')} onClose={onClose} />
         </SafeAreaView>
-      </View>
+      </KeyboardAvoidingView>
     </PageSheet>
   );
 }
@@ -463,7 +511,7 @@ const styles = StyleSheet.create({
     gap: Space[2],
   },
   title: { fontSize: 16, fontWeight: '700', flexShrink: 1 },
-  headingRight: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
+  headingRight: { flexDirection: 'row', alignItems: 'center', gap: Space[2], flexShrink: 1 },
   body: { paddingHorizontal: Space[4], paddingBottom: Space[4] },
   members: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   avatar: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },

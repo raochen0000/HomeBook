@@ -1,18 +1,16 @@
 /**
  * 搜索（流程 14 / PRD §16）：独立路由页，按参考图实现。
- * 顶栏：返回 + 搜索框；筛选为单行横向滚动摘要胶囊。
+ * 顶栏：返回 + 搜索框 + 筛选入口；统一面板内编辑筛选草稿。
  * 空态：最近搜索卡片 + 引导插图；无结果：search-empty.png 占位图。
- * 金额 / 日期筛选为底部 BottomSheet；结果列表复用首页 DayGroup（点击查看详情、左滑编辑/删除）。
+ * 结果列表复用首页 DayGroup（点击查看详情、左滑编辑/删除）。
  */
-import { Button, DatePicker, Host, List, Section, VStack, type ButtonProps } from '@expo/ui/swift-ui';
+import { Button, Host, List, Section, VStack, type ButtonProps } from '@expo/ui/swift-ui';
 import {
   buttonStyle,
   controlSize,
-  datePickerStyle,
   foregroundColor,
   frame,
   glassEffect,
-  labelsHidden,
   labelStyle,
   listRowBackground,
   listRowInsets,
@@ -21,22 +19,9 @@ import {
   listStyle,
 } from '@expo/ui/swift-ui/modifiers';
 import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { SymbolView } from 'expo-symbols';
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Alert, Animated, Keyboard, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
@@ -60,13 +45,7 @@ import { useAvatarFiles } from '@/features/home/use-avatar-files';
 import { RecordSheet } from '@/features/record/record-sheet';
 import { alertOk, categorySearchNames, displayCategoryName, t, useLocalePreference } from '@/i18n';
 import { categoryColorKey, categorySymbol } from '@/lib/category-style';
-import {
-  buildCategoryHierarchy,
-  categoryDescendantIds,
-  categoryPath,
-  matchingCategoryIds,
-  type CategoryHierarchy,
-} from '@/lib/category-hierarchy';
+import { buildCategoryHierarchy, matchingCategoryIds } from '@/lib/category-hierarchy';
 import { clockTime, dayKey, humanDay, signForType } from '@/lib/format';
 import { memberDisplayName } from '@/lib/member-name';
 import { isNetworkAvailable } from '@/lib/query-network';
@@ -78,69 +57,15 @@ import {
   type SearchFilters,
   type TxnType,
 } from '@/lib/search';
-import {
-  compactAmountFilterLabel,
-  customDateFilterLabel,
-  DATE_PRESET_LABELS,
-  isAmountFilterUnrestricted,
-  summarizeSelectedLabels,
-} from '@/lib/search-labels';
+
+import { ReportFilterSheet } from '@/features/report/filter-sheet';
+import { AmountFilterCard, DateFilterCard, TypeFilterCard } from './filter-extra';
+import { categoriesForType, isValidAmountInput } from './filter-logic';
 
 import { getSearchPresentation, shouldLockFilterControls } from './search-presentation';
 import { useSearchHistory } from './use-search-history';
 
-const DATE_PRESET_KEYS: DatePresetKey[] = ['all', 'thisMonth', 'lastMonth', 'last7', 'last30'];
-
-function datePresetOptionLabel(key: DatePresetKey): string {
-  switch (key) {
-    case 'all':
-      return t('common.all');
-    case 'thisMonth':
-      return t('dates.thisMonth');
-    case 'lastMonth':
-      return t('dates.lastMonth');
-    case 'last7':
-      return t('dates.last7');
-    case 'last30':
-      return t('dates.last30');
-    case 'thisYear':
-      return t('dates.thisYear');
-    case 'custom':
-      return t('dates.customDate');
-  }
-}
-
-/** 哪个筛选下拉面板正打开。 */
-type FilterKind = 'type' | 'date' | 'category' | 'member' | 'amount';
-
 type ResultGroup = { key: string; label: string; totalCents: number; rows: RowData[] };
-
-const AMOUNT_RANGES = [
-  { min: '0', max: '100' },
-  { min: '100', max: '500' },
-  { min: '500', max: '1000' },
-  { min: '1000', max: '' },
-] as const;
-
-function amountRangeLabel(range: (typeof AMOUNT_RANGES)[number]): string {
-  if (!range.max) return t('search.above1000');
-  return `${range.min}–${range.max}`;
-}
-
-function filterKindTitle(kind: FilterKind): string {
-  switch (kind) {
-    case 'type':
-      return t('search.type');
-    case 'date':
-      return t('dates.date');
-    case 'category':
-      return t('search.category');
-    case 'member':
-      return t('search.member');
-    case 'amount':
-      return t('search.amount');
-  }
-}
 
 /** 搜索结果区统一与 insetGrouped 卡片外沿对齐；需要手调时只改这里。 */
 const SEARCH_LIST_HORIZONTAL_INSET = 16;
@@ -181,7 +106,16 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   const [amountMinYuan, setAmountMinYuan] = useState('');
   const [amountMaxYuan, setAmountMaxYuan] = useState('');
 
-  const [openFilter, setOpenFilter] = useState<FilterKind | null>(null);
+  const [draft, setDraft] = useState<SearchFilters | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [sliderActive, setSliderActive] = useState(false);
+  const [typeNotice, setTypeNotice] = useState(false);
+  const [previewDraft, setPreviewDraft] = useState<SearchFilters | null>(null);
+  useEffect(() => {
+    if (!draft) return;
+    const timer = setTimeout(() => setPreviewDraft(draft), 350);
+    return () => clearTimeout(timer);
+  }, [draft]);
   const [filterInteractionId, setFilterInteractionId] = useState(0);
   // 点击结果行 → 详情；左滑 → 编辑 / 删除，与首页列表一致。
   const [detail, setDetail] = useState<{ open: boolean; txn: Transaction | null }>({ open: false, txn: null });
@@ -195,7 +129,6 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(timeout);
   }, [keyword]);
 
-  const multiMember = (familyQ.data?.member_count ?? 1) > 1;
   const myId = profileQ.data?.id;
   const avatarFiles = useAvatarFiles(membersQ.data ?? []);
 
@@ -234,45 +167,59 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     isSearching,
   });
 
-  const searchInput = useMemo(() => {
-    void locale;
-    if (!valid || !hasCurrentQuery || !catsQ.data || !layoutQ.data) return null;
-    const keywordLower = deferredFilters.keyword.trim().toLowerCase();
-    const keywordCategoryIds = matchingCategoryIds(
-      keywordLower,
-      hierarchy,
-      (category) => categorySearchNames(category.name, category.is_system),
-      t('category.unspecified'),
-    );
-    const keywordRecorderIds = keywordLower
-      ? (membersQ.data ?? [])
-          .filter(
-            (member) =>
-              member.nickname.toLowerCase().includes(keywordLower) ||
-              memberDisplayName(member.nickname, member.departed).toLowerCase().includes(keywordLower) ||
-              (member.id === myId && t('common.me').toLowerCase().includes(keywordLower)),
-          )
-          .map((member) => member.id)
-      : [];
-    const { minCents, maxCents } = resolveAmountRange(deferredFilters);
-    const dateText = (date: Date | null) =>
-      date
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-        : null;
-    return {
-      keyword: deferredFilters.keyword,
-      keywordCategoryIds,
-      keywordRecorderIds,
-      types: [...deferredFilters.types],
-      categoryIds: [...deferredFilters.categoryIds],
-      recorderIds: [...deferredFilters.recorderIds],
-      datePreset: deferredFilters.datePreset,
-      customFrom: dateText(deferredFilters.customFrom),
-      customTo: dateText(deferredFilters.customTo),
-      amountMin: minCents,
-      amountMax: maxCents,
-    };
-  }, [valid, hasCurrentQuery, deferredFilters, catsQ.data, layoutQ.data, membersQ.data, myId, locale, hierarchy]);
+  const buildSearchInput = useCallback(
+    (value: SearchFilters | null) => {
+      void locale;
+      if (!value || !catsQ.data || !layoutQ.data || !hasAnyQuery(value)) return null;
+      const validation = validateFilters(value);
+      if (
+        validation.amount ||
+        validation.date ||
+        !isValidAmountInput(value.amountMinYuan) ||
+        !isValidAmountInput(value.amountMaxYuan)
+      )
+        return null;
+      const keywordLower = value.keyword.trim().toLowerCase();
+      const keywordCategoryIds = matchingCategoryIds(
+        keywordLower,
+        hierarchy,
+        (category) => categorySearchNames(category.name, category.is_system),
+        t('category.unspecified'),
+      );
+      const keywordRecorderIds = keywordLower
+        ? (membersQ.data ?? [])
+            .filter(
+              (member) =>
+                member.nickname.toLowerCase().includes(keywordLower) ||
+                memberDisplayName(member.nickname, member.departed).toLowerCase().includes(keywordLower) ||
+                (member.id === myId && t('common.me').toLowerCase().includes(keywordLower)),
+            )
+            .map((member) => member.id)
+        : [];
+      const { minCents, maxCents } = resolveAmountRange(value);
+      const dateText = (date: Date | null) =>
+        date
+          ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+          : null;
+      return {
+        keyword: value.keyword,
+        keywordCategoryIds,
+        keywordRecorderIds,
+        types: [...value.types],
+        categoryIds: [...value.categoryIds],
+        recorderIds: [...value.recorderIds],
+        datePreset: value.datePreset,
+        customFrom: dateText(value.customFrom),
+        customTo: dateText(value.customTo),
+        amountMin: minCents,
+        amountMax: maxCents,
+      };
+    },
+    [catsQ.data, layoutQ.data, membersQ.data, myId, locale, hierarchy],
+  );
+  const searchInput = useMemo(() => buildSearchInput(deferredFilters), [buildSearchInput, deferredFilters]);
+  const previewInput = useMemo(() => buildSearchInput(previewDraft), [buildSearchInput, previewDraft]);
+  const previewQ = useSearchTransactions(filterOpen && !sliderActive && draft === previewDraft ? previewInput : null);
   const searchQ = useSearchTransactions(searchInput);
 
   const { groups } = useMemo(() => {
@@ -354,8 +301,6 @@ function SearchBody({ onClose }: { onClose: () => void }) {
 
   const categories = catsQ.data ?? [];
   const members = membersQ.data ?? [];
-  const typeIsAll = types.size === 0;
-
   const runFilterChange = useCallback(
     (change: () => void) => {
       if (filterControlsLocked) return;
@@ -365,26 +310,23 @@ function SearchBody({ onClose }: { onClose: () => void }) {
     [filterControlsLocked],
   );
 
-  const setType = (v: TxnType | null) => runFilterChange(() => setTypes(v ? new Set([v]) : new Set()));
-
-  const toggle = (set: Set<string>, setter: (s: Set<string>) => void, id: string) => {
-    runFilterChange(() => {
-      const next = new Set(set);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      setter(next);
-    });
+  const applyDraft = (value: SearchFilters) => {
+    setTypes(value.types);
+    setCategoryIds(value.categoryIds);
+    setRecorderIds(value.recorderIds);
+    setDatePreset(value.datePreset);
+    setCustomFrom(value.customFrom);
+    setCustomTo(value.customTo);
+    setAmountMinYuan(value.amountMinYuan);
+    setAmountMaxYuan(value.amountMaxYuan);
+    setSearchKeyword(value.keyword);
+    setFilterOpen(false);
   };
-
-  const onPickPreset = (key: DatePresetKey) => {
-    runFilterChange(() => {
-      setDatePreset(key);
-      if (key === 'custom') {
-        const now = new Date();
-        setCustomFrom((v) => v ?? new Date(now.getFullYear(), now.getMonth(), 1));
-        setCustomTo((v) => v ?? now);
-      }
-    });
+  const changeType = (type: TxnType | null) => {
+    if (!draft) return;
+    const ids = categoriesForType(draft.categoryIds, type, hierarchy);
+    setTypeNotice(ids.size !== draft.categoryIds.size);
+    setDraft({ ...draft, types: type ? new Set([type]) : new Set(), categoryIds: ids });
   };
 
   const onRowPress = useCallback((id: string) => {
@@ -425,46 +367,8 @@ function SearchBody({ onClose }: { onClose: () => void }) {
   );
 
   const amountSet = amountMinYuan.trim() !== '' || amountMaxYuan.trim() !== '';
-  const filtersActive = !typeIsAll || categoryIds.size > 0 || recorderIds.size > 0 || datePreset !== 'all' || amountSet;
-  const typeLabel = types.has('expense')
-    ? t('record.expense')
-    : types.has('income')
-      ? t('record.income')
-      : t('search.type');
-  const selectedCategoryLabels: string[] = [];
-  const summarizedIds = new Set<string>();
-  for (const category of categories) {
-    if (!hierarchy.layoutById.get(category.id)?.is_group) continue;
-    const ids = categoryDescendantIds(category.id, hierarchy);
-    if (ids.every((id) => categoryIds.has(id))) {
-      selectedCategoryLabels.push(displayCategoryName(category.name, category.is_system));
-      ids.forEach((id) => summarizedIds.add(id));
-    }
-  }
-  for (const category of categories) {
-    if (categoryIds.has(category.id) && !summarizedIds.has(category.id)) {
-      selectedCategoryLabels.push(
-        categoryPath(
-          category.id,
-          hierarchy,
-          (item) => displayCategoryName(item.name, item.is_system),
-          t('category.unspecified'),
-        ) ?? displayCategoryName(category.name, category.is_system),
-      );
-    }
-  }
-  const categoryLabel = categoryIds.size > 0 ? summarizeSelectedLabels(selectedCategoryLabels) : t('search.category');
-  const memberLabel =
-    recorderIds.size > 0
-      ? summarizeSelectedLabels(
-          members
-            .filter((m) => recorderIds.has(m.id))
-            .map((m) => (m.id === myId ? t('common.me') : memberDisplayName(m.nickname, m.departed))),
-        )
-      : t('search.member');
-  const dateLabel =
-    datePreset === 'custom' ? customDateFilterLabel(customFrom, customTo) : DATE_PRESET_LABELS[datePreset];
-  const amountLabel = compactAmountFilterLabel(amountMinYuan, amountMaxYuan);
+  const filtersActive =
+    types.size > 0 || categoryIds.size > 0 || recorderIds.size > 0 || datePreset !== 'all' || amountSet;
 
   const clearFilters = () => {
     runFilterChange(() => {
@@ -496,56 +400,18 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         <View style={styles.topBar}>
           <SearchBackButton onPress={onClose} />
           <SearchInput keyword={keyword} onChangeKeyword={setKeyword} onSubmit={submitKeyword} onClear={clearKeyword} />
+          <SearchFilterButton
+            active={filtersActive}
+            onPress={() => {
+              Keyboard.dismiss();
+              setSliderActive(false);
+              setSearchKeyword(keyword);
+              setTypeNotice(false);
+              setDraft({ ...filters, keyword });
+              setFilterOpen(true);
+            }}
+          />
         </View>
-
-        {/* 筛选：单行横向滚动，每个维度聚合为一个摘要胶囊。 */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.pillScroller}
-          contentContainerStyle={styles.pillRow}
-        >
-          <FilterPill
-            icon="arrow.up.arrow.down"
-            label={typeLabel}
-            active={!typeIsAll}
-            onPress={() => setOpenFilter('type')}
-            disabled={filterControlsLocked}
-          />
-          <FilterPill
-            icon="calendar"
-            label={dateLabel}
-            active={datePreset !== 'all'}
-            onPress={() => setOpenFilter('date')}
-            disabled={filterControlsLocked}
-          />
-          <FilterPill
-            icon="square.grid.2x2"
-            label={categoryLabel}
-            active={categoryIds.size > 0}
-            onPress={() => setOpenFilter('category')}
-            disabled={filterControlsLocked}
-          />
-          {multiMember ? (
-            <FilterPill
-              icon="person"
-              label={memberLabel}
-              active={recorderIds.size > 0}
-              onPress={() => setOpenFilter('member')}
-              disabled={filterControlsLocked}
-            />
-          ) : null}
-          <FilterPill
-            icon="yensign"
-            label={amountLabel}
-            active={amountSet}
-            onPress={() => setOpenFilter('amount')}
-            disabled={filterControlsLocked}
-          />
-          {filtersActive ? <ResetPill onPress={clearFilters} disabled={filterControlsLocked} /> : null}
-        </ScrollView>
-
-        <View style={[styles.separator, { backgroundColor: palette.separator }]} />
 
         {/* 主体：搜索历史 / 校验提示 / 结果 / 空结果 */}
         {presentation === 'invalid' ? (
@@ -597,39 +463,96 @@ function SearchBody({ onClose }: { onClose: () => void }) {
         )}
       </SafeAreaView>
 
-      {/* 筛选下拉面板（底部） */}
-      <FilterDropdown
-        kind={openFilter}
-        onClose={() => setOpenFilter(null)}
-        isSearching={isSearching}
-        filterControlsLocked={filterControlsLocked}
-        onFilterChange={runFilterChange}
-        types={types}
-        setType={setType}
-        typeIsAll={typeIsAll}
-        datePreset={datePreset}
-        onPickPreset={onPickPreset}
-        setDatePreset={setDatePreset}
-        customFrom={customFrom}
-        customTo={customTo}
-        setCustomFrom={setCustomFrom}
-        setCustomTo={setCustomTo}
-        dateError={errors.date}
-        categories={categories}
-        hierarchy={hierarchy}
-        categoryIds={categoryIds}
-        setCategoryIds={setCategoryIds}
-        members={members}
-        myId={myId}
-        recorderIds={recorderIds}
-        setRecorderIds={setRecorderIds}
-        amountMinYuan={amountMinYuan}
-        amountMaxYuan={amountMaxYuan}
-        setAmountMinYuan={setAmountMinYuan}
-        setAmountMaxYuan={setAmountMaxYuan}
-        amountError={errors.amount}
-        toggle={toggle}
-      />
+      {draft && (
+        <ReportFilterSheet
+          visible={filterOpen}
+          filters={{ memberIds: [...draft.recorderIds], categoryIds: [...draft.categoryIds] }}
+          members={members.map((member) => ({
+            id: member.id,
+            nickname: member.nickname,
+            accessibilityLabel: memberDisplayName(member.nickname, member.departed),
+            avatarUrl: member.avatar_url,
+          }))}
+          categories={categories}
+          hierarchy={hierarchy}
+          pending={null}
+          error={false}
+          onChange={(value) =>
+            setDraft({ ...draft, recorderIds: new Set(value.memberIds), categoryIds: new Set(value.categoryIds) })
+          }
+          onClose={() => setFilterOpen(false)}
+          onSubmit={(action) => {
+            if (action === 'confirm') applyDraft(draft);
+            else {
+              setTypeNotice(false);
+              setDraft({
+                ...draft,
+                types: new Set(),
+                categoryIds: new Set(),
+                recorderIds: new Set(),
+                datePreset: 'all',
+                customFrom: null,
+                customTo: null,
+                amountMinYuan: '',
+                amountMaxYuan: '',
+              });
+            }
+          }}
+          search={{
+            before: (
+              <>
+                <TypeFilterCard filters={draft} onType={changeType} />
+                {typeNotice && (
+                  <Text accessibilityRole="alert" style={{ color: palette.textSecondary }}>
+                    {t('search.categoriesCleared')}
+                  </Text>
+                )}
+              </>
+            ),
+            after: (
+              <>
+                <DateFilterCard filters={draft} onChange={setDraft} />
+                <AmountFilterCard
+                  filters={draft}
+                  familyId={familyQ.data?.id}
+                  onChange={setDraft}
+                  onSlidingChange={setSliderActive}
+                />
+                {(previewQ.isError || (hasAnyQuery(draft) && previewQ.fetchStatus === 'paused')) && (
+                  <Text accessibilityRole="alert" style={{ color: palette.textSecondary }}>
+                    {t('search.previewFailed')}
+                  </Text>
+                )}
+              </>
+            ),
+            showExpense: !draft.types.size || draft.types.has('expense'),
+            showIncome: !draft.types.size || draft.types.has('income'),
+            invalid:
+              sliderActive ||
+              validateFilters(draft).amount ||
+              validateFilters(draft).date ||
+              !isValidAmountInput(draft.amountMinYuan) ||
+              !isValidAmountInput(draft.amountMaxYuan),
+            loading:
+              !sliderActive &&
+              hasAnyQuery(draft) &&
+              !validateFilters(draft).amount &&
+              !validateFilters(draft).date &&
+              isValidAmountInput(draft.amountMinYuan) &&
+              isValidAmountInput(draft.amountMaxYuan) &&
+              (draft !== previewDraft || (!!previewInput && previewQ.isFetching)),
+            confirmLabel:
+              !sliderActive &&
+              draft === previewDraft &&
+              previewInput &&
+              previewQ.data &&
+              !previewQ.isError &&
+              previewQ.fetchStatus !== 'paused'
+                ? t('search.showResultCount', { count: previewQ.data.pages[0].count })
+                : t('search.showResults'),
+          }}
+        />
+      )}
 
       <TransactionDetailSheet
         visible={detail.open}
@@ -851,50 +774,53 @@ function SearchInput({
   return <View style={[styles.searchBox, { backgroundColor: palette.card }]}>{content}</View>;
 }
 
-// ── 筛选胶囊 ──────────────────────────────────────────────────────────────────
-function FilterPill({
-  icon,
-  label,
-  active,
-  onPress,
-  disabled,
-}: {
-  icon: SymbolViewProps['name'];
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  disabled: boolean;
-}) {
+function SearchFilterButton({ active, onPress }: { active: boolean; onPress: () => void }) {
   const palette = usePalette();
-  const fg = active ? palette.accent : palette.textPrimary;
-  const bg = active ? palette.accentTint : palette.cardPill;
   return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={[styles.pill, { backgroundColor: bg }, disabled && styles.disabledControl]}
-    >
-      <SymbolView name={icon} tintColor={palette.accent} size={13} />
-      <Text numberOfLines={1} style={{ color: fg, fontSize: 13, maxWidth: 140, fontWeight: active ? '500' : '400' }}>
-        {label}
-      </Text>
-      <SymbolView name="chevron.down" tintColor={palette.textTertiary} size={9} />
-    </Pressable>
-  );
-}
-
-function ResetPill({ onPress, disabled }: { onPress: () => void; disabled: boolean }) {
-  const palette = usePalette();
-  useLocalePreference();
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      hitSlop={6}
-      style={[styles.resetPill, disabled && styles.disabledControl]}
-    >
-      <Text style={{ color: palette.accent, fontSize: 13, fontWeight: '500' }}>{t('common.reset')}</Text>
-    </Pressable>
+    <View>
+      {Platform.OS === 'ios' ? (
+        <Host matchContents>
+          <Button
+            label={t('search.filters')}
+            systemImage="line.3.horizontal.decrease.circle"
+            onPress={onPress}
+            modifiers={[
+              labelStyle('iconOnly'),
+              controlSize('large'),
+              frame({ width: 40, height: 40 }),
+              buttonStyle('plain'),
+              foregroundColor(palette.textPrimary),
+              ...(supportsLiquidGlass()
+                ? [glassEffect({ glass: { variant: 'regular', interactive: true }, shape: 'circle' })]
+                : []),
+            ]}
+          />
+        </Host>
+      ) : (
+        <Pressable
+          onPress={onPress}
+          accessibilityRole="button"
+          accessibilityLabel={t('search.filters')}
+          style={styles.navIconButton}
+        >
+          <SymbolView name="line.3.horizontal.decrease.circle" tintColor={palette.textPrimary} size={21} />
+        </Pressable>
+      )}
+      {active && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            right: 1,
+            top: 1,
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: palette.accent,
+          }}
+        />
+      )}
+    </View>
   );
 }
 
@@ -1005,475 +931,6 @@ function HistoryCloud({
   );
 }
 
-// ── 筛选下拉面板（底部 sheet，按 kind 切换内容）──────────────────────────────
-type DropdownProps = {
-  kind: FilterKind | null;
-  onClose: () => void;
-  isSearching: boolean;
-  filterControlsLocked: boolean;
-  onFilterChange: (change: () => void) => void;
-  types: Set<TxnType>;
-  setType: (v: TxnType | null) => void;
-  typeIsAll: boolean;
-  datePreset: DatePresetKey;
-  onPickPreset: (k: DatePresetKey) => void;
-  setDatePreset: (k: DatePresetKey) => void;
-  customFrom: Date | null;
-  customTo: Date | null;
-  setCustomFrom: (d: Date) => void;
-  setCustomTo: (d: Date) => void;
-  dateError: boolean;
-  categories: { id: string; name: string; is_system: boolean }[];
-  hierarchy: CategoryHierarchy;
-  categoryIds: Set<string>;
-  setCategoryIds: (s: Set<string>) => void;
-  members: { id: string; nickname: string; departed: boolean }[];
-  myId: string | undefined;
-  recorderIds: Set<string>;
-  setRecorderIds: (s: Set<string>) => void;
-  amountMinYuan: string;
-  amountMaxYuan: string;
-  setAmountMinYuan: (s: string) => void;
-  setAmountMaxYuan: (s: string) => void;
-  amountError: boolean;
-  toggle: (set: Set<string>, setter: (s: Set<string>) => void, id: string) => void;
-};
-
-function formatSlashDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = (d.getMonth() + 1).toString().padStart(2, '0');
-  const day = d.getDate().toString().padStart(2, '0');
-  return `${y}/${m}/${day}`;
-}
-
-function matchesQuickRange(minYuan: string, maxYuan: string, range: (typeof AMOUNT_RANGES)[number]): boolean {
-  return minYuan.trim() === range.min && maxYuan.trim() === range.max;
-}
-
-function FilterDropdown(props: DropdownProps) {
-  const { kind, onClose, isSearching } = props;
-  const palette = usePalette();
-  useLocalePreference();
-  return (
-    <Modal visible={kind !== null} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.flex}>
-        <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onClose} />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.sheetAnchor}
-          pointerEvents="box-none"
-        >
-          <View style={[styles.sheet, { backgroundColor: palette.elevated }]} onStartShouldSetResponder={() => true}>
-            <View style={[styles.grabber, { backgroundColor: palette.separator }]} />
-            <View style={styles.sheetHeader}>
-              <View style={styles.sheetHeaderSide} />
-              <Text style={[styles.sheetTitle, { color: palette.textPrimary }]}>
-                {kind ? filterKindTitle(kind) : ''}
-              </Text>
-              <View style={styles.sheetHeaderSide}>
-                {isSearching ? (
-                  <ActivityIndicator
-                    color={palette.accent}
-                    size="small"
-                    accessibilityRole="progressbar"
-                    accessibilityLabel={t('search.searching')}
-                  />
-                ) : null}
-              </View>
-            </View>
-            {kind ? <DropdownContent {...props} kind={kind} /> : null}
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  );
-}
-
-function DropdownContent(props: DropdownProps & { kind: FilterKind }) {
-  const palette = usePalette();
-  useLocalePreference();
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const {
-    kind,
-    types,
-    setType,
-    typeIsAll,
-    datePreset,
-    onPickPreset,
-    setDatePreset,
-    customFrom,
-    customTo,
-    setCustomFrom,
-    setCustomTo,
-    dateError,
-    categories,
-    hierarchy,
-    categoryIds,
-    setCategoryIds,
-    members,
-    myId,
-    recorderIds,
-    setRecorderIds,
-    amountMinYuan,
-    amountMaxYuan,
-    setAmountMinYuan,
-    setAmountMaxYuan,
-    amountError,
-    toggle,
-    filterControlsLocked,
-    onFilterChange,
-  } = props;
-
-  if (kind === 'type') {
-    return (
-      <View>
-        <OptionRow
-          label={t('common.all')}
-          active={typeIsAll}
-          onPress={() => setType(null)}
-          disabled={filterControlsLocked}
-        />
-        <OptionRow
-          label={t('record.expense')}
-          active={types.has('expense')}
-          onPress={() => setType('expense')}
-          disabled={filterControlsLocked}
-        />
-        <OptionRow
-          label={t('record.income')}
-          active={types.has('income')}
-          onPress={() => setType('income')}
-          disabled={filterControlsLocked}
-        />
-      </View>
-    );
-  }
-
-  if (kind === 'date') {
-    const onCustomFrom = (d: Date) => {
-      onFilterChange(() => {
-        setCustomFrom(d);
-        setDatePreset('custom');
-      });
-    };
-    const onCustomTo = (d: Date) => {
-      onFilterChange(() => {
-        setCustomTo(d);
-        setDatePreset('custom');
-      });
-    };
-    return (
-      <View style={styles.sheetBody}>
-        <View style={[styles.optionCard, { backgroundColor: palette.card }]}>
-          {DATE_PRESET_KEYS.map((key, i) => (
-            <OptionRow
-              key={key}
-              label={datePresetOptionLabel(key)}
-              active={datePreset === key}
-              onPress={() => onPickPreset(key)}
-              disabled={filterControlsLocked}
-              showDivider={i < DATE_PRESET_KEYS.length - 1}
-            />
-          ))}
-        </View>
-        <View style={[styles.customDateCard, { backgroundColor: palette.card }]}>
-          <Text style={[styles.customDateTitle, { color: palette.textPrimary }]}>{t('dates.customDate')}</Text>
-          <View style={styles.customDateFields} pointerEvents={filterControlsLocked ? 'none' : 'auto'}>
-            <DateFieldBox label={t('dates.startDate')} date={customFrom} onChange={onCustomFrom} />
-            <Text style={[styles.customDateDash, { color: palette.textTertiary }]}>—</Text>
-            <DateFieldBox label={t('dates.endDate')} date={customTo} onChange={onCustomTo} />
-          </View>
-        </View>
-        {dateError ? (
-          <Text style={[styles.errorText, { color: palette.danger }]}>{t('search.dateOrderError')}</Text>
-        ) : null}
-      </View>
-    );
-  }
-
-  if (kind === 'category') {
-    return (
-      <ScrollView style={styles.sheetScroll} keyboardShouldPersistTaps="handled">
-        <OptionRow
-          label={t('search.allCategories')}
-          active={categoryIds.size === 0}
-          onPress={() => onFilterChange(() => setCategoryIds(new Set()))}
-          disabled={filterControlsLocked}
-        />
-        {categories
-          .filter((category) => !hierarchy.layoutById.get(category.id)?.parent_category_id)
-          .map((c) => {
-            const isGroup =
-              !!hierarchy.layoutById.get(c.id)?.is_group && (hierarchy.childrenByParent.get(c.id)?.length ?? 0) > 0;
-            const ids = isGroup ? categoryDescendantIds(c.id, hierarchy) : [c.id];
-            const selected = ids.filter((id) => categoryIds.has(id)).length;
-            const expanded = expandedGroups.has(c.id);
-            const selectGroup = () =>
-              onFilterChange(() => {
-                const next = new Set(categoryIds);
-                const remove = ids.every((id) => next.has(id));
-                for (const id of ids) {
-                  if (remove) next.delete(id);
-                  else next.add(id);
-                }
-                setCategoryIds(next);
-              });
-            return (
-              <View key={c.id}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  {isGroup ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={displayCategoryName(c.name, c.is_system)}
-                      accessibilityState={{ expanded }}
-                      style={{ padding: Space[3] }}
-                      onPress={() => {
-                        const next = new Set(expandedGroups);
-                        if (expanded) next.delete(c.id);
-                        else next.add(c.id);
-                        setExpandedGroups(next);
-                      }}
-                    >
-                      <SymbolView
-                        name={expanded ? 'chevron.down' : 'chevron.right'}
-                        tintColor={palette.textSecondary}
-                        size={15}
-                      />
-                    </Pressable>
-                  ) : null}
-                  <View style={styles.flex}>
-                    <OptionRow
-                      label={`${displayCategoryName(c.name, c.is_system)}${isGroup && selected > 0 && selected < ids.length ? ` (${t('category.partial')})` : ''}`}
-                      active={selected === ids.length}
-                      onPress={isGroup ? selectGroup : () => toggle(categoryIds, setCategoryIds, c.id)}
-                      disabled={filterControlsLocked}
-                    />
-                  </View>
-                </View>
-                {isGroup && expanded
-                  ? ids.map((id) => {
-                      const child = hierarchy.byId.get(id);
-                      if (!child) return null;
-                      const name =
-                        id === c.id ? t('category.unspecified') : displayCategoryName(child.name, child.is_system);
-                      return (
-                        <View key={id} style={{ paddingLeft: Space[6] }}>
-                          <OptionRow
-                            label={name}
-                            active={categoryIds.has(id)}
-                            onPress={() => toggle(categoryIds, setCategoryIds, id)}
-                            disabled={filterControlsLocked}
-                          />
-                        </View>
-                      );
-                    })
-                  : null}
-              </View>
-            );
-          })}
-      </ScrollView>
-    );
-  }
-
-  if (kind === 'member') {
-    return (
-      <ScrollView style={styles.sheetScroll} keyboardShouldPersistTaps="handled">
-        <OptionRow
-          label={t('search.allMembers')}
-          active={recorderIds.size === 0}
-          onPress={() => onFilterChange(() => setRecorderIds(new Set()))}
-          disabled={filterControlsLocked}
-        />
-        {members.map((m) => (
-          <OptionRow
-            key={m.id}
-            label={m.id === myId ? t('common.me') : memberDisplayName(m.nickname, m.departed)}
-            active={recorderIds.has(m.id)}
-            onPress={() => toggle(recorderIds, setRecorderIds, m.id)}
-            disabled={filterControlsLocked}
-          />
-        ))}
-      </ScrollView>
-    );
-  }
-
-  // amount
-  const amountFilterIsUnrestricted = isAmountFilterUnrestricted(amountMinYuan, amountMaxYuan);
-  return (
-    <View style={styles.amountSheet}>
-      <View style={styles.amountSectionHeader}>
-        <Text style={[styles.quickRangeTitle, { color: palette.textPrimary }]}>{t('search.custom')}</Text>
-        {!amountFilterIsUnrestricted ? (
-          <Pressable
-            style={styles.amountClearButton}
-            disabled={filterControlsLocked}
-            onPress={() =>
-              onFilterChange(() => {
-                setAmountMinYuan('');
-                setAmountMaxYuan('');
-              })
-            }
-            accessibilityRole="button"
-            accessibilityLabel={t('search.clearAmount')}
-          >
-            <Text style={[styles.amountClearText, { color: palette.accent }]}>{t('common.clear')}</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      <View style={styles.amountInputsRow}>
-        <AmountField
-          label={t('search.minAmount')}
-          value={amountMinYuan}
-          onChange={setAmountMinYuan}
-          editable={!filterControlsLocked}
-        />
-        <AmountField
-          label={t('search.maxAmount')}
-          value={amountMaxYuan}
-          onChange={setAmountMaxYuan}
-          editable={!filterControlsLocked}
-        />
-      </View>
-      <View style={styles.amountSectionHeader}>
-        <Text style={[styles.quickRangeTitle, { color: palette.textPrimary }]}>{t('search.quickRanges')}</Text>
-      </View>
-      <View style={styles.quickRangeRow}>
-        {AMOUNT_RANGES.map((range) => {
-          const selected = matchesQuickRange(amountMinYuan, amountMaxYuan, range);
-          return (
-            <QuickRangeChip
-              key={`${range.min}-${range.max}`}
-              label={amountRangeLabel(range)}
-              selected={selected}
-              disabled={filterControlsLocked}
-              onPress={() =>
-                onFilterChange(() => {
-                  setAmountMinYuan(range.min);
-                  setAmountMaxYuan(range.max);
-                })
-              }
-            />
-          );
-        })}
-      </View>
-      {amountError ? (
-        <Text style={[styles.errorText, { color: palette.danger }]}>{t('search.amountOrderError')}</Text>
-      ) : null}
-    </View>
-  );
-}
-
-function QuickRangeChip({
-  label,
-  selected,
-  disabled,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  disabled: boolean;
-  onPress: () => void;
-}) {
-  const palette = usePalette();
-  return (
-    <Pressable
-      style={[styles.quickRangeChip, { backgroundColor: selected ? palette.accentTint : palette.cardPill }]}
-      disabled={disabled}
-      onPress={onPress}
-    >
-      <Text
-        style={{
-          color: selected ? palette.accent : palette.textPrimary,
-          fontSize: 14,
-          fontWeight: selected ? '500' : '400',
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function AmountField({
-  label,
-  value,
-  onChange,
-  editable,
-}: {
-  label: string;
-  value: string;
-  onChange: (s: string) => void;
-  editable: boolean;
-}) {
-  const palette = usePalette();
-  return (
-    <View style={[styles.amountFieldBox, { backgroundColor: palette.cardPill }]}>
-      <Text style={[styles.amountFieldLabel, { color: palette.textTertiary }]}>{label}</Text>
-      <View style={styles.amountFieldValueRow}>
-        <Text style={[styles.amountFieldPrefix, { color: palette.textPrimary }]}>¥</Text>
-        <TextInput
-          style={[styles.amountFieldInput, { color: palette.textPrimary }]}
-          value={value}
-          onChangeText={onChange}
-          placeholder="0"
-          placeholderTextColor={palette.textTertiary}
-          keyboardType="decimal-pad"
-          editable={editable}
-        />
-      </View>
-    </View>
-  );
-}
-
-function DateFieldBox({ label, date, onChange }: { label: string; date: Date | null; onChange: (d: Date) => void }) {
-  const palette = usePalette();
-  return (
-    <View style={[styles.dateFieldBox, { backgroundColor: palette.cardPill, borderColor: palette.separator }]}>
-      {date ? <Text style={[styles.dateFieldLabel, { color: palette.textTertiary }]}>{label}</Text> : null}
-      <View style={[styles.dateFieldValueRow, !date && styles.dateFieldPlaceholderRow]}>
-        <Text style={[styles.dateFieldValue, { color: date ? palette.textPrimary : palette.textTertiary }]}>
-          {date ? formatSlashDate(date) : label}
-        </Text>
-        <SymbolView name="calendar" tintColor={palette.textTertiary} size={15} />
-      </View>
-      <Host matchContents style={styles.datePickerOverlay}>
-        <DatePicker
-          selection={date ?? new Date()}
-          displayedComponents={['date']}
-          onDateChange={onChange}
-          modifiers={[datePickerStyle('compact'), labelsHidden()]}
-        />
-      </Host>
-    </View>
-  );
-}
-
-function OptionRow({
-  label,
-  active,
-  onPress,
-  disabled,
-  showDivider = false,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  disabled: boolean;
-  showDivider?: boolean;
-}) {
-  const palette = usePalette();
-  return (
-    <>
-      <Pressable style={[styles.optionRow, disabled && styles.disabledControl]} onPress={onPress} disabled={disabled}>
-        <Text style={{ color: active ? palette.accent : palette.textPrimary, fontSize: 16 }}>{label}</Text>
-        <View style={styles.flex} />
-        {active ? <SymbolView name="checkmark" tintColor={palette.accent} size={18} /> : null}
-      </Pressable>
-      {showDivider ? <View style={[styles.optionDivider, { backgroundColor: palette.separator }]} /> : null}
-    </>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
@@ -1502,29 +959,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Space[3],
   },
   searchInput: { flex: 1, fontSize: 16, paddingVertical: 0 },
-  pillScroller: { flexGrow: 0 },
-  pillRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space[2],
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[2],
-  },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space[1],
-    paddingHorizontal: Space[3],
-    height: 34,
-    borderRadius: Radius.full,
-  },
-  resetPill: {
-    height: 34,
-    justifyContent: 'center',
-    paddingHorizontal: Space[2],
-  },
-  disabledControl: { opacity: 0.5 },
-  separator: { height: StyleSheet.hairlineWidth, marginTop: Space[1] },
   center: {
     flex: 1,
     alignItems: 'center',
@@ -1581,83 +1015,4 @@ const styles = StyleSheet.create({
   skeletonTitle: { width: '48%', height: 14, borderRadius: Radius.sm },
   skeletonSubtitle: { width: '30%', height: 11, borderRadius: Radius.sm },
   skeletonAmount: { width: 52, height: 14, borderRadius: Radius.sm },
-  backdrop: { backgroundColor: 'rgba(0,0,0,0.35)' },
-  sheetAnchor: { flex: 1, justifyContent: 'flex-end' },
-  sheet: {
-    borderTopLeftRadius: Radius.lg,
-    borderTopRightRadius: Radius.lg,
-    paddingHorizontal: Space[4],
-  },
-  grabber: { width: 36, height: 5, borderRadius: Radius.full, alignSelf: 'center', marginTop: Space[2] },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Space[3],
-  },
-  sheetHeaderSide: { width: 48, alignItems: 'flex-end' },
-  sheetTitle: { fontSize: 16, fontWeight: '600' },
-  sheetBody: { gap: Space[3], paddingBottom: Space[2] },
-  sheetScroll: { maxHeight: 360 },
-  optionCard: { borderRadius: Radius.lg, overflow: 'hidden' },
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Space[3],
-    paddingHorizontal: Space[4],
-    minHeight: 48,
-  },
-  optionDivider: { height: StyleSheet.hairlineWidth, marginLeft: Space[4] },
-  customDateCard: { borderRadius: Radius.lg, padding: Space[4], gap: Space[3] },
-  customDateTitle: { fontSize: 15, fontWeight: '600' },
-  customDateFields: { flexDirection: 'row', alignItems: 'center', gap: Space[2] },
-  customDateDash: { fontSize: 16, paddingHorizontal: Space[1] },
-  dateFieldBox: {
-    flex: 1,
-    borderRadius: Radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: Space[3],
-    paddingVertical: Space[2],
-    minHeight: 64,
-    overflow: 'hidden',
-  },
-  dateFieldLabel: { fontSize: 12, marginBottom: Space[1] },
-  dateFieldValueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  dateFieldPlaceholderRow: { flex: 1 },
-  dateFieldValue: { fontSize: 15, fontVariant: ['tabular-nums'] },
-  datePickerOverlay: {
-    position: 'absolute',
-    right: Space[2],
-    bottom: Space[1],
-    opacity: 0.02,
-    minWidth: 44,
-    minHeight: 44,
-  },
-  amountSheet: { paddingVertical: Space[2], gap: Space[4] },
-  // 无论“清空”是否出现，都为该行保留同样的 iOS 最小触控高度，避免 Sheet 跳动。
-  amountSectionHeader: { minHeight: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  amountClearButton: { minHeight: 16, justifyContent: 'center', paddingHorizontal: Space[2], marginRight: -Space[2] },
-  amountClearText: { fontSize: 15, fontWeight: '500' },
-  amountInputsRow: { flexDirection: 'row', gap: Space[3] },
-  amountFieldBox: {
-    flex: 1,
-    borderRadius: Radius.md,
-    paddingHorizontal: Space[3],
-    paddingVertical: Space[3],
-    gap: Space[1],
-  },
-  amountFieldLabel: { fontSize: 12 },
-  amountFieldValueRow: { flexDirection: 'row', alignItems: 'baseline' },
-  amountFieldPrefix: { fontSize: 18, fontWeight: '600', marginRight: Space[1] },
-  amountFieldInput: { flex: 1, fontSize: 18, fontWeight: '600', paddingVertical: 0, fontVariant: ['tabular-nums'] },
-  quickRangeTitle: { fontSize: 15, fontWeight: '600' },
-  quickRangeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Space[2], paddingBottom: Space[4] },
-  quickRangeChip: {
-    paddingHorizontal: Space[4],
-    paddingVertical: Space[2],
-    borderRadius: Radius.full,
-    minHeight: 36,
-    justifyContent: 'center',
-  },
-  errorText: { fontSize: 12, paddingTop: Space[1] },
 });
